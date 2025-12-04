@@ -1,0 +1,8 @@
+numpy
+polars
+scipy
+matplotlib
+joblib
+numba
+tifffile
+cellprofiler

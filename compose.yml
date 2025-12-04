@@ -1,0 +1,14 @@
+services:
+  cellprofiler_maince:
+    build:
+      context: ./CellProfiler_pipeline
+      dockerfile: Dockerfile
+    user: "${DOCKER_UID}:${DOCKER_GID}"
+    environment:
+      - USER_ID=${DOCKER_UID}
+      - GROUP_ID=${DOCKER_GID}
+    volumes:
+      - /mnt/czolab-storage-01/acruzcar/CellPainting_proyects/MAINCE_CellProfiler/CellProfiler_pipeline:/workspace
+      - /mnt/czolab-storage-01/acruzcar/MAINCE_Natural_products/Antibody/Claudius[3701]:/workspace_images 
+    working_dir: /workspace
+    command: sh -c "set -xe; /workspace/Code/run_workflow.sh"
