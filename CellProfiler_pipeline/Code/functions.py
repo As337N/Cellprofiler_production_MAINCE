@@ -4,9 +4,9 @@ import polars as pl
 import random
 from typing import Union, List
 
-def get_well(col, row):
-  col_corr = chr(64 + int(col))
-  return f"{col_corr}{row}"
+def get_well(row, col):
+  row_corr = chr(64 + int(row))
+  return f"{row_corr}{col}"
 
 def split_and_save_by_groups(df: pl.DataFrame, col: str, k: int,
     out_dir: Union[str, Path],) -> List[pl.DataFrame]:
@@ -63,7 +63,7 @@ def parse_image_dataset(root: Union[str, Path], illum: bool = False) -> pl.DataF
                 if int(meta["Plane"]) != 2:
                     continue
 
-                meta["Well"] = get_well(meta["Column"], meta["Row"])
+                meta["Well"] = get_well(meta["Row"], meta["Column"])
 
                 plate_name = plate.name.split("_")[-1][:5]
                 parent_name = path.parent.name
