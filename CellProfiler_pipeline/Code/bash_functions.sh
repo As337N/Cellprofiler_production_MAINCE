@@ -35,7 +35,7 @@ generar_batchfiles() {
   local PROFILES="${6:-}"
 
   if [ -z "$metadata_csv_path" ] || [ -z "$TEMPLATE_CPPIPE" ] || [ -z "$PATH_CPPIPE" ]; then
-    echo "[ERROR] Debes proporcionar: ruta_csvs_illum plantilla_cppipe salida_cppipe"
+    echo "[ERROR] A parameter is missing, path csv: $metadata_csv_path, template cppipe: $TEMPLATE_CPPIPE, path cppipe: $PATH_CPPIPE"
     return 1
   fi
   
@@ -50,12 +50,6 @@ generar_batchfiles() {
     echo "[INFO] path images: $PATH_IMAGES"
     CURRENT_CPPIPE="$PATH_CPPIPE/pipeline_${file_name}.cppipe"
 
-  #echo "[DEBUGING: csv: $file_name_csv en el path: $parent_dir_csv]"
-  #echo "[DEBUGING: out_dir: $OUTPUT_DIR]"
-  #echo "[DEBUGING: path_images: $PATH_IMAGES]"
-  #echo "[DEBUGING: CPPIPE: $CURRENT_CPPIPE]"
-  #echo "[DEBUGING: (sh1) OUTPUT_DIR: $OUTPUT_DIR]"
-
   sed -e "s|INPUT_PATH_CSV|$parent_dir_csv|g" \
       -e "s|SAVING_OUTPUT_PATH|$PATH_OUTPUT|g" \
       -e "s|SAVING_BATCH_PATH|$PATH_BATCH_FILE|g" \
@@ -64,8 +58,8 @@ generar_batchfiles() {
       -e "s|TEMPLATE_CPPIPE|$CURRENT_CPPIPE|g" \
       "$TEMPLATE_CPPIPE" > "$CURRENT_CPPIPE"
 
-  echo "[INFO] CPPipe generado: $CURRENT_CPPIPE"
-  echo "[INFO] Guardando h5 en $PATH_BATCH_FILE"
+  echo "[INFO] CPPipe generated in: $CURRENT_CPPIPE"
+  echo "[INFO] Saving h5 in: $PATH_BATCH_FILE"
 
   cellprofiler -c -r \
   --data-file "$metadata_csv_path" \
@@ -79,31 +73,51 @@ generar_batchfiles() {
 }
 
 create_output_dirs() {
-    local IMAGES_WORKSPACE="$1"
+    local OUTPUT="$1"
+    local IMAGES_WORKSPACE="$2"
+    local REGEX='_P([0-9]{2})_'
 
-    OUTPUT="$IMAGES_WORKSPACE/Output"
+    mapfile -t PLATES < <(
+        find "$IMAGES_WORKSPACE" -maxdepth 1 -type d -printf '%f\n' \
+        | grep -oP "$REGEX" \
+        | sed -E 's/_P([0-9]{2})_/\1/' \
+        | sort -u
+    )
 
-    PATH_CSV_ILLUM="$OUTPUT/Illum_CSV_MPI"
-    PATH_CPPIPE_ILLUM="$OUTPUT/Illum_pipelines_MPI"
-    PATH_CSV_PROF="$OUTPUT/MP_CSV_MPI"
-    PATH_CPPIPE_PROF="$OUTPUT/MP_pipelines_MPI"
-    PATH_ILLUM_FILES="$OUTPUT/Illum_files_MPI"
-    PATH_PROFILES="$OUTPUT/MP_MPI"
-    BATCH_PIPELINES="$OUTPUT/Batch_pipelines_MPI"
+    for PLATE in "${PLATES[@]}"; do
 
-    for folder in \
-        "$PATH_CSV_ILLUM" \
-        "$PATH_CPPIPE_ILLUM" \
-        "$PATH_CSV_PROF" \
-        "$PATH_CPPIPE_PROF" \
-        "$PATH_ILLUM_FILES" \
-        "$PATH_PROFILES" \
-        "$BATCH_PIPELINES"
-    do
-        mkdir -p "$folder"
+        PATH_CELLPOSE_SEG="$OUTPUT/CellProfiler_files/Cellpose_seg"
+        PATH_CSV="$OUTPUT/CellProfiler_files/CSVs"
+        PATH_ILLUM_FILES="$OUTPUT/CellProfiler_files/Illum_files"
+        PATH_CPPIPE="$OUTPUT/CellProfiler_files/Pipelines"
+        PATH_BATCH_PIPELINES="$OUTPUT/CellProfiler_files/Batch_files"
+        PATH_PROFILES="$OUTPUT/CellProfiler_files/MP"
+
+        PATH_QC_IMAGES="$OUTPUT/QC/Images"
+        PATH_QC_COLLAGES="$OUTPUT/QC/Collages"
+        PATH_QC_REPORTS="$OUTPUT/QC/Reports"
+
+        PATH_FINAL_PROFILES="$OUTPUT/Profiles/Treated_profiles"
+        PATH_CLUSTERS="$OUTPUT/Clustering"
+
+        for folder in \
+            "$PATH_CELLPOSE_SEG" \
+            "$PATH_CSV" \
+            "$PATH_ILLUM_FILES" \
+            "$PATH_CPPIPE" \
+            "$PATH_BATCH_PIPELINES" \
+            "$PATH_PROFILES" \
+            "$PATH_QC_IMAGES" \
+            "$PATH_QC_COLLAGES" \
+            "$PATH_QC_REPORTS" \
+            "$PATH_FINAL_PROFILES" \
+            "$PATH_CLUSTERS"
+        do
+            mkdir -p "$folder"
+        done
     done
-    echo "Folders creados"
 }
+
 
 ejecutar_pipeline() {
   local BATCH_DATA="$1"
@@ -138,9 +152,9 @@ ejecutar_pipeline() {
   local MEM_TOTAL=$(grep MemTotal /proc/meminfo | awk '{print int($2/1024)}')
   local MEM_FREE=$(grep MemAvailable /proc/meminfo | awk '{print int($2/1024)}')
 
-  echo "[INFO] RAM total: ${MEM_TOTAL} MiB"
-  echo "[INFO] RAM disponible: ${MEM_FREE} MiB"
-  echo "[INFO] Núcleos disponibles: $NPROC"
+  echo "[INFO] Total RAM: ${MEM_TOTAL} MiB"
+  echo "[INFO] Available RAM: ${MEM_FREE} MiB"
+  echo "[INFO] Available cores: $NPROC"
 
   # ---------- Estimación de RAM por batch ----------
   # regla empírica: CellProfiler suele usar 200–600 MB por batch dependiendo del pipeline
@@ -154,10 +168,9 @@ ejecutar_pipeline() {
   # máximo total (limitado también por CPU)
   local MAX_JOBS=$(( MAX_BY_RAM < NPROC ? MAX_BY_RAM : NPROC ))
 
-  echo "[INFO] Paralelización auto-calculada:"
-  echo "[INFO]   → Máx trabajos por RAM: $MAX_BY_RAM"
-  echo "[INFO]   → Máx trabajos por CPU: $NPROC"
-  echo "[INFO]   → Trabajos paralelos efectivos: $MAX_JOBS"
+  echo "[INFO]   Max jobs per RAM: $MAX_BY_RAM"
+  echo "[INFO]   Max jobs per CPU: $NPROC"
+  echo "[INFO]   Effective parallel works: $MAX_JOBS"
 
   # ---------- Tamaño automático del batch ----------
   local BATCH_SIZE="$USER_BATCH_SIZE"
@@ -180,7 +193,7 @@ ejecutar_pipeline() {
     local OUTDIR="$OUT_ROOT/batch_${start}_${end}"
     mkdir -p "$OUTDIR"
 
-    echo "[INFO] Lanzando batch: $start → $end"
+    echo "[INFO] Launching batch: $start → $end"
 
     cellprofiler -c -r \
       -p "$BATCH_DATA" \
@@ -200,6 +213,6 @@ ejecutar_pipeline() {
   done
 
   wait
-  echo "[INFO] TODOS los batches terminaron"
+  echo "[INFO] All batch processing done"
 }
 

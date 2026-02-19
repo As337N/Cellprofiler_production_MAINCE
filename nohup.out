@@ -1,0 +1,1059 @@
+#1 [internal] load local bake definitions
+#1 reading from stdin 1.97kB done
+#1 DONE 0.0s
+
+#2 [cellpose_seg internal] load build definition from Dockerfile
+#2 transferring dockerfile: 460B done
+#2 DONE 0.0s
+
+#3 [cellprofiler_workflow internal] load build definition from Dockerfile
+#3 transferring dockerfile: 544B done
+#3 DONE 0.0s
+
+#4 [cellprofiler_workflow internal] load metadata for docker.io/library/python:3.8-bullseye
+#4 ...
+
+#5 [cellpose_seg internal] load metadata for docker.io/biocontainers/cellpose:4.0.7_cv1
+#5 DONE 0.4s
+
+#6 [cellpose_seg internal] load .dockerignore
+#6 transferring context: 2B done
+#6 DONE 0.0s
+
+#7 [cellpose_seg 1/6] FROM docker.io/biocontainers/cellpose:4.0.7_cv1@sha256:1ece14a8f3557558a1447ca62ef15398805936cae07160f64caa434b8288616f
+#7 DONE 0.0s
+
+#8 [cellpose_seg internal] load build context
+#8 transferring context: 75B done
+#8 DONE 0.0s
+
+#9 [cellpose_seg 2/6] RUN apt-get update && apt-get install -y     ffmpeg     libgl1     libglib2.0-0     build-essential     && rm -rf /var/lib/apt/lists/*
+#9 CACHED
+
+#10 [cellpose_seg 5/6] RUN pip install --no-cache-dir -r requirements.txt
+#10 CACHED
+
+#11 [cellpose_seg 4/6] COPY requirements.txt .
+#11 CACHED
+
+#12 [cellpose_seg 3/6] RUN pip install --upgrade pip setuptools wheel
+#12 CACHED
+
+#13 [cellpose_seg 6/6] WORKDIR /workspace
+#13 CACHED
+
+#4 [cellprofiler_workflow internal] load metadata for docker.io/library/python:3.8-bullseye
+#4 DONE 0.4s
+
+#14 [cellpose_seg] exporting to image
+#14 exporting layers done
+#14 writing image sha256:e314e94cc5901c45d6f891d14d8623781a15e01547c1c49f8f0e702f2bead523 done
+#14 naming to docker.io/library/maince_cellprofilerv2-cellpose_seg done
+#14 DONE 0.0s
+
+#15 [cellprofiler_illum internal] load .dockerignore
+#15 transferring context: 2B done
+#15 DONE 0.0s
+
+#16 [cellprofiler_illum 1/6] FROM docker.io/library/python:3.8-bullseye@sha256:11da1db2f485e2560be9817f92932a29f68fefc332b0167e8c51ae308ee23337
+#16 DONE 0.0s
+
+#17 [cellprofiler_illum internal] load build context
+#17 transferring context: 37B done
+#17 DONE 0.0s
+
+#18 [cellprofiler_workflow 3/6] WORKDIR /workspace
+#18 CACHED
+
+#19 [cellprofiler_workflow 2/6] RUN apt-get update && apt-get install -y     openjdk-11-jdk-headless     build-essential     libgtk-3-dev     bc     && rm -rf /var/lib/apt/lists/*
+#19 CACHED
+
+#20 [cellprofiler_workflow 4/6] COPY requirements.txt .
+#20 CACHED
+
+#21 [cellprofiler_workflow 5/6] RUN pip install --no-cache-dir -r requirements.txt
+#21 CACHED
+
+#22 [cellprofiler_workflow 6/6] RUN mkdir -p /tmp/matplotlib
+#22 CACHED
+
+#23 [cellpose_seg] resolving provenance for metadata file
+#23 DONE 0.0s
+
+#24 [cellprofiler_illum] exporting to image
+#24 exporting layers done
+#24 writing image sha256:6cd9bfd7e3eb44f4d5447d679debc9798f007ba3fb0227fecd41f90d77fede01 done
+#24 naming to docker.io/library/maince_cellprofilerv2-cellprofiler_illum done
+#24 DONE 0.0s
+
+#25 [cellprofiler_workflow] exporting to image
+#25 exporting layers done
+#25 writing image sha256:2dc8d5062c98fcc80c3b1812b8b2976d3566aba1713daf9990f48a962ba30151 done
+#25 naming to docker.io/library/maince_cellprofilerv2-cellprofiler_workflow done
+#25 DONE 0.0s
+
+#26 [cellprofiler_illum] resolving provenance for metadata file
+#26 DONE 0.0s
+ maince_cellprofilerv2-cellprofiler_illum  Built
+ maince_cellprofilerv2-cellpose_seg  Built
+ maince_cellprofilerv2-cellprofiler_workflow  Built
+ Network maince_cellprofilerv2_default  Creating
+ Network maince_cellprofilerv2_default  Created
+ Container maince_cellprofilerv2-cellprofiler_illum-1  Creating
+ Container maince_cellprofilerv2-cellprofiler_illum-1  Created
+ Container maince_cellprofilerv2-cellpose_seg-1  Creating
+ Container maince_cellprofilerv2-cellpose_seg-1  Created
+ Container maince_cellprofilerv2-cellprofiler_workflow-1  Creating
+ Container maince_cellprofilerv2-cellprofiler_workflow-1  Created
+ Container maince_cellprofilerv2-cellprofiler_illum-1  Starting
+ Container maince_cellprofilerv2-cellprofiler_illum-1  Started
+ Container maince_cellprofilerv2-cellprofiler_illum-1  Waiting
+ Container maince_cellprofilerv2-cellprofiler_illum-1  Exited
+ Container maince_cellprofilerv2-cellpose_seg-1  Starting
+ Container maince_cellprofilerv2-cellpose_seg-1  Started
+ Container maince_cellprofilerv2-cellpose_seg-1  Waiting
+ Container maince_cellprofilerv2-cellpose_seg-1  service "cellpose_seg" didn't complete successfully: exit 127
+service "cellpose_seg" didn't complete successfully: exit 127
+#1 [internal] load local bake definitions
+#1 reading from stdin 1.97kB done
+#1 DONE 0.0s
+
+#2 [cellprofiler_workflow internal] load build definition from Dockerfile
+#2 transferring dockerfile: 544B done
+#2 DONE 0.0s
+
+#3 [cellpose_seg internal] load build definition from Dockerfile
+#3 transferring dockerfile: 476B done
+#3 DONE 0.0s
+
+#4 [cellprofiler_illum internal] load metadata for docker.io/library/python:3.8-bullseye
+#4 ...
+
+#5 [cellpose_seg internal] load metadata for docker.io/biocontainers/cellpose:4.0.7_cv1
+#5 DONE 0.9s
+
+#6 [cellpose_seg internal] load .dockerignore
+#6 transferring context: 2B done
+#6 DONE 0.0s
+
+#4 [cellprofiler_illum internal] load metadata for docker.io/library/python:3.8-bullseye
+#4 DONE 0.9s
+
+#7 [cellpose_seg 1/6] FROM docker.io/biocontainers/cellpose:4.0.7_cv1@sha256:1ece14a8f3557558a1447ca62ef15398805936cae07160f64caa434b8288616f
+#7 DONE 0.0s
+
+#8 [cellprofiler_illum internal] load .dockerignore
+#8 transferring context: 2B done
+#8 DONE 0.0s
+
+#9 [cellpose_seg internal] load build context
+#9 transferring context: 37B done
+#9 DONE 0.0s
+
+#10 [cellprofiler_workflow 1/6] FROM docker.io/library/python:3.8-bullseye@sha256:11da1db2f485e2560be9817f92932a29f68fefc332b0167e8c51ae308ee23337
+#10 DONE 0.0s
+
+#11 [cellpose_seg 3/6] RUN pip install --upgrade pip setuptools wheel
+#11 CACHED
+
+#12 [cellpose_seg 4/6] COPY requirements.txt .
+#12 CACHED
+
+#13 [cellpose_seg 2/6] RUN apt-get update && apt-get install -y     ffmpeg     libgl1     libglib2.0-0     build-essential     && rm -rf /var/lib/apt/lists/*
+#13 CACHED
+
+#14 [cellpose_seg 5/6] RUN pip install --no-cache-dir -r requirements.txt
+#14 CACHED
+
+#15 [cellpose_seg 6/6] WORKDIR /workspace
+#15 CACHED
+
+#16 [cellprofiler_illum internal] load build context
+#16 transferring context: 37B done
+#16 DONE 0.0s
+
+#17 [cellprofiler_illum 2/6] RUN apt-get update && apt-get install -y     openjdk-11-jdk-headless     build-essential     libgtk-3-dev     bc     && rm -rf /var/lib/apt/lists/*
+#17 CACHED
+
+#18 [cellprofiler_illum 3/6] WORKDIR /workspace
+#18 CACHED
+
+#19 [cellprofiler_illum 5/6] RUN pip install --no-cache-dir -r requirements.txt
+#19 CACHED
+
+#20 [cellprofiler_illum 4/6] COPY requirements.txt .
+#20 CACHED
+
+#21 [cellprofiler_illum 6/6] RUN mkdir -p /tmp/matplotlib
+#21 CACHED
+
+#22 [cellpose_seg] exporting to image
+#22 exporting layers done
+#22 writing image sha256:a682aab523387b22bc564b5bc3bf26779d3bb367faa58af1657d9c0cf238d754 done
+#22 naming to docker.io/library/maince_cellprofilerv2-cellpose_seg done
+#22 DONE 0.0s
+
+#23 [cellprofiler_illum] exporting to image
+#23 exporting layers done
+#23 writing image sha256:6cd9bfd7e3eb44f4d5447d679debc9798f007ba3fb0227fecd41f90d77fede01 done
+#23 naming to docker.io/library/maince_cellprofilerv2-cellprofiler_illum done
+#23 DONE 0.0s
+
+#24 [cellprofiler_workflow] exporting to image
+#24 exporting layers done
+#24 writing image sha256:2dc8d5062c98fcc80c3b1812b8b2976d3566aba1713daf9990f48a962ba30151 done
+#24 naming to docker.io/library/maince_cellprofilerv2-cellprofiler_workflow done
+#24 DONE 0.0s
+
+#25 [cellpose_seg] resolving provenance for metadata file
+ maince_cellprofilerv2-cellprofiler_illum  Built
+ maince_cellprofilerv2-cellpose_seg  Built
+ maince_cellprofilerv2-cellprofiler_workflow  Built
+ Container maince_cellprofilerv2-cellpose_seg-1  Recreate
+ Container maince_cellprofilerv2-cellpose_seg-1  Recreated
+ Container maince_cellprofilerv2-cellprofiler_illum-1  Starting
+ Container maince_cellprofilerv2-cellprofiler_illum-1  Started
+ Container maince_cellprofilerv2-cellprofiler_illum-1  Waiting
+ Container maince_cellprofilerv2-cellprofiler_illum-1  Exited
+ Container maince_cellprofilerv2-cellpose_seg-1  Starting
+ Container maince_cellprofilerv2-cellpose_seg-1  Started
+ Container maince_cellprofilerv2-cellpose_seg-1  Waiting
+ Container maince_cellprofilerv2-cellpose_seg-1  service "cellpose_seg" didn't complete successfully: exit 127
+service "cellpose_seg" didn't complete successfully: exit 127
+#1 [internal] load local bake definitions
+#1 reading from stdin 1.97kB done
+#1 DONE 0.0s
+
+#2 [cellpose_seg internal] load build definition from Dockerfile
+#2 transferring dockerfile: 460B done
+#2 DONE 0.0s
+
+#3 [cellprofiler_workflow internal] load build definition from Dockerfile
+#3 transferring dockerfile: 544B done
+#3 DONE 0.0s
+
+#4 [cellprofiler_workflow internal] load metadata for docker.io/library/python:3.8-bullseye
+#4 DONE 0.6s
+
+#5 [cellprofiler_illum internal] load .dockerignore
+#5 transferring context: 2B done
+#5 DONE 0.0s
+
+#6 [cellprofiler_workflow 1/6] FROM docker.io/library/python:3.8-bullseye@sha256:11da1db2f485e2560be9817f92932a29f68fefc332b0167e8c51ae308ee23337
+#6 DONE 0.0s
+
+#7 [cellprofiler_workflow internal] load build context
+#7 transferring context: 131B done
+#7 DONE 0.0s
+
+#8 [cellprofiler_workflow 2/6] RUN apt-get update && apt-get install -y     openjdk-11-jdk-headless     build-essential     libgtk-3-dev     bc     && rm -rf /var/lib/apt/lists/*
+#8 CACHED
+
+#9 [cellprofiler_illum 3/6] WORKDIR /workspace
+#9 CACHED
+
+#10 [cellpose_seg internal] load metadata for docker.io/biocontainers/cellpose:4.0.7_cv1
+#10 DONE 0.7s
+
+#11 [cellprofiler_illum 4/6] COPY requirements.txt .
+#11 DONE 0.0s
+
+#12 [cellpose_seg internal] load .dockerignore
+#12 transferring context: 2B done
+#12 DONE 0.0s
+
+#13 [cellpose_seg 1/6] FROM docker.io/biocontainers/cellpose:4.0.7_cv1@sha256:1ece14a8f3557558a1447ca62ef15398805936cae07160f64caa434b8288616f
+#13 DONE 0.0s
+
+#14 [cellpose_seg internal] load build context
+#14 transferring context: 37B done
+#14 DONE 0.0s
+
+#15 [cellpose_seg 5/6] RUN pip install --no-cache-dir -r requirements.txt
+#15 CACHED
+
+#16 [cellpose_seg 2/6] RUN apt-get update && apt-get install -y     ffmpeg     libgl1     libglib2.0-0     build-essential     && rm -rf /var/lib/apt/lists/*
+#16 CACHED
+
+#17 [cellpose_seg 4/6] COPY requirements.txt .
+#17 CACHED
+
+#18 [cellpose_seg 3/6] RUN pip install --upgrade pip setuptools wheel
+#18 CACHED
+
+#19 [cellpose_seg 6/6] WORKDIR /workspace
+#19 CACHED
+
+#20 [cellpose_seg] exporting to image
+#20 exporting layers done
+#20 writing image sha256:e314e94cc5901c45d6f891d14d8623781a15e01547c1c49f8f0e702f2bead523 done
+#20 naming to docker.io/library/maince_cellprofilerv2-cellpose_seg done
+#20 DONE 0.0s
+
+#21 [cellprofiler_illum 5/6] RUN pip install --no-cache-dir -r requirements.txt
+#21 ...
+
+#22 [cellpose_seg] resolving provenance for metadata file
+#22 DONE 0.0s
+
+#21 [cellprofiler_illum 5/6] RUN pip install --no-cache-dir -r requirements.txt
+#21 1.277 Collecting numpy
+#21 1.288   Downloading numpy-1.24.4-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (17.3 MB)
+#21 3.056      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 17.3/17.3 MB 9.1 MB/s eta 0:00:00
+#21 3.243 Collecting polars
+#21 3.252   Downloading polars-1.8.2-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (32.5 MB)
+#21 6.092      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 32.5/32.5 MB 11.6 MB/s eta 0:00:00
+#21 6.283 Collecting scipy
+#21 6.289   Downloading scipy-1.10.1-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (34.5 MB)
+#21 9.266      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 34.5/34.5 MB 11.6 MB/s eta 0:00:00
+#21 9.456 Collecting matplotlib
+#21 9.463   Downloading matplotlib-3.7.5-cp38-cp38-manylinux_2_12_x86_64.manylinux2010_x86_64.whl (9.2 MB)
+#21 10.36      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 9.2/9.2 MB 10.3 MB/s eta 0:00:00
+#21 10.39 Collecting joblib
+#21 10.39   Downloading joblib-1.4.2-py3-none-any.whl (301 kB)
+#21 10.42      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 301.8/301.8 kB 11.9 MB/s eta 0:00:00
+#21 10.54 Collecting numba
+#21 10.54   Downloading numba-0.58.1-cp38-cp38-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (3.7 MB)
+#21 10.86      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.7/3.7 MB 11.6 MB/s eta 0:00:00
+#21 10.90 Collecting tifffile
+#21 10.90   Downloading tifffile-2023.7.10-py3-none-any.whl (220 kB)
+#21 10.92      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 220.9/220.9 kB 11.9 MB/s eta 0:00:00
+#21 10.96 Collecting tqdm
+#21 10.96   Downloading tqdm-4.67.3-py3-none-any.whl (78 kB)
+#21 10.97      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 78.4/78.4 kB 12.9 MB/s eta 0:00:00
+#21 11.07 Collecting cellprofiler
+#21 11.07   Downloading CellProfiler-4.2.8-py3-none-any.whl (21.0 MB)
+#21 13.16      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 21.0/21.0 MB 11.0 MB/s eta 0:00:00
+#21 13.32 Collecting pandas
+#21 13.32   Downloading pandas-2.0.3-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (12.4 MB)
+#21 14.38      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 12.4/12.4 MB 11.7 MB/s eta 0:00:00
+#21 14.49 Collecting pycytominer
+#21 14.59   Downloading pycytominer-1.2.0-py3-none-any.whl (86 kB)
+#21 14.60      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 86.2/86.2 kB 12.7 MB/s eta 0:00:00
+#21 14.74 Collecting contourpy>=1.0.1
+#21 14.74   Downloading contourpy-1.1.1-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (301 kB)
+#21 14.77      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 301.1/301.1 kB 11.9 MB/s eta 0:00:00
+#21 14.84 Collecting kiwisolver>=1.0.1
+#21 14.84   Downloading kiwisolver-1.4.7-cp38-cp38-manylinux_2_5_x86_64.manylinux1_x86_64.whl (1.2 MB)
+#21 14.94      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 11.8 MB/s eta 0:00:00
+#21 15.11 Collecting fonttools>=4.22.0
+#21 15.11   Downloading fonttools-4.57.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (4.7 MB)
+#21 15.52      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.7/4.7 MB 11.7 MB/s eta 0:00:00
+#21 15.54 Collecting pyparsing>=2.3.1
+#21 15.55   Downloading pyparsing-3.1.4-py3-none-any.whl (104 kB)
+#21 15.56      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 104.1/104.1 kB 12.6 MB/s eta 0:00:00
+#21 15.57 Collecting python-dateutil>=2.7
+#21 15.57   Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl (229 kB)
+#21 15.59      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 229.9/229.9 kB 11.9 MB/s eta 0:00:00
+#21 15.61 Collecting importlib-resources>=3.2.0
+#21 15.62   Downloading importlib_resources-6.4.5-py3-none-any.whl (36 kB)
+#21 15.64 Collecting packaging>=20.0
+#21 15.65   Downloading packaging-26.0-py3-none-any.whl (74 kB)
+#21 15.65      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 74.4/74.4 kB 13.0 MB/s eta 0:00:00
+#21 15.87 Collecting pillow>=6.2.0
+#21 15.87   Downloading pillow-10.4.0-cp38-cp38-manylinux_2_28_x86_64.whl (4.5 MB)
+#21 16.26      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.5/4.5 MB 11.7 MB/s eta 0:00:00
+#21 16.27 Collecting cycler>=0.10
+#21 16.27   Downloading cycler-0.12.1-py3-none-any.whl (8.3 kB)
+#21 16.34 Collecting llvmlite<0.42,>=0.41.0dev0
+#21 16.35   Downloading llvmlite-0.41.1-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (43.6 MB)
+#21 20.56      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 43.6/43.6 MB 11.7 MB/s eta 0:00:00
+#21 20.63 Collecting importlib-metadata
+#21 20.63   Downloading importlib_metadata-8.5.0-py3-none-any.whl (26 kB)
+#21 20.67 Collecting six
+#21 20.67   Downloading six-1.17.0-py2.py3-none-any.whl (11 kB)
+#21 20.69 Collecting mysqlclient==1.4.6
+#21 20.69   Downloading mysqlclient-1.4.6.tar.gz (85 kB)
+#21 20.70      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 85.5/85.5 kB 12.5 MB/s eta 0:00:00
+#21 20.71   Preparing metadata (setup.py): started
+#21 20.92   Preparing metadata (setup.py): finished with status 'done'
+#21 21.02 Collecting python-javabridge<5,>=4.0.3
+#21 21.02   Downloading python_javabridge-4.0.4.tar.gz (1.3 MB)
+#21 21.14      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.3/1.3 MB 11.7 MB/s eta 0:00:00
+#21 21.16   Installing build dependencies: started
+#21 25.46   Installing build dependencies: finished with status 'done'
+#21 25.46   Getting requirements to build wheel: started
+#21 25.59   Getting requirements to build wheel: finished with status 'done'
+#21 25.59   Preparing metadata (pyproject.toml): started
+#21 25.74   Preparing metadata (pyproject.toml): finished with status 'done'
+#21 25.76 Collecting imageio>=2.5
+#21 25.77   Downloading imageio-2.35.1-py3-none-any.whl (315 kB)
+#21 25.80      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 315.4/315.4 kB 12.0 MB/s eta 0:00:00
+#21 25.85 Collecting sentry-sdk==0.18.0
+#21 25.85   Downloading sentry_sdk-0.18.0-py2.py3-none-any.whl (120 kB)
+#21 25.86      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 120.7/120.7 kB 12.4 MB/s eta 0:00:00
+#21 25.93 Collecting scikit-image==0.18.3
+#21 25.94   Downloading scikit_image-0.18.3-cp38-cp38-manylinux_2_5_x86_64.manylinux1_x86_64.whl (30.2 MB)
+#21 28.52      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 30.2/30.2 MB 11.7 MB/s eta 0:00:00
+#21 28.57 Collecting mahotas>=1.4
+#21 28.58   Downloading mahotas-1.4.18-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (5.8 MB)
+#21 29.07      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 5.8/5.8 MB 11.7 MB/s eta 0:00:00
+#21 29.17 Collecting python-bioformats<5,>=4.0.7
+#21 29.18   Downloading python_bioformats-4.1.0-py3-none-any.whl (42.6 MB)
+#21 32.82      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 42.6/42.6 MB 11.7 MB/s eta 0:00:00
+#21 32.86 Collecting inflect<7,>=2.1
+#21 32.87   Downloading inflect-6.2.0-py3-none-any.whl (35 kB)
+#21 32.89 Collecting docutils==0.15.2
+#21 32.89   Downloading docutils-0.15.2-py3-none-any.whl (547 kB)
+#21 32.94      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 547.6/547.6 kB 11.8 MB/s eta 0:00:00
+#21 33.01 Collecting wxPython<5,>=4.1.0
+#21 33.02   Downloading wxPython-4.2.2.tar.gz (57.4 MB)
+#21 37.92      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 57.4/57.4 MB 11.7 MB/s eta 0:00:00
+#21 39.87   Preparing metadata (setup.py): started
+#21 40.02   Preparing metadata (setup.py): finished with status 'done'
+#21 40.28 Collecting pyzmq~=22.3
+#21 40.29   Downloading pyzmq-22.3.0-cp38-cp38-manylinux_2_12_x86_64.manylinux2010_x86_64.whl (1.1 MB)
+#21 40.38      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.1/1.1 MB 11.7 MB/s eta 0:00:00
+#21 40.39 Collecting scipy
+#21 40.39   Downloading scipy-1.9.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (43.4 MB)
+#21 44.10      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 43.4/43.4 MB 11.7 MB/s eta 0:00:00
+#21 44.15 Collecting Jinja2>=2.11.2
+#21 44.15   Downloading jinja2-3.1.6-py3-none-any.whl (134 kB)
+#21 44.16      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 134.9/134.9 kB 12.2 MB/s eta 0:00:00
+#21 44.27 Collecting scikit-learn<1,>=0.20
+#21 44.28   Downloading scikit_learn-0.24.2-cp38-cp38-manylinux2010_x86_64.whl (24.9 MB)
+#21 46.47      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 24.9/24.9 MB 11.7 MB/s eta 0:00:00
+#21 46.54 Collecting h5py<4,~=3.6.0
+#21 46.55   Downloading h5py-3.6.0-cp38-cp38-manylinux_2_12_x86_64.manylinux2010_x86_64.whl (4.5 MB)
+#21 46.93      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.5/4.5 MB 11.7 MB/s eta 0:00:00
+#21 47.03 Collecting cellprofiler-core==4.2.8
+#21 47.04   Downloading cellprofiler_core-4.2.8-py3-none-any.whl (392 kB)
+#21 47.07      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 392.4/392.4 kB 11.9 MB/s eta 0:00:00
+#21 47.22 Collecting centrosome<1.3,>=1.2.3
+#21 47.22   Downloading centrosome-1.2.3-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (1.8 MB)
+#21 47.39      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.8/1.8 MB 11.2 MB/s eta 0:00:00
+#21 47.73 Collecting boto3>=1.12.28
+#21 47.73   Downloading boto3-1.37.38-py3-none-any.whl (139 kB)
+#21 47.74      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 139.9/139.9 kB 12.1 MB/s eta 0:00:00
+#21 47.84 Collecting prokaryote==2.4.4
+#21 47.84   Downloading prokaryote-2.4.4.tar.gz (84.2 MB)
+#21 55.08      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 84.2/84.2 MB 11.5 MB/s eta 0:00:00
+#21 55.61   Preparing metadata (setup.py): started
+#21 55.68   Preparing metadata (setup.py): finished with status 'done'
+#21 55.69 Collecting tifffile
+#21 55.69   Downloading tifffile-2022.4.8-py3-none-any.whl (180 kB)
+#21 55.71      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 180.6/180.6 kB 12.2 MB/s eta 0:00:00
+#21 55.73 Collecting requests>=2.22
+#21 55.73   Downloading requests-2.32.4-py3-none-any.whl (64 kB)
+#21 55.74      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 64.8/64.8 kB 13.2 MB/s eta 0:00:00
+#21 55.83 Collecting psutil>=5.7.0
+#21 55.83   Downloading psutil-7.2.2-cp36-abi3-manylinux2010_x86_64.manylinux_2_12_x86_64.manylinux_2_28_x86_64.whl (155 kB)
+#21 55.85      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 155.6/155.6 kB 10.7 MB/s eta 0:00:00
+#21 55.92 Collecting PyWavelets>=1.1.1
+#21 55.92   Downloading PyWavelets-1.4.1-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (6.9 MB)
+#21 56.51      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6.9/6.9 MB 11.7 MB/s eta 0:00:00
+#21 56.54 Collecting networkx>=2.0
+#21 56.55   Downloading networkx-3.1-py3-none-any.whl (2.1 MB)
+#21 56.72      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.1/2.1 MB 11.7 MB/s eta 0:00:00
+#21 56.78 Collecting urllib3>=1.10.0
+#21 56.79   Downloading urllib3-2.2.3-py3-none-any.whl (126 kB)
+#21 56.80      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 126.3/126.3 kB 12.4 MB/s eta 0:00:00
+#21 56.81 Collecting certifi
+#21 56.81   Downloading certifi-2026.1.4-py3-none-any.whl (152 kB)
+#21 56.83      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 152.9/152.9 kB 12.2 MB/s eta 0:00:00
+#21 56.95 Collecting pytz>=2020.1
+#21 56.96   Downloading pytz-2025.2-py2.py3-none-any.whl (509 kB)
+#21 57.00      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 509.2/509.2 kB 11.9 MB/s eta 0:00:00
+#21 57.01 Collecting tzdata>=2022.1
+#21 57.02   Downloading tzdata-2025.3-py2.py3-none-any.whl (348 kB)
+#21 57.05      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 348.5/348.5 kB 11.9 MB/s eta 0:00:00
+#21 57.38 Collecting sqlalchemy<2,>=1.3.6
+#21 57.38   Downloading SQLAlchemy-1.4.54-cp38-cp38-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl (1.6 MB)
+#21 57.52      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.6/1.6 MB 11.7 MB/s eta 0:00:00
+#21 57.62 Collecting pyarrow>=8.0.0
+#21 57.63   Downloading pyarrow-17.0.0-cp38-cp38-manylinux_2_28_x86_64.whl (40.0 MB)
+#21 61.06      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 40.0/40.0 MB 11.7 MB/s eta 0:00:00
+#21 61.54 Collecting botocore<1.38.0,>=1.37.38
+#21 61.54   Downloading botocore-1.37.38-py3-none-any.whl (13.5 MB)
+#21 62.71      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 13.5/13.5 MB 11.6 MB/s eta 0:00:00
+#21 62.74 Collecting s3transfer<0.12.0,>=0.11.0
+#21 62.74   Downloading s3transfer-0.11.5-py3-none-any.whl (84 kB)
+#21 62.75      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 84.8/84.8 kB 12.8 MB/s eta 0:00:00
+#21 62.76 Collecting jmespath<2.0.0,>=0.7.1
+#21 62.76   Downloading jmespath-1.0.1-py3-none-any.whl (20 kB)
+#21 62.79 Collecting deprecation
+#21 62.79   Downloading deprecation-2.1.0-py2.py3-none-any.whl (11 kB)
+#21 62.90 Collecting zipp>=3.1.0
+#21 62.90   Downloading zipp-3.20.2-py3-none-any.whl (9.2 kB)
+#21 62.92 Collecting typing-extensions
+#21 62.92   Downloading typing_extensions-4.13.2-py3-none-any.whl (45 kB)
+#21 62.93      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 45.8/45.8 kB 13.6 MB/s eta 0:00:00
+#21 63.06 Collecting pydantic>=1.9.1
+#21 63.06   Downloading pydantic-2.10.6-py3-none-any.whl (431 kB)
+#21 63.10      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 431.7/431.7 kB 11.6 MB/s eta 0:00:00
+#21 63.16 Collecting MarkupSafe>=2.0
+#21 63.16   Downloading MarkupSafe-2.1.5-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (26 kB)
+#21 63.20 Collecting future>=0.18.2
+#21 63.21   Downloading future-1.0.0-py3-none-any.whl (491 kB)
+#21 63.25      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 491.3/491.3 kB 11.9 MB/s eta 0:00:00
+#21 63.44 Collecting charset_normalizer<4,>=2
+#21 63.44   Downloading charset_normalizer-3.4.4-cp38-cp38-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (147 kB)
+#21 63.46      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 147.6/147.6 kB 12.3 MB/s eta 0:00:00
+#21 63.47 Collecting idna<4,>=2.5
+#21 63.48   Downloading idna-3.11-py3-none-any.whl (71 kB)
+#21 63.48      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 71.0/71.0 kB 12.8 MB/s eta 0:00:00
+#21 63.50 Collecting threadpoolctl>=2.0.0
+#21 63.51   Downloading threadpoolctl-3.5.0-py3-none-any.whl (18 kB)
+#21 63.70 Collecting greenlet!=0.4.17
+#21 63.70   Downloading greenlet-3.1.1-cp38-cp38-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (605 kB)
+#21 63.76      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 606.0/606.0 kB 11.6 MB/s eta 0:00:00
+#21 63.79 Collecting urllib3>=1.10.0
+#21 63.79   Downloading urllib3-1.26.20-py2.py3-none-any.whl (144 kB)
+#21 63.80      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 144.2/144.2 kB 12.1 MB/s eta 0:00:00
+#21 64.69 Collecting pydantic-core==2.27.2
+#21 64.70   Downloading pydantic_core-2.27.2-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.0 MB)
+#21 64.87      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.0/2.0 MB 11.7 MB/s eta 0:00:00
+#21 64.88 Collecting annotated-types>=0.6.0
+#21 64.88   Downloading annotated_types-0.7.0-py3-none-any.whl (13 kB)
+#21 65.05 Building wheels for collected packages: mysqlclient, prokaryote, python-javabridge, wxPython
+#21 65.06   Building wheel for mysqlclient (setup.py): started
+#21 65.41   Building wheel for mysqlclient (setup.py): finished with status 'done'
+#21 65.41   Created wheel for mysqlclient: filename=mysqlclient-1.4.6-cp38-cp38-linux_x86_64.whl size=111139 sha256=70a3edab1cbb33223965b7de38a92492aaefd238117e92d1541f53322ee5a434
+#21 65.41   Stored in directory: /tmp/pip-ephem-wheel-cache-swr3p9es/wheels/8a/3c/e6/347e293dbcd62352ee2806f68d624aae821bca7efe0070c963
+#21 65.41   Building wheel for prokaryote (setup.py): started
+#21 67.14   Building wheel for prokaryote (setup.py): finished with status 'done'
+#21 67.18   Created wheel for prokaryote: filename=prokaryote-2.4.4-py2.py3-none-any.whl size=84275285 sha256=55a17f822d94421f264f74feb6bd5e8daaf1ddf26d0cd3d1ed982e172f8cc047
+#21 67.18   Stored in directory: /tmp/pip-ephem-wheel-cache-swr3p9es/wheels/c5/2c/93/807ad1ef93ee55147546d41b93ff71c7df7ca213e5b3a71845
+#21 67.18   Building wheel for python-javabridge (pyproject.toml): started
+#21 71.10   Building wheel for python-javabridge (pyproject.toml): finished with status 'done'
+#21 71.10   Created wheel for python-javabridge: filename=python_javabridge-4.0.4-cp38-cp38-linux_x86_64.whl size=1877700 sha256=e5bdc55cf218331fa56bad35dfb04a3d0a64baf3d61831dfb8dacc4cadc5dd6b
+#21 71.10   Stored in directory: /tmp/pip-ephem-wheel-cache-swr3p9es/wheels/04/90/aa/cf480988d7bc973f74e6cbe3b43386960809eb41e302789ab5
+#21 71.10   Building wheel for wxPython (setup.py): started
+#21 131.1   Building wheel for wxPython (setup.py): still running...
+#21 184.7   Building wheel for wxPython (setup.py): finished with status 'done'
+#21 184.8   Created wheel for wxPython: filename=wxPython-4.2.2-cp38-cp38-linux_x86_64.whl size=138495103 sha256=53523c02692347af70a73b831babeaf1d0d6713b0844a17bce7087a020969c48
+#21 184.8   Stored in directory: /tmp/pip-ephem-wheel-cache-swr3p9es/wheels/a2/a6/ee/9f7bebd9ad75336df5a5f54821ad81a711fe272aa0e537cb6c
+#21 184.8 Successfully built mysqlclient prokaryote python-javabridge wxPython
+#21 185.1 Installing collected packages: pytz, mysqlclient, zipp, urllib3, tzdata, typing-extensions, tqdm, threadpoolctl, six, pyzmq, pyparsing, psutil, prokaryote, polars, pillow, packaging, numpy, networkx, MarkupSafe, llvmlite, kiwisolver, joblib, jmespath, idna, greenlet, future, fonttools, docutils, cycler, charset_normalizer, certifi, wxPython, tifffile, sqlalchemy, sentry-sdk, scipy, requests, PyWavelets, python-javabridge, python-dateutil, pydantic-core, pyarrow, mahotas, Jinja2, importlib-resources, importlib-metadata, imageio, h5py, deprecation, contourpy, annotated-types, scikit-learn, pydantic, pandas, numba, matplotlib, botocore, scikit-image, s3transfer, pycytominer, inflect, centrosome, boto3, python-bioformats, cellprofiler-core, cellprofiler
+#21 196.9 Successfully installed Jinja2-3.1.6 MarkupSafe-2.1.5 PyWavelets-1.4.1 annotated-types-0.7.0 boto3-1.37.38 botocore-1.37.38 cellprofiler-4.2.8 cellprofiler-core-4.2.8 centrosome-1.2.3 certifi-2026.1.4 charset_normalizer-3.4.4 contourpy-1.1.1 cycler-0.12.1 deprecation-2.1.0 docutils-0.15.2 fonttools-4.57.0 future-1.0.0 greenlet-3.1.1 h5py-3.6.0 idna-3.11 imageio-2.35.1 importlib-metadata-8.5.0 importlib-resources-6.4.5 inflect-6.2.0 jmespath-1.0.1 joblib-1.4.2 kiwisolver-1.4.7 llvmlite-0.41.1 mahotas-1.4.18 matplotlib-3.7.5 mysqlclient-1.4.6 networkx-3.1 numba-0.58.1 numpy-1.24.4 packaging-26.0 pandas-2.0.3 pillow-10.4.0 polars-1.8.2 prokaryote-2.4.4 psutil-7.2.2 pyarrow-17.0.0 pycytominer-1.2.0 pydantic-2.10.6 pydantic-core-2.27.2 pyparsing-3.1.4 python-bioformats-4.1.0 python-dateutil-2.9.0.post0 python-javabridge-4.0.4 pytz-2025.2 pyzmq-22.3.0 requests-2.32.4 s3transfer-0.11.5 scikit-image-0.18.3 scikit-learn-0.24.2 scipy-1.9.0 sentry-sdk-0.18.0 six-1.17.0 sqlalchemy-1.4.54 threadpoolctl-3.5.0 tifffile-2022.4.8 tqdm-4.67.3 typing-extensions-4.13.2 tzdata-2025.3 urllib3-1.26.20 wxPython-4.2.2 zipp-3.20.2
+#21 196.9 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+#21 197.0 
+#21 197.0 [notice] A new release of pip is available: 23.0.1 -> 25.0.1
+#21 197.0 [notice] To update, run: pip install --upgrade pip
+#21 DONE 198.2s
+
+#23 [cellprofiler_workflow 6/6] RUN mkdir -p /tmp/matplotlib
+#23 DONE 0.1s
+
+#24 [cellprofiler_illum] exporting to image
+#24 exporting layers
+#24 exporting layers 1.9s done
+#24 writing image sha256:39e197a8a4553a0ab439f3103f8cdd2403d7372bb767a28400795129e6e76e35 done
+#24 naming to docker.io/library/maince_cellprofilerv2-cellprofiler_illum done
+#24 DONE 1.9s
+
+#25 [cellprofiler_workflow] exporting to image
+#25 exporting layers 1.9s done
+#25 writing image sha256:58fad19eb2fa952c0e7d94aaf65e3300920ac89d7bb774264dc02c2673c68945 done
+#25 naming to docker.io/library/maince_cellprofilerv2-cellprofiler_workflow done
+#25 DONE 1.9s
+
+#26 [cellprofiler_workflow] resolving provenance for metadata file
+#26 DONE 0.0s
+
+#27 [cellprofiler_illum] resolving provenance for metadata file
+#27 DONE 0.0s
+ maince_cellprofilerv2-cellprofiler_illum  Built
+ maince_cellprofilerv2-cellpose_seg  Built
+ maince_cellprofilerv2-cellprofiler_workflow  Built
+ Container maince_cellprofilerv2-cellprofiler_illum-1  Recreate
+ Container maince_cellprofilerv2-cellprofiler_illum-1  Recreated
+ Container maince_cellprofilerv2-cellpose_seg-1  Recreate
+ Container maince_cellprofilerv2-cellpose_seg-1  Recreated
+ Container maince_cellprofilerv2-cellprofiler_workflow-1  Recreate
+ Container maince_cellprofilerv2-cellprofiler_workflow-1  Recreated
+ Container maince_cellprofilerv2-cellprofiler_illum-1  Starting
+ Container maince_cellprofilerv2-cellprofiler_illum-1  Started
+ Container maince_cellprofilerv2-cellprofiler_illum-1  Waiting
+ Container maince_cellprofilerv2-cellprofiler_illum-1  Exited
+ Container maince_cellprofilerv2-cellpose_seg-1  Starting
+ Container maince_cellprofilerv2-cellpose_seg-1  Started
+ Container maince_cellprofilerv2-cellpose_seg-1  Waiting
+ Container maince_cellprofilerv2-cellpose_seg-1  Exited
+ Container maince_cellprofilerv2-cellprofiler_workflow-1  Starting
+ Container maince_cellprofilerv2-cellprofiler_workflow-1  Started
+#1 [internal] load local bake definitions
+#1 reading from stdin 1.97kB done
+#1 DONE 0.0s
+
+#2 [cellprofiler_workflow internal] load build definition from Dockerfile
+#2 transferring dockerfile: 544B done
+#2 DONE 0.0s
+
+#3 [cellpose_seg internal] load build definition from Dockerfile
+#3 transferring dockerfile: 460B done
+#3 DONE 0.0s
+
+#4 [cellprofiler_workflow internal] load metadata for docker.io/library/python:3.8-bullseye
+#4 ...
+
+#5 [cellpose_seg internal] load metadata for docker.io/biocontainers/cellpose:4.0.7_cv1
+#5 DONE 0.6s
+
+#4 [cellprofiler_workflow internal] load metadata for docker.io/library/python:3.8-bullseye
+#4 DONE 0.6s
+
+#6 [cellpose_seg internal] load .dockerignore
+#6 transferring context: 2B done
+#6 DONE 0.0s
+
+#7 [cellpose_seg 1/6] FROM docker.io/biocontainers/cellpose:4.0.7_cv1@sha256:1ece14a8f3557558a1447ca62ef15398805936cae07160f64caa434b8288616f
+#7 DONE 0.0s
+
+#8 [cellprofiler_illum internal] load .dockerignore
+#8 transferring context: 2B done
+#8 DONE 0.0s
+
+#9 [cellprofiler_illum 1/6] FROM docker.io/library/python:3.8-bullseye@sha256:11da1db2f485e2560be9817f92932a29f68fefc332b0167e8c51ae308ee23337
+#9 DONE 0.0s
+
+#10 [cellpose_seg internal] load build context
+#10 transferring context: 37B done
+#10 DONE 0.0s
+
+#11 [cellprofiler_illum internal] load build context
+#11 transferring context: 155B done
+#11 DONE 0.0s
+
+#12 [cellpose_seg 4/6] COPY requirements.txt .
+#12 CACHED
+
+#13 [cellpose_seg 2/6] RUN apt-get update && apt-get install -y     ffmpeg     libgl1     libglib2.0-0     build-essential     && rm -rf /var/lib/apt/lists/*
+#13 CACHED
+
+#14 [cellpose_seg 5/6] RUN pip install --no-cache-dir -r requirements.txt
+#14 CACHED
+
+#15 [cellpose_seg 3/6] RUN pip install --upgrade pip setuptools wheel
+#15 CACHED
+
+#16 [cellpose_seg 6/6] WORKDIR /workspace
+#16 CACHED
+
+#17 [cellprofiler_workflow 2/6] RUN apt-get update && apt-get install -y     openjdk-11-jdk-headless     build-essential     libgtk-3-dev     bc     && rm -rf /var/lib/apt/lists/*
+#17 CACHED
+
+#18 [cellprofiler_illum 3/6] WORKDIR /workspace
+#18 CACHED
+
+#19 [cellpose_seg] exporting to image
+#19 exporting layers done
+#19 writing image sha256:e314e94cc5901c45d6f891d14d8623781a15e01547c1c49f8f0e702f2bead523 done
+#19 naming to docker.io/library/maince_cellprofilerv2-cellpose_seg done
+#19 DONE 0.0s
+
+#20 [cellprofiler_workflow 4/6] COPY requirements.txt .
+#20 DONE 0.0s
+
+#21 [cellprofiler_workflow 5/6] RUN pip install --no-cache-dir -r requirements.txt
+#21 ...
+
+#22 [cellpose_seg] resolving provenance for metadata file
+#22 DONE 0.0s
+
+#21 [cellprofiler_workflow 5/6] RUN pip install --no-cache-dir -r requirements.txt
+#21 1.288 Collecting numpy
+#21 1.307   Downloading numpy-1.24.4-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (17.3 MB)
+#21 2.788      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 17.3/17.3 MB 11.7 MB/s eta 0:00:00
+#21 2.967 Collecting polars
+#21 2.973   Downloading polars-1.8.2-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (32.5 MB)
+#21 5.771      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 32.5/32.5 MB 11.7 MB/s eta 0:00:00
+#21 5.963 Collecting scipy
+#21 5.968   Downloading scipy-1.10.1-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (34.5 MB)
+#21 8.924      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 34.5/34.5 MB 11.7 MB/s eta 0:00:00
+#21 9.115 Collecting matplotlib
+#21 9.123   Downloading matplotlib-3.7.5-cp38-cp38-manylinux_2_12_x86_64.manylinux2010_x86_64.whl (9.2 MB)
+#21 9.912      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 9.2/9.2 MB 11.7 MB/s eta 0:00:00
+#21 9.939 Collecting joblib
+#21 9.944   Downloading joblib-1.4.2-py3-none-any.whl (301 kB)
+#21 9.970      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 301.8/301.8 kB 12.0 MB/s eta 0:00:00
+#21 10.09 Collecting numba
+#21 10.09   Downloading numba-0.58.1-cp38-cp38-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (3.7 MB)
+#21 10.41      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.7/3.7 MB 11.7 MB/s eta 0:00:00
+#21 10.45 Collecting tifffile
+#21 10.45   Downloading tifffile-2023.7.10-py3-none-any.whl (220 kB)
+#21 10.47      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 220.9/220.9 kB 12.1 MB/s eta 0:00:00
+#21 10.51 Collecting tqdm
+#21 10.51   Downloading tqdm-4.67.3-py3-none-any.whl (78 kB)
+#21 10.52      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 78.4/78.4 kB 12.6 MB/s eta 0:00:00
+#21 10.62 Collecting cellprofiler
+#21 10.62   Downloading CellProfiler-4.2.8-py3-none-any.whl (21.0 MB)
+#21 12.42      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 21.0/21.0 MB 11.7 MB/s eta 0:00:00
+#21 12.58 Collecting pandas
+#21 12.59   Downloading pandas-2.0.3-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (12.4 MB)
+#21 13.65      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 12.4/12.4 MB 11.7 MB/s eta 0:00:00
+#21 13.67 Collecting pycytominer
+#21 13.68   Downloading pycytominer-1.2.0-py3-none-any.whl (86 kB)
+#21 13.69      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 86.2/86.2 kB 9.3 MB/s eta 0:00:00
+#21 13.70 Collecting umap-learn
+#21 13.70   Downloading umap_learn-0.5.8-py3-none-any.whl (89 kB)
+#21 13.71      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 89.2/89.2 kB 12.7 MB/s eta 0:00:00
+#21 13.84 Collecting scikit-learn
+#21 13.84   Downloading scikit_learn-1.3.2-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (11.1 MB)
+#21 14.79      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 11.1/11.1 MB 11.7 MB/s eta 0:00:00
+#21 14.84 Collecting cycler>=0.10
+#21 14.85   Downloading cycler-0.12.1-py3-none-any.whl (8.3 kB)
+#21 14.86 Collecting python-dateutil>=2.7
+#21 14.86   Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl (229 kB)
+#21 14.88      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 229.9/229.9 kB 12.1 MB/s eta 0:00:00
+#21 15.06 Collecting fonttools>=4.22.0
+#21 15.07   Downloading fonttools-4.57.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (4.7 MB)
+#21 15.47      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.7/4.7 MB 11.7 MB/s eta 0:00:00
+#21 15.55 Collecting contourpy>=1.0.1
+#21 15.55   Downloading contourpy-1.1.1-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (301 kB)
+#21 15.58      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 301.1/301.1 kB 11.9 MB/s eta 0:00:00
+#21 15.59 Collecting packaging>=20.0
+#21 15.60   Downloading packaging-26.0-py3-none-any.whl (74 kB)
+#21 15.60      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 74.4/74.4 kB 12.1 MB/s eta 0:00:00
+#21 15.63 Collecting importlib-resources>=3.2.0
+#21 15.63   Downloading importlib_resources-6.4.5-py3-none-any.whl (36 kB)
+#21 15.84 Collecting pillow>=6.2.0
+#21 15.85   Downloading pillow-10.4.0-cp38-cp38-manylinux_2_28_x86_64.whl (4.5 MB)
+#21 16.23      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.5/4.5 MB 11.7 MB/s eta 0:00:00
+#21 16.30 Collecting kiwisolver>=1.0.1
+#21 16.31   Downloading kiwisolver-1.4.7-cp38-cp38-manylinux_2_5_x86_64.manylinux1_x86_64.whl (1.2 MB)
+#21 16.41      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 11.8 MB/s eta 0:00:00
+#21 16.43 Collecting pyparsing>=2.3.1
+#21 16.43   Downloading pyparsing-3.1.4-py3-none-any.whl (104 kB)
+#21 16.44      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 104.1/104.1 kB 11.8 MB/s eta 0:00:00
+#21 16.51 Collecting llvmlite<0.42,>=0.41.0dev0
+#21 16.52   Downloading llvmlite-0.41.1-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (43.6 MB)
+#21 20.25      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 43.6/43.6 MB 11.7 MB/s eta 0:00:00
+#21 20.32 Collecting importlib-metadata
+#21 20.32   Downloading importlib_metadata-8.5.0-py3-none-any.whl (26 kB)
+#21 20.37 Collecting imageio>=2.5
+#21 20.37   Downloading imageio-2.35.1-py3-none-any.whl (315 kB)
+#21 20.40      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 315.4/315.4 kB 12.0 MB/s eta 0:00:00
+#21 20.43 Collecting mahotas>=1.4
+#21 20.45   Downloading mahotas-1.4.18-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (5.8 MB)
+#21 20.94      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 5.8/5.8 MB 11.7 MB/s eta 0:00:00
+#21 20.95 Collecting scikit-learn
+#21 20.95   Downloading scikit_learn-0.24.2-cp38-cp38-manylinux2010_x86_64.whl (24.9 MB)
+#21 23.08      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 24.9/24.9 MB 11.7 MB/s eta 0:00:00
+#21 23.16 Collecting sentry-sdk==0.18.0
+#21 23.16   Downloading sentry_sdk-0.18.0-py2.py3-none-any.whl (120 kB)
+#21 23.17      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 120.7/120.7 kB 12.4 MB/s eta 0:00:00
+#21 23.28 Collecting centrosome<1.3,>=1.2.3
+#21 23.28   Downloading centrosome-1.2.3-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (1.8 MB)
+#21 23.44      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.8/1.8 MB 11.7 MB/s eta 0:00:00
+#21 23.80 Collecting boto3>=1.12.28
+#21 23.81   Downloading boto3-1.37.38-py3-none-any.whl (139 kB)
+#21 23.82      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 139.9/139.9 kB 12.3 MB/s eta 0:00:00
+#21 23.85 Collecting wxPython<5,>=4.1.0
+#21 23.85   Downloading wxPython-4.2.2.tar.gz (57.4 MB)
+#21 28.76      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 57.4/57.4 MB 11.7 MB/s eta 0:00:00
+#21 30.71   Preparing metadata (setup.py): started
+#21 30.97   Preparing metadata (setup.py): finished with status 'done'
+#21 30.98 Collecting Jinja2>=2.11.2
+#21 30.98   Downloading jinja2-3.1.6-py3-none-any.whl (134 kB)
+#21 31.00      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 134.9/134.9 kB 12.3 MB/s eta 0:00:00
+#21 31.00 Collecting six
+#21 31.01   Downloading six-1.17.0-py2.py3-none-any.whl (11 kB)
+#21 31.11 Collecting python-bioformats<5,>=4.0.7
+#21 31.12   Downloading python_bioformats-4.1.0-py3-none-any.whl (42.6 MB)
+#21 34.78      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 42.6/42.6 MB 11.7 MB/s eta 0:00:00
+#21 34.83 Collecting mysqlclient==1.4.6
+#21 34.84   Downloading mysqlclient-1.4.6.tar.gz (85 kB)
+#21 34.85      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 85.5/85.5 kB 12.8 MB/s eta 0:00:00
+#21 34.85   Preparing metadata (setup.py): started
+#21 34.96   Preparing metadata (setup.py): finished with status 'done'
+#21 35.23 Collecting pyzmq~=22.3
+#21 35.24   Downloading pyzmq-22.3.0-cp38-cp38-manylinux_2_12_x86_64.manylinux2010_x86_64.whl (1.1 MB)
+#21 35.33      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.1/1.1 MB 11.8 MB/s eta 0:00:00
+#21 35.36 Collecting requests>=2.22
+#21 35.36   Downloading requests-2.32.4-py3-none-any.whl (64 kB)
+#21 35.36      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 64.8/64.8 kB 12.8 MB/s eta 0:00:00
+#21 35.46 Collecting prokaryote==2.4.4
+#21 35.46   Downloading prokaryote-2.4.4.tar.gz (84.2 MB)
+#21 42.67      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 84.2/84.2 MB 11.7 MB/s eta 0:00:00
+#21 43.20   Preparing metadata (setup.py): started
+#21 43.28   Preparing metadata (setup.py): finished with status 'done'
+#21 43.29 Collecting docutils==0.15.2
+#21 43.30   Downloading docutils-0.15.2-py3-none-any.whl (547 kB)
+#21 43.34      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 547.6/547.6 kB 11.8 MB/s eta 0:00:00
+#21 43.39 Collecting h5py<4,~=3.6.0
+#21 43.39   Downloading h5py-3.6.0-cp38-cp38-manylinux_2_12_x86_64.manylinux2010_x86_64.whl (4.5 MB)
+#21 43.77      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.5/4.5 MB 11.7 MB/s eta 0:00:00
+#21 43.79 Collecting inflect<7,>=2.1
+#21 43.79   Downloading inflect-6.2.0-py3-none-any.whl (35 kB)
+#21 43.80 Collecting tifffile
+#21 43.81   Downloading tifffile-2022.4.8-py3-none-any.whl (180 kB)
+#21 43.82      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 180.6/180.6 kB 12.2 MB/s eta 0:00:00
+#21 43.89 Collecting scikit-image==0.18.3
+#21 43.90   Downloading scikit_image-0.18.3-cp38-cp38-manylinux_2_5_x86_64.manylinux1_x86_64.whl (30.2 MB)
+#21 46.48      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 30.2/30.2 MB 11.7 MB/s eta 0:00:00
+#21 46.51 Collecting scipy
+#21 46.52   Downloading scipy-1.9.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (43.4 MB)
+#21 50.22      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 43.4/43.4 MB 11.7 MB/s eta 0:00:00
+#21 50.36 Collecting python-javabridge<5,>=4.0.3
+#21 50.36   Downloading python_javabridge-4.0.4.tar.gz (1.3 MB)
+#21 50.47      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.3/1.3 MB 11.7 MB/s eta 0:00:00
+#21 50.50   Installing build dependencies: started
+#21 54.53   Installing build dependencies: finished with status 'done'
+#21 54.54   Getting requirements to build wheel: started
+#21 54.65   Getting requirements to build wheel: finished with status 'done'
+#21 54.66   Preparing metadata (pyproject.toml): started
+#21 54.80   Preparing metadata (pyproject.toml): finished with status 'done'
+#21 54.90 Collecting cellprofiler-core==4.2.8
+#21 54.90   Downloading cellprofiler_core-4.2.8-py3-none-any.whl (392 kB)
+#21 54.94      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 392.4/392.4 kB 11.9 MB/s eta 0:00:00
+#21 55.03 Collecting psutil>=5.7.0
+#21 55.04   Downloading psutil-7.2.2-cp36-abi3-manylinux2010_x86_64.manylinux_2_12_x86_64.manylinux_2_28_x86_64.whl (155 kB)
+#21 55.05      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 155.6/155.6 kB 12.2 MB/s eta 0:00:00
+#21 55.12 Collecting PyWavelets>=1.1.1
+#21 55.12   Downloading PyWavelets-1.4.1-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (6.9 MB)
+#21 55.72      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6.9/6.9 MB 11.7 MB/s eta 0:00:00
+#21 55.75 Collecting networkx>=2.0
+#21 55.76   Downloading networkx-3.1-py3-none-any.whl (2.1 MB)
+#21 55.94      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.1/2.1 MB 11.7 MB/s eta 0:00:00
+#21 55.97 Collecting certifi
+#21 55.98   Downloading certifi-2026.1.4-py3-none-any.whl (152 kB)
+#21 55.99      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 152.9/152.9 kB 12.3 MB/s eta 0:00:00
+#21 56.02 Collecting urllib3>=1.10.0
+#21 56.02   Downloading urllib3-2.2.3-py3-none-any.whl (126 kB)
+#21 56.03      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 126.3/126.3 kB 12.4 MB/s eta 0:00:00
+#21 56.16 Collecting pytz>=2020.1
+#21 56.17   Downloading pytz-2025.2-py2.py3-none-any.whl (509 kB)
+#21 56.21      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 509.2/509.2 kB 11.8 MB/s eta 0:00:00
+#21 56.22 Collecting tzdata>=2022.1
+#21 56.23   Downloading tzdata-2025.3-py2.py3-none-any.whl (348 kB)
+#21 56.26      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 348.5/348.5 kB 11.9 MB/s eta 0:00:00
+#21 56.59 Collecting sqlalchemy<2,>=1.3.6
+#21 56.60   Downloading SQLAlchemy-1.4.54-cp38-cp38-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl (1.6 MB)
+#21 56.74      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.6/1.6 MB 11.7 MB/s eta 0:00:00
+#21 56.83 Collecting pyarrow>=8.0.0
+#21 56.84   Downloading pyarrow-17.0.0-cp38-cp38-manylinux_2_28_x86_64.whl (40.0 MB)
+#21 60.25      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 40.0/40.0 MB 11.7 MB/s eta 0:00:00
+#21 60.30 Collecting pynndescent>=0.5
+#21 60.30   Downloading pynndescent-0.6.0-py3-none-any.whl (73 kB)
+#21 60.31      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 73.5/73.5 kB 13.0 MB/s eta 0:00:00
+#21 60.32 Collecting umap-learn
+#21 60.32   Downloading umap_learn-0.5.7-py3-none-any.whl (88 kB)
+#21 60.33      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 88.8/88.8 kB 12.8 MB/s eta 0:00:00
+#21 60.39 Collecting threadpoolctl>=2.0.0
+#21 60.39   Downloading threadpoolctl-3.5.0-py3-none-any.whl (18 kB)
+#21 60.41 Collecting s3transfer<0.12.0,>=0.11.0
+#21 60.42   Downloading s3transfer-0.11.5-py3-none-any.whl (84 kB)
+#21 60.42      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 84.8/84.8 kB 12.6 MB/s eta 0:00:00
+#21 60.43 Collecting jmespath<2.0.0,>=0.7.1
+#21 60.44   Downloading jmespath-1.0.1-py3-none-any.whl (20 kB)
+#21 60.85 Collecting botocore<1.38.0,>=1.37.38
+#21 60.85   Downloading botocore-1.37.38-py3-none-any.whl (13.5 MB)
+#21 62.01      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 13.5/13.5 MB 11.7 MB/s eta 0:00:00
+#21 62.04 Collecting deprecation
+#21 62.05   Downloading deprecation-2.1.0-py2.py3-none-any.whl (11 kB)
+#21 62.17 Collecting zipp>=3.1.0
+#21 62.17   Downloading zipp-3.20.2-py3-none-any.whl (9.2 kB)
+#21 62.19 Collecting typing-extensions
+#21 62.20   Downloading typing_extensions-4.13.2-py3-none-any.whl (45 kB)
+#21 62.20      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 45.8/45.8 kB 14.2 MB/s eta 0:00:00
+#21 62.33 Collecting pydantic>=1.9.1
+#21 62.33   Downloading pydantic-2.10.6-py3-none-any.whl (431 kB)
+#21 62.37      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 431.7/431.7 kB 11.9 MB/s eta 0:00:00
+#21 62.43 Collecting MarkupSafe>=2.0
+#21 62.43   Downloading MarkupSafe-2.1.5-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (26 kB)
+#21 62.58 Collecting future>=0.18.2
+#21 62.58   Downloading future-1.0.0-py3-none-any.whl (491 kB)
+#21 62.63      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 491.3/491.3 kB 11.9 MB/s eta 0:00:00
+#21 62.66 Collecting idna<4,>=2.5
+#21 62.66   Downloading idna-3.11-py3-none-any.whl (71 kB)
+#21 62.67      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 71.0/71.0 kB 12.8 MB/s eta 0:00:00
+#21 62.76 Collecting charset_normalizer<4,>=2
+#21 62.76   Downloading charset_normalizer-3.4.4-cp38-cp38-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (147 kB)
+#21 62.77      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 147.6/147.6 kB 12.1 MB/s eta 0:00:00
+#21 62.95 Collecting greenlet!=0.4.17
+#21 62.95   Downloading greenlet-3.1.1-cp38-cp38-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (605 kB)
+#21 63.00      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 606.0/606.0 kB 11.8 MB/s eta 0:00:00
+#21 63.04 Collecting urllib3>=1.10.0
+#21 63.04   Downloading urllib3-1.26.20-py2.py3-none-any.whl (144 kB)
+#21 63.05      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 144.2/144.2 kB 12.3 MB/s eta 0:00:00
+#21 63.96 Collecting pydantic-core==2.27.2
+#21 63.97   Downloading pydantic_core-2.27.2-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.0 MB)
+#21 64.14      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.0/2.0 MB 11.7 MB/s eta 0:00:00
+#21 64.15 Collecting annotated-types>=0.6.0
+#21 64.15   Downloading annotated_types-0.7.0-py3-none-any.whl (13 kB)
+#21 64.29 Building wheels for collected packages: mysqlclient, prokaryote, python-javabridge, wxPython
+#21 64.29   Building wheel for mysqlclient (setup.py): started
+#21 64.63   Building wheel for mysqlclient (setup.py): finished with status 'done'
+#21 64.63   Created wheel for mysqlclient: filename=mysqlclient-1.4.6-cp38-cp38-linux_x86_64.whl size=111134 sha256=b63b401a4860a48c6c61f37d92ffeeeb4a7bcf370ec7abe9475485ec79c392e4
+#21 64.63   Stored in directory: /tmp/pip-ephem-wheel-cache-xweu_465/wheels/8a/3c/e6/347e293dbcd62352ee2806f68d624aae821bca7efe0070c963
+#21 64.63   Building wheel for prokaryote (setup.py): started
+#21 66.37   Building wheel for prokaryote (setup.py): finished with status 'done'
+#21 66.40   Created wheel for prokaryote: filename=prokaryote-2.4.4-py2.py3-none-any.whl size=84275285 sha256=4cfc2ef427d6d35b69a6272483af433237ad58aaccf0806b2d3d14cda8711bb5
+#21 66.40   Stored in directory: /tmp/pip-ephem-wheel-cache-xweu_465/wheels/c5/2c/93/807ad1ef93ee55147546d41b93ff71c7df7ca213e5b3a71845
+#21 66.40   Building wheel for python-javabridge (pyproject.toml): started
+#21 70.33   Building wheel for python-javabridge (pyproject.toml): finished with status 'done'
+#21 70.34   Created wheel for python-javabridge: filename=python_javabridge-4.0.4-cp38-cp38-linux_x86_64.whl size=1877708 sha256=6e0a6d0e9743ab15874e04cf31685ab840b6c15d9ea6d030f41423a0ec539bbf
+#21 70.34   Stored in directory: /tmp/pip-ephem-wheel-cache-xweu_465/wheels/04/90/aa/cf480988d7bc973f74e6cbe3b43386960809eb41e302789ab5
+#21 70.34   Building wheel for wxPython (setup.py): started
+#21 130.4   Building wheel for wxPython (setup.py): still running...
+#21 183.5   Building wheel for wxPython (setup.py): finished with status 'done'
+#21 183.6   Created wheel for wxPython: filename=wxPython-4.2.2-cp38-cp38-linux_x86_64.whl size=138492592 sha256=2cbd6daa222a295c9efe180eb95262273daee244041bdfa74695165bee0950f9
+#21 183.6   Stored in directory: /tmp/pip-ephem-wheel-cache-xweu_465/wheels/a2/a6/ee/9f7bebd9ad75336df5a5f54821ad81a711fe272aa0e537cb6c
+#21 183.6 Successfully built mysqlclient prokaryote python-javabridge wxPython
+#21 183.9 Installing collected packages: pytz, mysqlclient, zipp, urllib3, tzdata, typing-extensions, tqdm, threadpoolctl, six, pyzmq, pyparsing, psutil, prokaryote, polars, pillow, packaging, numpy, networkx, MarkupSafe, llvmlite, kiwisolver, joblib, jmespath, idna, greenlet, future, fonttools, docutils, cycler, charset_normalizer, certifi, wxPython, tifffile, sqlalchemy, sentry-sdk, scipy, requests, PyWavelets, python-javabridge, python-dateutil, pydantic-core, pyarrow, mahotas, Jinja2, importlib-resources, importlib-metadata, imageio, h5py, deprecation, contourpy, annotated-types, scikit-learn, pydantic, pandas, numba, matplotlib, botocore, scikit-image, s3transfer, pynndescent, pycytominer, inflect, umap-learn, centrosome, boto3, python-bioformats, cellprofiler-core, cellprofiler
+#21 195.8 Successfully installed Jinja2-3.1.6 MarkupSafe-2.1.5 PyWavelets-1.4.1 annotated-types-0.7.0 boto3-1.37.38 botocore-1.37.38 cellprofiler-4.2.8 cellprofiler-core-4.2.8 centrosome-1.2.3 certifi-2026.1.4 charset_normalizer-3.4.4 contourpy-1.1.1 cycler-0.12.1 deprecation-2.1.0 docutils-0.15.2 fonttools-4.57.0 future-1.0.0 greenlet-3.1.1 h5py-3.6.0 idna-3.11 imageio-2.35.1 importlib-metadata-8.5.0 importlib-resources-6.4.5 inflect-6.2.0 jmespath-1.0.1 joblib-1.4.2 kiwisolver-1.4.7 llvmlite-0.41.1 mahotas-1.4.18 matplotlib-3.7.5 mysqlclient-1.4.6 networkx-3.1 numba-0.58.1 numpy-1.24.4 packaging-26.0 pandas-2.0.3 pillow-10.4.0 polars-1.8.2 prokaryote-2.4.4 psutil-7.2.2 pyarrow-17.0.0 pycytominer-1.2.0 pydantic-2.10.6 pydantic-core-2.27.2 pynndescent-0.6.0 pyparsing-3.1.4 python-bioformats-4.1.0 python-dateutil-2.9.0.post0 python-javabridge-4.0.4 pytz-2025.2 pyzmq-22.3.0 requests-2.32.4 s3transfer-0.11.5 scikit-image-0.18.3 scikit-learn-0.24.2 scipy-1.9.0 sentry-sdk-0.18.0 six-1.17.0 sqlalchemy-1.4.54 threadpoolctl-3.5.0 tifffile-2022.4.8 tqdm-4.67.3 typing-extensions-4.13.2 tzdata-2025.3 umap-learn-0.5.7 urllib3-1.26.20 wxPython-4.2.2 zipp-3.20.2
+#21 195.8 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+#21 195.8 
+#21 195.8 [notice] A new release of pip is available: 23.0.1 -> 25.0.1
+#21 195.8 [notice] To update, run: pip install --upgrade pip
+#21 DONE 197.0s
+
+#23 [cellprofiler_illum 6/6] RUN mkdir -p /tmp/matplotlib
+#23 DONE 0.1s
+
+#24 [cellprofiler_workflow] exporting to image
+#24 exporting layers
+#24 exporting layers 1.9s done
+#24 writing image sha256:54f279cf7dddbc815f79cc057dc7afb6ca18e4f482a66550c8c6c09036d48426 done
+#24 naming to docker.io/library/maince_cellprofilerv2-cellprofiler_workflow 0.0s done
+#24 DONE 1.9s
+
+#25 [cellprofiler_illum] exporting to image
+#25 exporting layers 1.9s done
+#25 writing image sha256:cff999158f2fe3694fdc0b388c1502807efba678edd67aa6d8b26105fe28256b done
+#25 naming to docker.io/library/maince_cellprofilerv2-cellprofiler_illum done
+#25 DONE 1.9s
+
+#26 [cellprofiler_illum] resolving provenance for metadata file
+#26 DONE 0.0s
+
+#27 [cellprofiler_workflow] resolving provenance for metadata file
+#27 DONE 0.0s
+ maince_cellprofilerv2-cellprofiler_illum  Built
+ maince_cellprofilerv2-cellpose_seg  Built
+ maince_cellprofilerv2-cellprofiler_workflow  Built
+ Container maince_cellprofilerv2-cellprofiler_illum-1  Recreate
+ Container maince_cellprofilerv2-cellprofiler_illum-1  Recreated
+ Container maince_cellprofilerv2-cellprofiler_workflow-1  Recreate
+ Container maince_cellprofilerv2-cellprofiler_workflow-1  Recreated
+ Container maince_cellprofilerv2-cellprofiler_illum-1  Starting
+ Container maince_cellprofilerv2-cellprofiler_illum-1  Started
+ Container maince_cellprofilerv2-cellprofiler_illum-1  Waiting
+ Container maince_cellprofilerv2-cellprofiler_illum-1  Exited
+ Container maince_cellprofilerv2-cellpose_seg-1  Starting
+ Container maince_cellprofilerv2-cellpose_seg-1  Started
+ Container maince_cellprofilerv2-cellpose_seg-1  Waiting
+ Container maince_cellprofilerv2-cellpose_seg-1  Exited
+ Container maince_cellprofilerv2-cellprofiler_workflow-1  Starting
+ Container maince_cellprofilerv2-cellprofiler_workflow-1  Started
+#1 [internal] load local bake definitions
+#1 reading from stdin 1.97kB done
+#1 DONE 0.0s
+
+#2 [cellpose_seg internal] load build definition from Dockerfile
+#2 transferring dockerfile: 460B done
+#2 DONE 0.0s
+
+#3 [cellprofiler_illum internal] load build definition from Dockerfile
+#3 transferring dockerfile: 604B done
+#3 WARN: ConsistentInstructionCasing: Command 'env' should match the case of the command majority (uppercase) (line 21)
+#3 WARN: ConsistentInstructionCasing: Command 'env' should match the case of the command majority (uppercase) (line 22)
+#3 WARN: ConsistentInstructionCasing: Command 'env' should match the case of the command majority (uppercase) (line 21)
+#3 WARN: ConsistentInstructionCasing: Command 'env' should match the case of the command majority (uppercase) (line 22)
+#3 DONE 0.0s
+
+#4 [cellprofiler_workflow internal] load metadata for docker.io/library/python:3.8-bullseye
+#4 ...
+
+#5 [cellpose_seg internal] load metadata for docker.io/biocontainers/cellpose:4.0.7_cv1
+#5 DONE 0.7s
+
+#4 [cellprofiler_workflow internal] load metadata for docker.io/library/python:3.8-bullseye
+#4 DONE 0.7s
+
+#6 [cellpose_seg internal] load .dockerignore
+#6 transferring context: 2B done
+#6 DONE 0.0s
+
+#7 [cellpose_seg 1/6] FROM docker.io/biocontainers/cellpose:4.0.7_cv1@sha256:1ece14a8f3557558a1447ca62ef15398805936cae07160f64caa434b8288616f
+#7 DONE 0.0s
+
+#8 [cellprofiler_workflow internal] load .dockerignore
+#8 transferring context: 2B done
+#8 DONE 0.0s
+
+#9 [cellprofiler_workflow 1/6] FROM docker.io/library/python:3.8-bullseye@sha256:11da1db2f485e2560be9817f92932a29f68fefc332b0167e8c51ae308ee23337
+#9 DONE 0.0s
+
+#10 [cellpose_seg internal] load build context
+#10 transferring context: 37B done
+#10 DONE 0.0s
+
+#11 [cellprofiler_workflow internal] load build context
+#11 transferring context: 37B done
+#11 DONE 0.0s
+
+#12 [cellpose_seg 2/6] RUN apt-get update && apt-get install -y     ffmpeg     libgl1     libglib2.0-0     build-essential     && rm -rf /var/lib/apt/lists/*
+#12 CACHED
+
+#13 [cellpose_seg 4/6] COPY requirements.txt .
+#13 CACHED
+
+#14 [cellpose_seg 3/6] RUN pip install --upgrade pip setuptools wheel
+#14 CACHED
+
+#15 [cellpose_seg 5/6] RUN pip install --no-cache-dir -r requirements.txt
+#15 CACHED
+
+#16 [cellpose_seg 6/6] WORKDIR /workspace
+#16 CACHED
+
+#17 [cellprofiler_workflow 2/6] RUN apt-get update && apt-get install -y     openjdk-11-jdk-headless     build-essential     libgtk-3-dev     bc     && rm -rf /var/lib/apt/lists/*
+#17 CACHED
+
+#18 [cellprofiler_workflow 3/6] WORKDIR /workspace
+#18 CACHED
+
+#19 [cellprofiler_workflow 5/6] RUN pip install --no-cache-dir -r requirements.txt
+#19 CACHED
+
+#20 [cellprofiler_workflow 4/6] COPY requirements.txt .
+#20 CACHED
+
+#21 [cellprofiler_workflow 6/6] RUN mkdir -p /tmp/matplotlib
+#21 CACHED
+
+#22 [cellpose_seg] exporting to image
+#22 exporting layers done
+#22 writing image sha256:e314e94cc5901c45d6f891d14d8623781a15e01547c1c49f8f0e702f2bead523 done
+#22 naming to docker.io/library/maince_cellprofilerv2-cellpose_seg done
+#22 DONE 0.0s
+
+#23 [cellprofiler_workflow] exporting to image
+#23 exporting layers done
+#23 writing image sha256:3c60de891264ff0350da2e284734ee22159ca864880cdac527d4fedb933c527a done
+#23 naming to docker.io/library/maince_cellprofilerv2-cellprofiler_workflow 0.0s done
+#23 DONE 0.0s
+
+#24 [cellprofiler_illum] exporting to image
+#24 exporting layers done
+#24 writing image sha256:8c165581dec664cf84d3747d3f252533fea8cc930f27c882436ed7799fdcbee2 done
+#24 naming to docker.io/library/maince_cellprofilerv2-cellprofiler_illum 0.0s done
+#24 DONE 0.0s
+
+#25 [cellpose_seg] resolving provenance for metadata file
+#25 DONE 0.0s
+
+#26 [cellprofiler_workflow] resolving provenance for metadata file
+#26 DONE 0.0s
+
+#27 [cellprofiler_illum] resolving provenance for metadata file
+#27 DONE 0.0s
+ maince_cellprofilerv2-cellprofiler_illum  Built
+ maince_cellprofilerv2-cellpose_seg  Built
+ maince_cellprofilerv2-cellprofiler_workflow  Built
+ Container maince_cellprofilerv2-cellprofiler_illum-1  Recreate
+ Container maince_cellprofilerv2-cellprofiler_illum-1  Recreated
+ Container maince_cellprofilerv2-cellprofiler_workflow-1  Recreate
+ Container maince_cellprofilerv2-cellprofiler_workflow-1  Recreated
+ Container maince_cellprofilerv2-cellprofiler_illum-1  Starting
+ Container maince_cellprofilerv2-cellprofiler_illum-1  Started
+ Container maince_cellprofilerv2-cellprofiler_illum-1  Waiting
+ Container maince_cellprofilerv2-cellprofiler_illum-1  Exited
+ Container maince_cellprofilerv2-cellpose_seg-1  Starting
+ Container maince_cellprofilerv2-cellpose_seg-1  Started
+ Container maince_cellprofilerv2-cellpose_seg-1  Waiting
+ Container maince_cellprofilerv2-cellpose_seg-1  Exited
+ Container maince_cellprofilerv2-cellprofiler_workflow-1  Starting
+ Container maince_cellprofilerv2-cellprofiler_workflow-1  Started

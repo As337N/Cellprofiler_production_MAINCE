@@ -1,14 +1,54 @@
+x-container: &container
+  user: "${DOCKER_UID}:${DOCKER_GID}"
+  environment:
+    - USER_ID=${DOCKER_UID}
+    - GROUP_ID=${DOCKER_GID}
+  volumes:
+    - /mnt/czolab-storage-01/acruzcar/CellPainting_proyects/MAINCE_CellProfilerV2:/workspace
+    - /mnt/czolab-storage-01/acruzcar/MAINCE_Natural_products/Cohort3_test:/workspace_images
+    - /mnt/czolab-storage-01/acruzcar/MAINCE_output/Cohort3_test/V01:/output
+  working_dir: /workspace
+
+x-cellprofiler: &cellprofiler
+  <<: *container
+  build:
+    context: ./CellProfiler_pipeline
+    dockerfile: Dockerfile
+  volumes:
+    - /mnt/czolab-storage-01/acruzcar/CellPainting_proyects/MAINCE_CellProfilerV2/CellProfiler_pipeline:/workspace
+    - /mnt/czolab-storage-01/acruzcar/MAINCE_Natural_products/Cohort3_test:/workspace_images
+    - /mnt/czolab-storage-01/acruzcar/MAINCE_output/Cohort3_test/V01:/output
+  working_dir: /workspace
+
+x-cellpose: &cellpose
+  <<: *container
+  build:
+    context: ./Cellpose_seg
+    dockerfile: Dockerfile
+  gpus: all
+  shm_size: "2g"
+  ipc: host
+  volumes:
+    - /mnt/czolab-storage-01/acruzcar/CellPainting_proyects/MAINCE_CellProfilerV2/Cellpose_seg:/workspace
+    - /mnt/czolab-storage-01/acruzcar/MAINCE_Natural_products/Cohort3_test:/workspace_images
+    - /mnt/czolab-storage-01/acruzcar/MAINCE_output/Cohort3_test/V01:/output
+  working_dir: /workspace
+
 services:
-  cellprofiler_maince:
-    build:
-      context: ./CellProfiler_pipeline
-      dockerfile: Dockerfile
-    user: "${DOCKER_UID}:${DOCKER_GID}"
-    environment:
-      - USER_ID=${DOCKER_UID}
-      - GROUP_ID=${DOCKER_GID}
-    volumes:
-      - /mnt/czolab-storage-01/acruzcar/CellPainting_proyects/MAINCE_CellProfiler/CellProfiler_pipeline:/workspace
-      - /mnt/czolab-storage-01/acruzcar/MAINCE_Natural_products/Cohort3:/workspace_images 
-    working_dir: /workspace
+  cellprofiler_illum:
+    <<: *cellprofiler
+    command: sh -c "set -xe; /workspace/Code/correct_illum.sh"
+
+  cellpose_seg:
+    <<: *cellpose
+    command: sh -c "set -xe; /workspace/Code/run_cellpose.sh"
+    depends_on:
+      cellprofiler_illum:
+        condition: service_completed_successfully
+
+  cellprofiler_workflow:
+    <<: *cellprofiler
     command: sh -c "set -xe; /workspace/Code/run_workflow.sh"
+    depends_on:
+      cellpose_seg:
+        condition: service_completed_successfully

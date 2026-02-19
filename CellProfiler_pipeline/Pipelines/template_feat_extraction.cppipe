@@ -2,7 +2,7 @@ CellProfiler Pipeline: http://www.cellprofiler.org
 Version:5
 DateRevision:428
 GitHash:
-ModuleCount:15
+ModuleCount:14
 HasImagePlaneDetails:False
 
 LoadData:[module_num:1|svn_version:'Unknown'|variable_revision_number:6|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
@@ -185,27 +185,7 @@ OverlayOutlines:[module_num:12|svn_version:'Unknown'|variable_revision_number:4|
     Select outline color:Green
     Select objects to display:Nuclei
 
-SaveImages:[module_num:13|svn_version:'Unknown'|variable_revision_number:16|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:False|wants_pause:False]
-    Select the type of image to save:Image
-    Select the image to save:CellOutlines
-    Select method for constructing file names:Single name
-    Select image name for file prefix:None
-    Enter single file name:\g<Well>-s\g<Field>-cell_outlines
-    Number of digits:4
-    Append a suffix to the image file name?:No
-    Text to append to the image name:
-    Saved file format:png
-    Output file location:Default Output Folder sub-folder|MPI_output
-    Image bit depth:8-bit integer
-    Overwrite existing files without warning?:Yes
-    When to save:Every cycle
-    Record the file and path information to the saved image?:Yes
-    Create subfolders in the output folder?:No
-    Base image folder:Elsewhere...|
-    How to save the series:T (Time)
-    Save with lossless compression?:Yes
-
-ExportToSpreadsheet:[module_num:14|svn_version:'Unknown'|variable_revision_number:13|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+ExportToSpreadsheet:[module_num:13|svn_version:'Unknown'|variable_revision_number:13|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select the column delimiter:Tab
     Add image metadata columns to your object data file?:Yes
     Add image file and folder names to your object data file?:No
@@ -241,12 +221,12 @@ ExportToSpreadsheet:[module_num:14|svn_version:'Unknown'|variable_revision_numbe
     File name:DATA.csv
     Use the object name for the file name?:Yes
 
-CreateBatchFiles:[module_num:15|svn_version:'Unknown'|variable_revision_number:8|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+CreateBatchFiles:[module_num:14|svn_version:'Unknown'|variable_revision_number:8|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Store batch files in default output folder?:Yes
     Output folder path:Elsewhere...|SAVING_BATCH_PATH/
     Are the cluster computers running Windows?:No
     Hidden- in batch mode:No
     Hidden- in distributed mode:No
-    Hidden- default input folder at time of save:c:\users\acruzcar
+    Hidden- default input folder at time of save:None|
     Hidden- revision number:0
     Hidden- from old matlab:No

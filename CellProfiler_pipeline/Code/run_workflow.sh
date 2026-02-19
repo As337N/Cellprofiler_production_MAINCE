@@ -7,40 +7,54 @@ source /workspace/variables.env
 set +a
 source /workspace/Code/bash_functions.sh
 
-create_output_dirs $IMAGES_WORKSPACE
-
+create_output_dirs $OUTPUT $IMAGES_WORKSPACE
 BATCH_SIZE=5000 
 
-#echo "[DEBUG] $(ls /workspace_images)"
+#### --- 3) Obtain plate collage for quaility control --- ####
 
-#### --- 1) Creación de los CSV [Illum] --- ####
+NAME_QC="III_QC"
+python $SCRIPT_PY_CELLPROFILER $IMAGES_WORKSPACE $PATH_CSV $NAME_QC 1 1
 
-python $SCRIPT_PY $IMAGES_WORKSPACE $PATH_CSV_ILLUM 0
+CSV_COUNT=$(find "$PATH_CPPIPE" -maxdepth 1 -name "*.csv" | wc -l)
+echo "[INFO] Se van a procesar $CSV_COUNT archivos CSV en $PATH_CPPIPE"
 
-#### --- 2) Creación de los CPPIPE y ejecución de CellProfiler [Illum] --- ####
+echo "===***=== QC outlines generation ===***==="
 
-echo "===***=== Obtención de illum files ===***==="
-generar_batchfiles "$PATH_CSV_ILLUM/metadata.csv" "$TEMPLATE_CPPIPE_ILLUM" "$PATH_CPPIPE_ILLUM" "$BATCH_PIPELINES" "$PATH_ILLUM_FILES" 0
-mv $BATCH_PIPELINES/Batch_data.h5 \
-   $BATCH_PIPELINES/Batch_data_Illum.h5
-echo "Batch files generated"
-ejecutar_pipeline "$BATCH_PIPELINES/Batch_data_Illum.h5" 1
-
-#### --- 3) Creación de los CSV [Profiling] --- ####
-
-echo "===***=== Obtención de csv prof ===***==="
-python $SCRIPT_PY $IMAGES_WORKSPACE $PATH_CSV_PROF 1
-
-CSV_COUNT=$(find "$PATH_CPPIPE_PROF" -maxdepth 1 -name "*.csv" | wc -l)
-echo "[INFO] Se van a procesar $CSV_COUNT archivos CSV en $PATH_CPPIPE_PROF"
-
-#### --- 4) Creación de los CPPIPE y ejecución de CellProfiler [Profiling] --- ####
-echo "===***=== Obtención de profiles ===***==="
-generar_batchfiles "$PATH_CSV_PROF/metadata.csv" "$TEMPLATE_CPPIPE_PROFILING" "$PATH_CPPIPE_PROF" "$BATCH_PIPELINES" "$PATH_PROFILES" 1
-mv $BATCH_PIPELINES/Batch_data.h5 \
-   $BATCH_PIPELINES/Batch_data_MP.h5
+generar_batchfiles "$PATH_CSV/$NAME_QC.csv" "$TEMPLATE_CPPIPE_QC" "$PATH_CPPIPE" "$PATH_BATCH_PIPELINES" "$PATH_QC_IMAGES" 1
+mv $PATH_BATCH_PIPELINES/Batch_data.h5 \
+   $PATH_BATCH_PIPELINES/Batch_data_QC.h5
 echo "batchfiles generated"
-ejecutar_pipeline "$BATCH_PIPELINES/Batch_data_MP.h5" 0 "$PATH_PROFILES" "$PATH_CSV_PROF/metadata.csv" 5000
+ejecutar_pipeline "$PATH_BATCH_PIPELINES/Batch_data_QC.h5" 0 "$PATH_QC_IMAGES" "$PATH_CSV/$NAME_QC.csv" 5000
+python $SCRIPT_PY_COLLAGE -i $PATH_QC_IMAGES -o $PATH_QC_COLLAGES
+
+#### --- 4) Calculate CellProfiler features --- ####
+
+echo "===***=== Profiles CSV generation ===***==="
+NAME_MP="IV_MP"
+python $SCRIPT_PY_CELLPROFILER $IMAGES_WORKSPACE $PATH_CSV $NAME_MP 1 1
+
+CSV_COUNT=$(find "$PATH_CPPIPE" -maxdepth 1 -name "*.csv" | wc -l)
+echo "[INFO] Amount of CSV files to be process: $CSV_COUNT, in: $PATH_CPPIPE"
+
+echo "===***=== Profile generation ===***==="
+
+generar_batchfiles "$PATH_CSV/$NAME_MP.csv" "$TEMPLATE_CPPIPE_PROFILING" "$PATH_CPPIPE" "$PATH_BATCH_PIPELINES" "$PATH_PROFILES" 1
+mv $PATH_BATCH_PIPELINES/Batch_data.h5 \
+   $PATH_BATCH_PIPELINES/Batch_data_MP.h5
+echo "batchfiles generated"
+ejecutar_pipeline "$PATH_BATCH_PIPELINES/Batch_data_MP.h5" 0 "$PATH_PROFILES" "$PATH_CSV/$NAME_MP.csv" 5000
+
+#### --- 5) Feature postprocessing [Aggregation, Normalization and Reduction] --- ####
+
+echo "===***=== Feature processing ===***==="
+python $SCRIPT_PY_FEAT_PROCESS -i $PATH_PROFILES -o $PATH_FINAL_PROFILES -c $COHORT -m $PATH_PLATEMAP
+
+#### --- 6) Clustering --- ####
+
+echo "===***=== Clustering generation ===***==="
+python $SCRIPT_PY_CLUSTERING -i $PATH_FINAL_PROFILES -o $PATH_CLUSTERS
 
 END_TIME=$(date +%s)
-echo "[INFO] Tiempo total: $((END_TIME - START_TIME))s"
+ELAPSED=$((END_TIME - START_TIME))
+printf "[INFO] Cellpose seg complete in: %02d:%02d:%02d\n" \
+  $((ELAPSED/3600)) $(( (ELAPSED%3600)/60 )) $((ELAPSED%60))
