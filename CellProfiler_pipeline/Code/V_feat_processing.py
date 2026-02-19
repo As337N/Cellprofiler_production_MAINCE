@@ -147,10 +147,14 @@ class PyCytoPipe:
         df_corr = qc.winsorize()
 
         platemap = self._load_platemap()
+        for col in meta_cols:
+            if col in df_corr.columns and col in platemap.columns:
+                if df_corr[col].dtype != platemap[col].dtype:
+                    logger.warning(f"Tipo incompatible en '{col}': df_corr={df_corr[col].dtype}, platemap={platemap[col].dtype}. Convirtiendo a string.")
+                    df_corr[col] = df_corr[col].astype(str)
+                    platemap[col] = platemap[col].astype(str)
+
         df_corr = df_corr.merge(platemap, on=meta_cols, how="left")
-        n_unmapped = agg_df["Metadata_Perturbation"].isna().sum()
-        if n_unmapped > 0:
-            logger.warning(f"{n_unmapped} wells without match in the plate")
 
         agg_df = aggregate(
             population_df=df_corr,
@@ -159,7 +163,7 @@ class PyCytoPipe:
             operation="median",
             output_type="pandas",)
 
-        feat_agg = [c for c in agg_df.columns if c not in meta_cols]
+        feat_agg = [c for c in agg_df.columns if c not in ["Metadata_Plate", "Metadata_Perturbation"]]
 
         norm_df = normalize(
             profiles=agg_df,

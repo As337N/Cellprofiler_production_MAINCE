@@ -51,7 +51,11 @@ class Clustering:
     def _load_and_prepare(self, path_profiles: Path):
         df     = pl.read_csv(path_profiles)
         labels = df[self.label_col].to_numpy()
-        X      = df.drop(list(self.drop_cols)).to_numpy().astype(float)
+        X      = (df
+                .drop(list(self.drop_cols))
+                .select(pl.col(pl.Float64, pl.Float32, pl.Int64, pl.Int32))
+                .to_numpy()
+                .astype(float))
         return StandardScaler().fit_transform(X), labels
 
     def _encode_labels(self):
@@ -60,9 +64,16 @@ class Clustering:
         return label_codes, label_names, cmap
 
     def _run_embeddings(self):
+        MIN_SAMPLES_TSNE = 10
+        MIN_SAMPLES_UMAP = 10
+        n = self.X_scaled.shape[0]
         X_pca  = self._run_pca()
-        X_umap = self._run_umap()
-        X_tsne = self._run_tsne()
+        X_umap = self._run_umap() if n >= MIN_SAMPLES_UMAP else None
+        X_tsne = self._run_tsne() if n >= MIN_SAMPLES_TSNE else None
+
+        if X_umap is None: print(f"[WARNING] UMAP omitido: solo {n} muestras")
+        if X_tsne is None: print(f"[WARNING] t-SNE omitido: solo {n} muestras")
+
         return X_pca, X_umap, X_tsne
 
     def _run_pca(self):
@@ -86,12 +97,38 @@ class Clustering:
         ).fit_transform(self.X_scaled)
 
     def _plot_embedding(self, X: np.ndarray, title: str, filename: Path):
-        fig, ax = plt.subplots(figsize=(7, 6), dpi=300)
-        sc = ax.scatter(X[:, 0], X[:, 1], c=self.label_codes,
-                        cmap=self.cmap, s=6, alpha=0.9)
-        ax.set_title(title)
+        fig, ax = plt.subplots(figsize=(9, 7), dpi=300)
+
+        for i, label in enumerate(self.label_names):
+            mask = self.label_codes == i
+            ax.scatter(
+                X[mask, 0], X[mask, 1],
+                color=self.cmap(i),
+                s=40, alpha=0.9,
+                label=label
+            )
+            cx, cy = X[mask, 0].mean(), X[mask, 1].mean()
+            ax.annotate(
+                label, (cx, cy),
+                fontsize=7,
+                fontweight="bold",
+                ha="center", va="center",
+                bbox=dict(boxstyle="round,pad=0.2", fc="white", alpha=0.5, ec="none")
+            )
+
+        ax.legend(
+            title="Perturbation",
+            bbox_to_anchor=(1.01, 1),
+            loc="upper left",
+            fontsize=7,
+            title_fontsize=8,
+            framealpha=0.7
+        )
+        ax.set_title(title, fontsize=12)
+        ax.set_xlabel("Component 1")
+        ax.set_ylabel("Component 2")
         fig.tight_layout()
-        fig.savefig(filename, transparent=True)
+        fig.savefig(filename, transparent=True, bbox_inches="tight")
         plt.close(fig)
 
     def _save_figures(self):
@@ -100,8 +137,9 @@ class Clustering:
             "UMAP":  (self.X_umap, "umap_embedding.png"),
             "t-SNE": (self.X_tsne, "tsne_embedding.png"),
         }
-
         for title, (X, fname) in embeddings.items():
+            if X is None:
+                continue
             self._plot_embedding(X, title, self.saving_path / fname)
             score = silhouette_score(X, self.label_codes)
             print(f"Silhouette {title:<6}: {score:.3f}")
