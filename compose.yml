@@ -3,10 +3,6 @@ x-container: &container
   environment:
     - USER_ID=${DOCKER_UID}
     - GROUP_ID=${DOCKER_GID}
-  volumes:
-    - /mnt/czolab-storage-01/acruzcar/CellPainting_proyects/MAINCE_CellProfilerV2:/workspace
-    - /mnt/czolab-storage-01/acruzcar/MAINCE_Natural_products/Cohort3_test:/workspace_images
-    - /mnt/czolab-storage-01/acruzcar/MAINCE_output/Cohort3_test/V01:/output
   working_dir: /workspace
 
 x-cellprofiler: &cellprofiler
