@@ -36,20 +36,14 @@ The last pipeline of this workflow is in charge of running clustering (t-SNE, PC
 ## - Input data.
 The "/workspace_images/" should be organized as follows: 
 
-Cohort_A
-  |
-  |--Plate_Pxx_
-  |     |
-  |     |-- untreated_data -> Folders with images, they need to be named as "untreated_data"
-  |
-  |--Plate_Pyy_
-  |     |
-  |     |-- untreated_data
-  |
-  |--Plate_Pzz_
-  |     |
-  |     |-- untreated_data
-  |..
+Cohort_A/
+├── Plate_Pxx_/
+│   └── untreated_data/        # Folder with images (must be named exactly "untreated_data")
+├── Plate_Pyy_/
+│   └── untreated_data/
+├── Plate_Pzz_/
+│   └── untreated_data/
+└── ...
 
 The name of the plates should follow the format "_Pxx_" (ie. a mayus "P" followed by 2 digits "xx") in the filename so a regex can be applied to extract the XX number of the plate (eg. 01, 09, 11, etc.).
 
