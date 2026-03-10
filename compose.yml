@@ -11,9 +11,9 @@ x-cellprofiler: &cellprofiler
     context: ./CellProfiler_pipeline
     dockerfile: Dockerfile
   volumes:
-    - /mnt/czolab-storage-01/acruzcar/CellPainting_proyects/MAINCE_CellProfilerV2/CellProfiler_pipeline:/workspace
-    - /mnt/czolab-storage-01/acruzcar/MAINCE_Natural_products/Cohort3_test:/workspace_images
-    - /mnt/czolab-storage-01/acruzcar/MAINCE_output/Cohort3_test/V01:/output
+    - /mnt/czolab-storage-01/acruzcar/CellPainting_proyects/Cellprofiler_production_MAINCE/CellProfiler_pipeline:/workspace
+    - /mnt/czolab-storage-01/acruzcar/MAINCE_Natural_products/Cohort2:/workspace_images
+    - /mnt/czolab-storage-01/acruzcar/MAINCE_output/Cohort2/V01:/output
   working_dir: /workspace
 
 x-cellpose: &cellpose
@@ -25,9 +25,9 @@ x-cellpose: &cellpose
   shm_size: "2g"
   ipc: host
   volumes:
-    - /mnt/czolab-storage-01/acruzcar/CellPainting_proyects/MAINCE_CellProfilerV2/Cellpose_seg:/workspace
-    - /mnt/czolab-storage-01/acruzcar/MAINCE_Natural_products/Cohort3_test:/workspace_images
-    - /mnt/czolab-storage-01/acruzcar/MAINCE_output/Cohort3_test/V01:/output
+    - /mnt/czolab-storage-01/acruzcar/CellPainting_proyects/Cellprofiler_production_MAINCE/Cellpose_seg:/workspace
+    - /mnt/czolab-storage-01/acruzcar/MAINCE_Natural_products/Cohort2:/workspace_images
+    - /mnt/czolab-storage-01/acruzcar/MAINCE_output/Cohort2/V01:/output
   working_dir: /workspace
 
 services:
