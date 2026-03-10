@@ -3,7 +3,7 @@ set -e # El script fallara si hay un error
 START_TIME=$(date +%s)
 set -a
 source /workspace/variables.env
-SECTIONS=( )
+SECTIONS=(2) # 2
 run_section() { [[ " ${SECTIONS[*]} " == *" $1 "* ]]; }
 
 if run_section 2; then

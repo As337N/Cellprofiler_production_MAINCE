@@ -115,6 +115,7 @@ create_output_dirs() {
         do
             mkdir -p "$folder"
         done
+        export PATH_CSV 
     done
 }
 

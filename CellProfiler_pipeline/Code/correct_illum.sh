@@ -11,14 +11,21 @@ create_output_dirs $OUTPUT $IMAGES_WORKSPACE
 
 BATCH_SIZE=5000 
 
-SECTIONS=( )
+SECTIONS=(1) #1
 run_section() { [[ " ${SECTIONS[*]} " == *" $1 "* ]]; }
 
 #### --- 1) Calculate illumination correction files --- ####
 if run_section 1; then
    echo "===***=== Generating Illumination correction files ===***==="
    NAME_ILLUM="I_illum"
+
+   echo "SCRIPT_PY_CELLPROFILER=$SCRIPT_PY_CELLPROFILER"
+   echo "IMAGES_WORKSPACE=$IMAGES_WORKSPACE"
+   echo "PATH_CSV=$PATH_CSV"
+   echo "NAME_ILLUM=$NAME_ILLUM"
+
    python $SCRIPT_PY_CELLPROFILER $IMAGES_WORKSPACE $PATH_CSV $NAME_ILLUM 0 0
+
 
    generar_batchfiles "$PATH_CSV/$NAME_ILLUM.csv" "$TEMPLATE_CPPIPE_ILLUM" "$PATH_CPPIPE" "$PATH_BATCH_PIPELINES" "$PATH_ILLUM_FILES" 0
    mv $PATH_BATCH_PIPELINES/Batch_data.h5 \
