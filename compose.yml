@@ -4,16 +4,17 @@ x-container: &container
     - USER_ID=${DOCKER_UID}
     - GROUP_ID=${DOCKER_GID}
   working_dir: /workspace
-
+    
 x-cellprofiler: &cellprofiler
   <<: *container
   build:
     context: ./CellProfiler_pipeline
     dockerfile: Dockerfile
   volumes:
-    - /mnt/czolab-storage-01/acruzcar/CellPainting_proyects/Cellprofiler_production_MAINCE/CellProfiler_pipeline:/workspace
-    - /mnt/czolab-storage-01/acruzcar/MAINCE_Natural_products/Cohort2:/workspace_images
-    - /mnt/czolab-storage-01/acruzcar/MAINCE_output/Cohort2/V01:/output
+    - ${WORKSPACE_PATH}/CellProfiler_pipeline:/workspace
+    - ${IMAGES_PATH}:/workspace_images
+    - ${OUTPUT_PATH}:/output
+    - ${PWD}/variables.env:/config/variables.env:ro
   working_dir: /workspace
 
 x-cellpose: &cellpose
@@ -21,13 +22,19 @@ x-cellpose: &cellpose
   build:
     context: ./Cellpose_seg
     dockerfile: Dockerfile
-  gpus: all
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            capabilities: [gpu]
   shm_size: "2g"
   ipc: host
   volumes:
-    - /mnt/czolab-storage-01/acruzcar/CellPainting_proyects/Cellprofiler_production_MAINCE/Cellpose_seg:/workspace
-    - /mnt/czolab-storage-01/acruzcar/MAINCE_Natural_products/Cohort2:/workspace_images
-    - /mnt/czolab-storage-01/acruzcar/MAINCE_output/Cohort2/V01:/output
+    - ${WORKSPACE_PATH}/Cellpose_seg:/workspace
+    - ${IMAGES_PATH}:/workspace_images
+    - ${OUTPUT_PATH}:/output
+    - ${PWD}/variables.env:/config/variables.env:ro
   working_dir: /workspace
 
 services:

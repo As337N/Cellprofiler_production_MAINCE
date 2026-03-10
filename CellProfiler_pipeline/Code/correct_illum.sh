@@ -3,7 +3,7 @@ set -e
 
 START_TIME=$(date +%s)
 set -a
-source /workspace/variables.env
+source /config/variables.env
 set +a
 source /workspace/Code/bash_functions.sh
 
