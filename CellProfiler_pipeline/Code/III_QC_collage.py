@@ -704,9 +704,9 @@ class Collage:
             collage = np.concatenate([collage, footer], axis=0)
 
         # PNG — lossless, max compression
-        out_png = self.output_path / f"{plate_name}_QC.png"
+        """out_png = self.output_path / f"{plate_name}_QC.png"
         imageio.imwrite(str(out_png), collage, format="png", compress_level=9)
-        png_mb = out_png.stat().st_size / 1e6
+        png_mb = out_png.stat().st_size / 1e6"""
 
         # JPEG — lossy quality=95, much smaller, visually identical
         out_jpg = self.output_path / f"{plate_name}_QC.jpg"
@@ -717,8 +717,6 @@ class Collage:
         print(f"  → {out_png}  ({collage.shape[1]}×{collage.shape[0]} px)  {png_mb:.1f} MB")
         print(f"  → {out_jpg}  (JPEG q=95)  {jpg_mb:.1f} MB")
 
-
-# ── CLI ───────────────────────────────────────────────────────────────────────
 
 def parse_args():
     p = argparse.ArgumentParser(
