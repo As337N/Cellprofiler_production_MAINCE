@@ -33,6 +33,9 @@ SCRIPT_PY_CELLPOSE=/workspace/Code/II_cellpose_seg.py
 SCRIPT_PY_COLLAGE=/workspace/Code/III_QC_collage.py
 SCRIPT_PY_FEAT_PROCESS=/workspace/Code/V_feat_processing.py
 SCRIPT_PY_CLUSTERING=/workspace/Code/VI_Clustering.py
+SCRIPT_PY_REPRODUCIBILITY=/workspace/Code/VII_Reproducibility.py
+SCRIPT_PY_SUBPROFILES=/workspace/Code/VIII_Subprofiles.py
+SCRIPT_PY_MORPHOMAP=/workspace/Code/IX_Morphological_map.py
 EOF
     echo "Variables.env generated"
     chmod 755 ./variables.env

@@ -2,7 +2,7 @@ import os
 os.environ["NUMBA_CACHE_DIR"] = "/tmp/numba_cache"
 
 from pathlib import Path
-from typing import Callable
+from typing import Callable, List, Optional
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -18,7 +18,7 @@ from sklearn.metrics import silhouette_score
 import umap
 import plotly.graph_objects as go
 
-DEFAULT_LABEL_COL    = "Metadata_Compound"
+DEFAULT_LABEL_COL    = "Metadata_Perturbation"
 DEFAULT_RANDOM_STATE = 42
 
 
@@ -100,13 +100,13 @@ class Clustering:
 
     Parameters
     ----------
-    metric_fns : list of callables, optional
+    metric_fns : List of callables, optional
         Functions with signature (X_scaled, labels, label_names) -> pl.DataFrame.
         Each must return a DataFrame with a "Metadata_Compound" column.
         Defaults to [metric_cosine_similarity, metric_spearman_correlation].
     """
 
-    DEFAULT_METRICS: list[Callable] = [
+    DEFAULT_METRICS: List[Callable] = [
         metric_cosine_similarity,
         metric_spearman_correlation,
     ]
@@ -119,7 +119,7 @@ class Clustering:
         label_col: str        = DEFAULT_LABEL_COL,
         drop_cols: tuple      = (DEFAULT_LABEL_COL,),
         random_state: int     = DEFAULT_RANDOM_STATE,
-        metric_fns: list[Callable] | None = None,
+        metric_fns: Optional[Callable] = None,
     ):
         self.saving_path  = saving_path
         self.cohort = cohort

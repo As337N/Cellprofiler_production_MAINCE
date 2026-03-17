@@ -7,7 +7,7 @@ source /config/variables.env
 set +a
 source /workspace/Code/bash_functions.sh
 
-SECTIONS=(3) #3-6
+SECTIONS=(3) #3-9
 run_section() { [[ " ${SECTIONS[*]} " == *" $1 "* ]]; }
 
 # ============================================================
@@ -29,7 +29,7 @@ if run_section 3; then
   echo "[INFO] Batchfiles generated"
 
   ejecutar_pipeline "$PATH_BATCH_PIPELINES/Batch_data_QC.h5" 0 "$PATH_QC_IMAGES" "$PATH_CSV/$NAME_QC.csv" $BATCH_SIZE
-  python $SCRIPT_PY_COLLAGE -i $PATH_QC_IMAGES -o $PATH_QC_COLLAGES
+  python $SCRIPT_PY_COLLAGE -i $PATH_QC_IMAGES -o $PATH_QC_COLLAGES --platemap /workspace_images/platemap_${COHORT}.csv
 fi
 
 #### --- 4) Calculate CellProfiler features --- ####
@@ -58,7 +58,41 @@ fi
 #### --- 6) Clustering --- ####
 if run_section 6; then
   echo "===***=== [6] Clustering generation ===***==="
-  python $SCRIPT_PY_CLUSTERING -i $PATH_FINAL_PROFILES -o $PATH_CLUSTERS
+  python $SCRIPT_PY_CLUSTERING -i $PATH_FINAL_PROFILES -o $PATH_CLUSTERS -c $COHORT
+fi
+
+#### --- 7) Reproducibility --- ####
+if run_section 7; then
+  echo "===***=== [7] Reproducibility analysis ===***==="
+  python $SCRIPT_PY_REPRODUCIBILITY -i $PATH_FINAL_PROFILES -o $PATH_REPRODUCIBILITY -c $COHORT
+fi
+
+#### --- 8) Subprofile analysis --- ####
+if run_section 8; then
+  echo "===***=== [8] Subprofile clustering ===***==="
+  python $SCRIPT_PY_SUBPROFILES \
+    -i $PATH_FINAL_PROFILES \
+    -o $PATH_SUBPROFILES \
+    -c $COHORT \
+    --fraction 0.85 \
+    --magnitude 0.5 \
+    --fdr 0.05 \
+    --metric spearman \
+    --reference-col Metadata_Reference
+fi
+
+# ── Step IX: Morphological Map ───────────────────────────────────────────────
+
+if run_section 9; then
+  echo "===***=== [9] Morphological Map ===***==="
+  python $SCRIPT_PY_MORPHOMAP \
+    -i "$PATH_SUBPROFILES/subprofiles_norm" \
+    -o $PATH_MORPHOMAP \
+    -c $COHORT \
+    --prefix-filenames \
+    --metric spearman \
+    --fdr 0.05 \
+    --secondary-threshold 0.60
 fi
 
 # ============================================================

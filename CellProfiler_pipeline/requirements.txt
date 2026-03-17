@@ -11,3 +11,5 @@ pandas
 pycytominer
 umap-learn
 scikit-learn
+plotly
+copairs
