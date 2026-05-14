@@ -18,17 +18,17 @@ BATCH_SIZE=5000
 if run_section 3; then
   echo "===***=== [3] QC outlines generation ===***==="
   NAME_QC="III_QC"
-  python $SCRIPT_PY_CELLPROFILER -i $IMAGES_WORKSPACE -o $PATH_CSV --name_csv $NAME_QC --illum --masks
+  #python $SCRIPT_PY_CELLPROFILER -i $IMAGES_WORKSPACE -o $PATH_CSV --name_csv $NAME_QC --illum --masks
 
   CSV_COUNT=$(find "$PATH_CPPIPE" -maxdepth 1 -name "*.csv" | wc -l)
   echo "[INFO] Se van a procesar $CSV_COUNT archivos CSV en $PATH_CPPIPE"
 
-  generar_batchfiles "$PATH_CSV/$NAME_QC.csv" "$TEMPLATE_CPPIPE_QC" "$PATH_CPPIPE" "$PATH_BATCH_PIPELINES" "$PATH_QC_IMAGES" 1
-  mv "$PATH_BATCH_PIPELINES/Batch_data.h5" \
-     "$PATH_BATCH_PIPELINES/Batch_data_QC.h5"
+  #generar_batchfiles "$PATH_CSV/$NAME_QC.csv" "$TEMPLATE_CPPIPE_QC" "$PATH_CPPIPE" "$PATH_BATCH_PIPELINES" "$PATH_QC_IMAGES" 1
+  #mv "$PATH_BATCH_PIPELINES/Batch_data.h5" \
+  #   "$PATH_BATCH_PIPELINES/Batch_data_QC.h5"
   echo "[INFO] Batchfiles generated"
 
-  ejecutar_pipeline "$PATH_BATCH_PIPELINES/Batch_data_QC.h5" 0 "$PATH_QC_IMAGES" "$PATH_CSV/$NAME_QC.csv" $BATCH_SIZE
+  #ejecutar_pipeline "$PATH_BATCH_PIPELINES/Batch_data_QC.h5" 0 "$PATH_QC_IMAGES" "$PATH_CSV/$NAME_QC.csv" $BATCH_SIZE
   python $SCRIPT_PY_COLLAGE -i $PATH_QC_IMAGES -o $PATH_QC_COLLAGES --platemap /workspace_images/platemap_${COHORT}.csv
 fi
 
