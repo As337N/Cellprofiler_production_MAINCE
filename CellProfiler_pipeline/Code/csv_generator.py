@@ -114,6 +114,7 @@ def parse_image_dataset(
     masks: bool = False,
     output: Union[str, Path, None] = None,
     max_workers: int | None = None,
+    plates2process: list | None = None,
     chunk_size: int = 2000,) -> pl.DataFrame:
     """
         Parse a microscopy image dataset into a structured Polars DataFrame using
@@ -141,11 +142,13 @@ def parse_image_dataset(
     """
     root = Path(root)
     output = Path(output) if output is not None else None
-
+    print(f"[DEBUG 02-04-2026] plates2process: {plates2process}")
     files = [
         path
         for plate in root.iterdir()
-        if plate.is_dir() and plate.name != "Output"
+        if plate.is_dir()
+        and plate.name != "Output"
+        and (plates2process is None or any(f"_P{p}_" in plate.name for p in plates2process))
         for path in plate.rglob("*.tif*")
     ]
 
@@ -303,10 +306,11 @@ def split_and_save_by_groups(
 def prepare_CSVs(
     path: Union[str, Path],
     output: Union[str, Path],
-    name_csv: str = "metadata",
+    name_csv: str,
     illum: bool = False,
     masks: bool = False,
-    max_workers: int | None = None,) -> None:
+    max_workers: int | None = None,
+    plates2process: list | None = None) -> None:
     """
         Run the full metadata extraction pipeline and save final CSV output.
 
@@ -331,6 +335,7 @@ def prepare_CSVs(
         masks=masks,
         output=output,
         max_workers=max_workers,
+        plates2process=plates2process
     )
 
     #print("[DEBUG] columnas reales:", df.columns)
@@ -338,7 +343,7 @@ def prepare_CSVs(
     logger.info("Pivoting metadata table")
     df_wide = pivot_df(df, illum=illum, masks=masks)
 
-    filepath = output / f"{name_csv}.csv"
+    filepath = Path(output) / f"{name_csv}.csv"
     df_wide.write_csv(filepath)
     logger.info(f"Final metadata CSV written to: {filepath}")
 
@@ -347,19 +352,22 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="High-performance metadata extraction pipeline")
-    parser.add_argument("--path", required=True, help="Input dataset root")
-    parser.add_argument("--output", required=True, help="Output directory")
+    parser.add_argument("-i", "--input", required=True, help="Input dataset root")
+    parser.add_argument("-o", "--output", required=True, help="Output directory")
     parser.add_argument("--name_csv", required=True, help="Name of the CSV file to generate")
     parser.add_argument("--illum", action="store_true", help="Include illumination metadata")
     parser.add_argument("--masks", action="store_true", help="Include RNA mask metadata")
     parser.add_argument("--workers", type=int, default=None, help="Number of worker processes")
+    parser.add_argument("--plates2process", nargs='*', help="List of plates to be processed")
 
     args = parser.parse_args()
 
     prepare_CSVs(
-        path=args.path,
+        path=args.input,
         output=args.output,
+        name_csv=args.name_csv,
         illum=args.illum,
         masks=args.masks,
         max_workers=args.workers,
+        plates2process=args.plates2process
     )

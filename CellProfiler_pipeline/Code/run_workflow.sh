@@ -7,7 +7,7 @@ source /config/variables.env
 set +a
 source /workspace/Code/bash_functions.sh
 
-SECTIONS=(3) #3-9
+SECTIONS=(10) #3-9
 run_section() { [[ " ${SECTIONS[*]} " == *" $1 "* ]]; }
 
 # ============================================================
@@ -18,7 +18,7 @@ BATCH_SIZE=5000
 if run_section 3; then
   echo "===***=== [3] QC outlines generation ===***==="
   NAME_QC="III_QC"
-  python $SCRIPT_PY_CELLPROFILER $IMAGES_WORKSPACE $PATH_CSV $NAME_QC 1 1
+  python $SCRIPT_PY_CELLPROFILER -i $IMAGES_WORKSPACE -o $PATH_CSV --name_csv $NAME_QC --illum --masks
 
   CSV_COUNT=$(find "$PATH_CPPIPE" -maxdepth 1 -name "*.csv" | wc -l)
   echo "[INFO] Se van a procesar $CSV_COUNT archivos CSV en $PATH_CPPIPE"
@@ -36,7 +36,7 @@ fi
 if run_section 4; then
   echo "===***=== [4] Profile generation ===***==="
   NAME_MP="IV_MP"
-  python $SCRIPT_PY_CELLPROFILER $IMAGES_WORKSPACE $PATH_CSV $NAME_MP 1 1
+  python $SCRIPT_PY_CELLPROFILER -i $IMAGES_WORKSPACE -o $PATH_CSV --name_csv $NAME_MP --illum --masks
 
   CSV_COUNT=$(find "$PATH_CPPIPE" -maxdepth 1 -name "*.csv" | wc -l)
   echo "[INFO] Amount of CSV files to be processed: $CSV_COUNT in: $PATH_CPPIPE"
@@ -93,6 +93,17 @@ if run_section 9; then
     --metric spearman \
     --fdr 0.05 \
     --secondary-threshold 0.60
+fi
+
+
+# -- Step X: Random forest ----------------
+
+if run_section 10; then
+  echo "===***=== [10] Random Forest ===***==="
+  python $SCRYPT_PY_RANDOMFOREST \
+    -i "$PATH_FINAL_PROFILES" \
+    -o "$PATH_RANDOMFOREST" \
+    -c $COHORT
 fi
 
 # ============================================================

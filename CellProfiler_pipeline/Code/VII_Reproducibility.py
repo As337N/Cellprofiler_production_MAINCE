@@ -494,7 +494,7 @@ def main():
     args.saving_path.mkdir(parents=True, exist_ok=True)
 
     # ── Reduced profiles ─────────────────────────────────────────────────────
-    red_files = sorted(args.input_dir.glob("**/*_red*.csv"))
+    red_files = sorted(args.input_dir.glob("**/*_reduced.csv"))
     if red_files:
         print(f"\nFound {len(red_files)} reduced profile file(s).")
         import polars as pl
@@ -507,7 +507,7 @@ def main():
         print(f"[WARNING] No reduced files ('_red') found in {args.input_dir}")
 
     # ── Cohort norm profiles ──────────────────────────────────────────────────
-    norm_files = sorted(args.input_dir.glob("**/*cohort_norm*.csv"))
+    norm_files = sorted(args.input_dir.glob("**/*_normalized.csv"))
     if norm_files:
         print(f"\nFound {len(norm_files)} cohort norm file(s).")
         import polars as pl
@@ -517,7 +517,7 @@ def main():
         _process_dataset(tmp, args.saving_path / "combined_norm",
                          "combined norm profiles", args.cohort, args.n_null)
     else:
-        print(f"[WARNING] No cohort norm files ('cohort_norm') found in {args.input_dir}")
+        print(f"[WARNING] No cohort norm files ('_normalized.csv') found in {args.input_dir}")
 
 
 if __name__ == "__main__":

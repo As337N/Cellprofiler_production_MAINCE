@@ -13,3 +13,5 @@ umap-learn
 scikit-learn
 plotly
 copairs
+igraph
+leidenalg

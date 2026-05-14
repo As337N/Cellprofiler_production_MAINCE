@@ -28,7 +28,7 @@ IMAGES_WORKSPACE=/workspace_images
 OUTPUT=/output
 PATH_PLATEMAP=/workspace_images/platemap_${COHORT}.csv
 
-SCRIPT_PY_CELLPROFILER=/workspace/Code/main.py
+SCRIPT_PY_CELLPROFILER=/workspace/Code/csv_generator.py
 SCRIPT_PY_CELLPOSE=/workspace/Code/II_cellpose_seg.py
 SCRIPT_PY_COLLAGE=/workspace/Code/III_QC_collage.py
 SCRIPT_PY_FEAT_PROCESS=/workspace/Code/V_feat_processing.py
@@ -36,6 +36,7 @@ SCRIPT_PY_CLUSTERING=/workspace/Code/VI_Clustering.py
 SCRIPT_PY_REPRODUCIBILITY=/workspace/Code/VII_Reproducibility.py
 SCRIPT_PY_SUBPROFILES=/workspace/Code/VIII_Subprofiles.py
 SCRIPT_PY_MORPHOMAP=/workspace/Code/IX_Morphological_map.py
+SCRYPT_PY_RANDOMFOREST=/workspace/Code/X_Random_forest.py
 EOF
     echo "Variables.env generated"
     chmod 755 ./variables.env
@@ -50,6 +51,7 @@ create_variables
 
 LOG_FILE="./logs/${COHORT}.log"
 mkdir -p "$(dirname "$LOG_FILE")"
+mkdir -p "${OUTPUT_PATH}"
 
-nohup docker compose up > "$LOG_FILE" 2>&1 &
+docker compose down --remove-orphans && nohup docker compose up > "$LOG_FILE" 2>&1 &
 echo "Docker compose running in background. Log saved in ${LOG_FILE}"

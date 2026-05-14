@@ -758,12 +758,34 @@ class MorphologicalMap:
         self._run()
 
     def _resolve(self, subdir: str, fname: str) -> Path:
-        # Try <cohort_root>/<subdir>/<fname> first (original structure),
-        # then fall back to <cohort_root>/<fname> directly (VIII flat output).
-        subdir_path = self.cohort_root / subdir
-        if subdir_path.exists():
-            return resolve_path(subdir_path, fname, self.cohort, self.prefix_filenames)
-        return resolve_path(self.cohort_root, fname, self.cohort, self.prefix_filenames)
+        """
+        Try paths in order:
+        1. <cohort_root>/<subdir>/combined_norm/<cohort>_<fname>
+        2. <cohort_root>/<subdir>/combined_red/<cohort>_<fname>
+        3. <cohort_root>/<subdir>/<cohort>_<fname>  (original)
+        4. <cohort_root>/<cohort>_<fname>            (flat fallback)
+        """
+        subdirs_to_try = [
+            self.cohort_root / subdir / "combined_norm",
+            self.cohort_root / subdir / "combined_red",
+            self.cohort_root / subdir,
+            self.cohort_root,
+        ]
+        for d in subdirs_to_try:
+            if not d.exists():
+                continue
+            candidate = d / f"{self.cohort}_{fname}"
+            if candidate.exists():
+                return candidate
+            candidate = d / fname
+            if candidate.exists():
+                return candidate
+
+        raise FileNotFoundError(
+            f"Could not find '{fname}' (or '{self.cohort}_{fname}') "
+            f"in any of: {[str(d) for d in subdirs_to_try]}. "
+            f"Make sure VIII_Subprofiles and VII_Reproducibility have been run."
+        )
 
     def _run(self):
         prefix = self.saving_path / self.cohort
@@ -805,14 +827,24 @@ class MorphologicalMap:
         # ── 2. Load VII reproducibility ───────────────────────────────────────
         print("\n── Step 2: Loading VII reproducibility ──────────────────────")
         try:
-            df_repro = pd.read_csv(
-                self._resolve("Reproducibility", FNAME_REPRO)
-            )
-            print(f"  Reproducibility report: {len(df_repro)} compounds")
-        except FileNotFoundError:
+            # Reproducibility está al mismo nivel que Subprofiles, no dentro de cohort_root
+            repro_root = self.cohort_root.parent.parent
+            repro_candidates = [
+                repro_root / "Reproducibility" / "combined_norm" / f"{self.cohort}_reproducibility_report.csv",
+                repro_root/ "Reproducibility" / "combined_red"  / f"{self.cohort}_reproducibility_report.csv"
+            ]
+            repro_path = next((p for p in repro_candidates if p.exists()), None)
+            if repro_path is None:
+                raise FileNotFoundError(
+                    f"reproducibility_report.csv not found. Tried:\n" +
+                    "\n".join(f"  {p}" for p in repro_candidates)
+                )
+            df_repro = pd.read_csv(repro_path)
+            print(f"  Reproducibility report: {repro_path}")
+            print(f"  {len(df_repro)} compounds loaded")
+        except FileNotFoundError as e:
             df_repro = None
-            print("  [WARNING] reproducibility_report.csv not found — "
-                  "PR and mAP metrics will be unavailable")
+            print(f"  [WARNING] {e}")
 
         # ── 3. Aggregate to compound level ────────────────────────────────────
         print("\n── Step 3: Aggregating to compound level ─────────────────────")

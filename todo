@@ -1,0 +1,6 @@
+[] plates2process es problemático, esta algo hardcodeada la función y hay que checar que se llame de forma correcta 
+    cada vez que se llama la función en los scripts .sh
+    csv_generator.py->linea 151 -> (csv_generator.py->linea 151)
+
+[] El log que se genera es muy grande, quiero comprimirlo para facilitar su interpretación. Quiza tener un modo debug que 
+    permita ver más errores y el modo producción que sea minimalista puede ser una solución.
