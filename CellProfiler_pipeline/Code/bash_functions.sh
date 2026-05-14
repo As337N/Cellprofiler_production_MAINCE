@@ -107,6 +107,8 @@ create_output_dirs() {
 
         PATH_MORPHOMAP="$OUTPUT/MorphologicalMap"
 
+        PATH_RANDOMFOREST="$OUTPUT/Random_forest"
+
         for folder in \
             "$PATH_CELLPOSE_SEG" \
             "$PATH_CSV" \
@@ -121,7 +123,8 @@ create_output_dirs() {
             "$PATH_CLUSTERS" \
             "$PATH_REPRODUCIBILITY" \
             "$PATH_SUBPROFILES" \
-            "$PATH_MORPHOMAP"
+            "$PATH_MORPHOMAP" \
+            "$PATH_RANDOMFOREST"
         do
             mkdir -p "$folder"
         done

@@ -333,7 +333,7 @@ def load_platemap(platemap_path) -> dict:
     """
     Load a platemap CSV (platemap_*.csv) and return a nested dict:
       { plate: { well: compound_name } }
-    Columns expected: Metadata_Well, Metadata_Compound, Metadata_Plate (optional).
+    Columns expected: Metadata_Well, Metadata_Perturbation, Metadata_Plate (optional).
     """
     if platemap_path is None:
         return {}

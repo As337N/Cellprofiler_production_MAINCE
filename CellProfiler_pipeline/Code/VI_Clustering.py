@@ -120,6 +120,7 @@ class Clustering:
         drop_cols: tuple      = (DEFAULT_LABEL_COL,),
         random_state: int     = DEFAULT_RANDOM_STATE,
         metric_fns: Optional[Callable] = None,
+        ctrl_label: str       = "DMSO",
     ):
         self.saving_path  = saving_path
         self.cohort = cohort
@@ -127,6 +128,7 @@ class Clustering:
         self.drop_cols    = drop_cols
         self.random_state = random_state
         self.metric_fns   = metric_fns if metric_fns is not None else self.DEFAULT_METRICS
+        self.ctrl_label   = ctrl_label
 
         self.saving_path.mkdir(parents=True, exist_ok=True)
 
@@ -145,11 +147,34 @@ class Clustering:
         df     = pl.read_csv(path_profiles)
         labels = df[self.label_col].to_numpy()
         X      = (df
-                  .drop(list(self.drop_cols))
-                  .select(pl.col(pl.Float64, pl.Float32, pl.Int64, pl.Int32))
-                  .to_numpy()
-                  .astype(float))
-        return StandardScaler().fit_transform(X), labels
+                .drop(list(self.drop_cols))
+                .select(pl.col(pl.Float64, pl.Float32, pl.Int64, pl.Int32))
+                .to_numpy()
+                .astype(float))
+
+        # ── Robust z-score referenciado a DMSO (Harmony convention) ──────────
+        # Identificar filas de control (prefijo, cubre DMSO_1, DMSO_2, etc.)
+        ctrl_mask = np.array([
+            str(lbl).startswith(self.ctrl_label) for lbl in labels
+        ])
+
+        if ctrl_mask.sum() >= 2:
+            ctrl_X = X[ctrl_mask]
+            A      = ctrl_X.mean(axis=0)                        # media por feature
+            B      = np.median(np.abs(ctrl_X - A), axis=0)     # MAD por feature
+            denom  = np.where(B > 1e-8, B, np.exp(-B))         # fallback igual que Harmony
+            X_scaled = 0.6745 * (X - A) / denom
+            print(f"  [robust zscore] Control rows used: {ctrl_mask.sum()} "
+                f"(prefix='{self.ctrl_label}')")
+            print(f"  [robust zscore] Features with B≈0 (fallback): {(B <= 1e-8).sum()}")
+        else:
+            # Sin suficientes controles: caer en StandardScaler con aviso
+            print(f"  [WARNING] No DMSO rows found with prefix '{self.ctrl_label}' "
+                f"({ctrl_mask.sum()} found). Falling back to StandardScaler.")
+            from sklearn.preprocessing import StandardScaler
+            X_scaled = StandardScaler().fit_transform(X)
+
+        return X_scaled, labels
 
     def _encode_labels(self):
         label_names, label_codes = np.unique(self.labels, return_inverse=True)
@@ -181,11 +206,16 @@ class Clustering:
 
     def _run_tsne(self):
         n = self.X_scaled.shape[0]
+        pca_init = PCA(n_components=3, random_state=self.random_state).fit_transform(self.X_scaled)
+        pca_init = (pca_init / (pca_init.std(axis=0) * 10000)).astype(np.float32)
+
         return TSNE(
-            n_components=3, perplexity=min(30, n - 1),
-            learning_rate="auto", init="pca",
+            n_components=3,
+            perplexity=min(30, n - 1),
+            learning_rate=200.0,   # "auto" not supported in sklearn < 1.2 — use explicit float
+            init=pca_init,
             random_state=self.random_state,
-        ).fit_transform(self.X_scaled)
+        ).fit_transform(self.X_scaled).astype(np.float64)
 
     # ── Figures ──────────────────────────────────────────────────────────
 
@@ -318,12 +348,15 @@ def parse_args() -> argparse.Namespace:
                         dest="saving_path", help="Directory for output figures and reports.")
     parser.add_argument("-c", "--cohort", required=True, type=str,
                         help="Name of the analyzed cohort.")
+    parser.add_argument("--ctrl-label", type=str, default="DMSO",
+                    dest="ctrl_label",
+                    help="Prefix of control wells for robust z-score (default: DMSO).")
     return parser.parse_args()
 
 
-def _process_dataset(tmp_csv: Path, saving_path: Path, tag: str, cohort: str):
+def _process_dataset(tmp_csv: Path, saving_path: Path, tag: str, cohort: str, ctrl_label="DMSO"):
     print(f"\n{'─'*50}\nProcessing: {tag}\n{'─'*50}")
-    cl = Clustering(tmp_csv, saving_path, cohort)
+    cl = Clustering(tmp_csv, saving_path, cohort, ctrl_label=ctrl_label)
     out = saving_path / "similarity_report.csv"
     cl.df_report.write_csv(out)
     print(f"Report saved → {out}")
@@ -334,7 +367,7 @@ def main():
     args.saving_path.mkdir(parents=True, exist_ok=True)
 
     # ── 1. Reduced profiles (*_red*.csv) ─────────────────────────────────
-    red_files = sorted(args.input_dir.glob("**/*_red*.csv"))
+    red_files = sorted(args.input_dir.glob("**/*_reduced.csv"))
     if red_files:
         print(f"\nFound {len(red_files)} reduced profile file(s):")
         dfs = []
@@ -349,10 +382,10 @@ def main():
     else:
         print(f"[WARNING] No reduced files ('_red') found in {args.input_dir}")
 
-    # ── 2. Cohort norm profiles (*cohort_norm*.csv) ───────────────────────
-    norm_files = sorted(args.input_dir.glob("**/*cohort_norm*.csv"))
+    # ── 2. Normalized profiles (*_normalized*.csv) ───────────────────────
+    norm_files = sorted(args.input_dir.glob("**/*_normalized*.csv"))
     if norm_files:
-        print(f"\nFound {len(norm_files)} cohort norm file(s):")
+        print(f"\nFound {len(norm_files)} normalized profile file(s):")
         dfs = []
         for p in norm_files:
             print(f"  Loading: {p.name}")
@@ -361,9 +394,9 @@ def main():
         print(f"Combined norm shape: {combined.shape}")
         tmp = args.saving_path / "combined_norm.csv"
         combined.write_csv(tmp)
-        _process_dataset(tmp, args.saving_path / "combined_norm", "combined norm profiles (all wells)", args.cohort)
+        _process_dataset(tmp, args.saving_path / "combined_norm", "combined normalized profiles", args.cohort)
     else:
-        print(f"[WARNING] No cohort norm files ('cohort_norm') found in {args.input_dir}")
+        print(f"[WARNING] No normalized files ('_normalized') found in {args.input_dir}")
 
 
 if __name__ == "__main__":
