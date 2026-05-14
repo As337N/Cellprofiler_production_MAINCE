@@ -41,7 +41,7 @@ from __future__ import annotations
 import argparse
 import re
 from collections import defaultdict
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import imageio.v2 as imageio
@@ -50,6 +50,7 @@ import pandas as pd
 import tifffile as tiff
 from PIL import Image, ImageDraw, ImageFont
 from skimage.transform import resize
+import cv2
 
 # ── Fonts ─────────────────────────────────────────────────────────────────────
 
@@ -455,13 +456,15 @@ def well_label(row: int, col: int) -> str:
     return f"{chr(ord('A') + row - 1)}{col:02d}"
 
 def load_and_downscale(path: Path, scale: float = 0.5) -> np.ndarray:
-    img = tiff.imread(path)
+    with tiff.TiffFile(path) as tf:
+        img = tf.pages[0].asarray()
     if img.dtype != np.uint8:
         p_max = img.max()
         img = (img / p_max * 255).astype(np.uint8) if p_max > 0 else img.astype(np.uint8)
     if scale != 1.0:
-        img = resize(img, (int(img.shape[0] * scale), int(img.shape[1] * scale)),
-                     preserve_range=True, anti_aliasing=True).astype(np.uint8)
+        new_w = int(img.shape[1] * scale)
+        new_h = int(img.shape[0] * scale)
+        img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
     return img
 
 def parse_name(fname: str) -> tuple:
@@ -1015,14 +1018,15 @@ class Collage:
         montages = {}
         args = [((r, c), sites, self.scale, self.sites_per_well)
                 for (r, c), sites in wells.items()]
-        with ProcessPoolExecutor(max_workers=self.workers) as ex:
-            for fut in as_completed([ex.submit(build_well_montage, a) for a in args]):
+        with ThreadPoolExecutor(max_workers=self.workers) as ex:
+            futures = {ex.submit(build_well_montage, a): a[0] for a in args}
+            for fut in as_completed(futures):
                 (r, c), mont = fut.result()
                 if mont is not None:
                     montages[(r, c)] = mont
         return montages
 
-    def _render_plate(self, plate_name: str, montages: dict):
+    def _render_plate(self, plate_name: str, montages: dict, jpeg_quality: int = 80):
         if not montages:
             print(f"  No images for {plate_name}, skipping.")
             return
@@ -1091,8 +1095,10 @@ class Collage:
 
         # JPEG — lossy quality=95, much smaller, visually identical
         out_jpg = self.output_path / f"{plate_name}_QC.jpg"
-        Image.fromarray(collage).save(str(out_jpg), format="JPEG", quality=95,
-                                      optimize=True, subsampling=0)
+        Image.fromarray(collage).save(
+                        str(out_jpg), format="JPEG", 
+                        quality=jpeg_quality,
+                        optimize=True, subsampling=2)
         jpg_mb = out_jpg.stat().st_size / 1e6
 
         print(f"  → {out_jpg}  ({collage.shape[1]}×{collage.shape[0]} px, JPEG q=95)  {jpg_mb:.1f} MB")
