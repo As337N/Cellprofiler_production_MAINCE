@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<! Designed by As337N>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Platemap Designer</title>
+<style>
+:root {
+  --bg: #0f1117;
+  --surface: #161b27;
+  --surface2: #1e2535;
+  --border: #2a3147;
+  --border2: #3a4460;
+  --text: #e2e8f8;
+  --text2: #8a96b4;
+  --text3: #5a6480;
+  --neg: #00c48c;
+  --pos: #ff6b4a;
+  --empty: #232a3e;
+  --accent: #4f8ef7;
+  --accent-bg: #4f8ef718;
+  --warn-bg: #ff6b4a14;
+  --warn-border: #ff6b4a50;
+  --warn-text: #ff9a7a;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --mono: 'Courier New', monospace;
+  --sans: 'Segoe UI', system-ui, sans-serif;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; line-height: 1.5; min-height: 100vh; }
+.app { max-width: 900px; margin: 0 auto; padding: 2rem 1.5rem; display: flex; flex-direction: column; gap: 1.25rem; }
+.app-header { display: flex; align-items: baseline; gap: 1rem; padding-bottom: 1rem; border-bottom: 0.5px solid var(--border); }
+.app-header h1 { font-size: 18px; font-weight: 500; letter-spacing: -.01em; }
+.app-header span { font-size: 12px; color: var(--text3); font-family: var(--mono); }
+.card { background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 1.25rem; }
+.card-title { font-size: 11px; font-weight: 500; color: var(--text3); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 1rem; }
+.seg { display: flex; border: 0.5px solid var(--border2); border-radius: var(--radius); overflow: hidden; }
+.seg button { flex: 1; background: transparent; border: none; padding: 8px 6px; font-size: 13px; cursor: pointer; color: var(--text2); font-family: var(--mono); transition: background .12s, color .12s; }
+.seg button:not(:last-child) { border-right: 0.5px solid var(--border); }
+.seg button.active { background: var(--accent-bg); color: var(--accent); }
+.seg button:hover:not(.active) { background: var(--surface2); color: var(--text); }
+.row { display: flex; gap: 1rem; flex-wrap: wrap; }
+.field { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 180px; }
+.field label { font-size: 12px; color: var(--text2); }
+.field-hint { font-size: 11px; color: var(--text3); margin-top: 2px; }
+input[type=number], input[type=text], select, textarea { background: var(--surface2); border: 0.5px solid var(--border2); border-radius: var(--radius); color: var(--text); font-family: var(--sans); font-size: 13px; padding: 7px 10px; width: 100%; outline: none; transition: border-color .15s; }
+input[type=number]:focus, input[type=text]:focus, select:focus, textarea:focus { border-color: var(--accent); }
+select { cursor: pointer; }
+select option { background: var(--surface2); }
+textarea { resize: vertical; font-family: var(--mono); font-size: 12px; height: 90px; }
+.slider-row { display: flex; align-items: center; gap: 10px; }
+.slider-row input[type=range] { flex: 1; appearance: none; height: 4px; background: var(--border2); border-radius: 2px; cursor: pointer; }
+.slider-row input[type=range]::-webkit-slider-thumb { appearance: none; width: 16px; height: 16px; border-radius: 50%; background: var(--accent); cursor: pointer; border: 2px solid var(--bg); }
+.slider-row input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: var(--accent); cursor: pointer; border: 2px solid var(--bg); }
+.slider-val { font-size: 13px; font-family: var(--mono); color: var(--accent); min-width: 42px; text-align: right; }
+.metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 8px; }
+.metric { background: var(--surface2); border-radius: var(--radius); padding: .75rem; }
+.metric .val { font-size: 22px; font-weight: 500; font-family: var(--mono); color: var(--text); }
+.metric .lbl { font-size: 11px; color: var(--text3); margin-top: 2px; }
+.metric.warn .val { color: var(--pos); }
+.warn-box { display: none; font-size: 12px; color: var(--warn-text); background: var(--warn-bg); border: 0.5px solid var(--warn-border); border-radius: var(--radius); padding: 8px 12px; margin-top: .75rem; line-height: 1.6; }
+.warn-box.show { display: block; }
+.tab-row { display: flex; gap: 6px; margin-bottom: .75rem; }
+.tab { background: transparent; border: 0.5px solid var(--border2); border-radius: var(--radius); padding: 5px 14px; font-size: 12px; cursor: pointer; color: var(--text2); font-family: var(--sans); transition: all .12s; }
+.tab.active { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
+.tab:hover:not(.active) { background: var(--surface2); color: var(--text); }
+.file-btn { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; border: 0.5px solid var(--border2); border-radius: var(--radius); padding: 7px 14px; cursor: pointer; color: var(--text2); background: var(--surface2); transition: all .12s; }
+.file-btn:hover { background: var(--border); color: var(--text); }
+#file-in { display: none; }
+.file-preview { font-size: 11px; color: var(--text3); margin-top: 8px; font-family: var(--mono); max-height: 70px; overflow-y: auto; border: 0.5px solid var(--border); border-radius: var(--radius); padding: 6px 8px; background: var(--bg); display: none; }
+.plate-nav { display: none; align-items: center; gap: 12px; padding: .75rem 0; border-bottom: 0.5px solid var(--border); margin-bottom: .75rem; }
+.plate-nav.show { display: flex; }
+.plate-nav .pn-label { font-size: 12px; color: var(--text2); white-space: nowrap; }
+.plate-nav input[type=range] { flex: 1; appearance: none; height: 4px; background: var(--border2); border-radius: 2px; cursor: pointer; }
+.plate-nav input[type=range]::-webkit-slider-thumb { appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--text2); cursor: pointer; border: 2px solid var(--bg); }
+.plate-nav .pn-badge { font-family: var(--mono); font-size: 12px; color: var(--accent); background: var(--accent-bg); border-radius: var(--radius); padding: 3px 10px; white-space: nowrap; }
+.plate-wrap { overflow-x: auto; }
+.plate-outer { display: inline-block; }
+.plate-col-headers { display: flex; margin-bottom: 2px; }
+.col-header { font-size: 10px; color: var(--text3); font-family: var(--mono); text-align: center; flex-shrink: 0; }
+.plate-rows { display: flex; flex-direction: column; gap: 2px; }
+.plate-row { display: flex; gap: 2px; align-items: center; }
+.row-header { font-size: 10px; color: var(--text3); font-family: var(--mono); text-align: right; padding-right: 4px; flex-shrink: 0; }
+.plate-cells { display: flex; gap: 2px; }
+.pwell { border-radius: 3px; cursor: default; flex-shrink: 0; transition: transform .1s; }
+.pwell:hover { transform: scale(1.35); z-index: 10; position: relative; }
+.tooltip { position: fixed; background: var(--surface); border: 0.5px solid var(--border2); border-radius: var(--radius); padding: 7px 11px; font-size: 11px; pointer-events: none; z-index: 999; display: none; box-shadow: 0 4px 16px #00000080; max-width: 220px; font-family: var(--mono); line-height: 1.6; }
+.tt-well { color: var(--text3); font-size: 10px; }
+.tt-label { color: var(--text); font-weight: 500; word-break: break-all; }
+.tt-type { font-size: 10px; margin-top: 2px; }
+.tt-type.neg { color: var(--neg); }
+.tt-type.pos { color: var(--pos); }
+.tt-type.cmpd { color: var(--accent); }
+.legend { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: .75rem; }
+.legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text3); }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; border: 0.5px solid var(--border2); border-radius: var(--radius); padding: 8px 16px; cursor: pointer; color: var(--text2); background: transparent; font-family: var(--sans); transition: all .12s; }
+.btn:hover { background: var(--surface2); color: var(--text); }
+.btn.primary { color: var(--accent); border-color: var(--accent); }
+.btn.primary:hover { background: var(--accent-bg); }
+.fname-preview { font-family: var(--mono); font-size: 11px; color: var(--accent); background: var(--accent-bg); border-radius: var(--radius); padding: 5px 10px; margin-top: 8px; word-break: break-all; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="app-header">
+    <h1>Platemap Designer</h1>
+    <span>Cell Painting QC</span>
+  </div>
+
+  <!-- Plate size -->
+  <div class="card">
+    <p class="card-title">Plate size</p>
+    <div class="seg" id="seg-size">
+      <button class="active" data-rows="8" data-cols="12">96</button>
+      <button data-rows="16" data-cols="24">384</button>
+      <button data-rows="32" data-cols="48">1536</button>
+      <button data-rows="0" data-cols="0">Custom</button>
+    </div>
+    <div class="row" id="custom-row" style="display:none; margin-top:.75rem">
+      <div class="field" style="max-width:120px">
+        <label>Rows</label>
+        <input type="number" id="custom-rows" min="1" max="64" value="8">
+      </div>
+      <div class="field" style="max-width:120px">
+        <label>Columns</label>
+        <input type="number" id="custom-cols" min="1" max="96" value="12">
+      </div>
+    </div>
+  </div>
+
+  <!-- Compounds -->
+  <div class="card">
+    <p class="card-title">Compounds</p>
+    <div class="tab-row">
+      <button class="tab active" id="tab-paste" onclick="switchTab('paste')">Paste list</button>
+      <button class="tab" id="tab-file" onclick="switchTab('file')">Load file</button>
+      <button class="tab" id="tab-n" onclick="switchTab('n')">Count only</button>
+    </div>
+    <div id="panel-paste">
+      <textarea id="txt-compounds" placeholder="One compound per line:&#10;Compound_A&#10;Compound_B&#10;Compound_C"></textarea>
+    </div>
+    <div id="panel-file" style="display:none">
+      <label class="file-btn" for="file-in">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        Choose .txt or .csv
+      </label>
+      <input type="file" id="file-in" accept=".txt,.csv">
+      <div class="file-preview" id="file-preview"></div>
+    </div>
+    <div id="panel-n" style="display:none">
+      <div class="field" style="max-width:200px">
+        <label>Number of compounds</label>
+        <input type="number" id="n-compounds" min="1" max="9999" value="20">
+        <p class="field-hint">Auto-named as Cmpd_1, Cmpd_2…</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Controls & replicates -->
+  <div class="card">
+    <p class="card-title">Controls &amp; replicates</p>
+    <div class="row">
+      <div class="field">
+        <label>% negative controls</label>
+        <div class="slider-row">
+          <input type="range" id="neg-pct" min="4" max="50" value="8" step="1">
+          <span class="slider-val" id="neg-pct-out">8%</span>
+        </div>
+        <p class="field-hint">Min. 4% — guarantees ≥6 wells on a 96-well plate</p>
+      </div>
+      <div class="field">
+        <label>% positive controls</label>
+        <div class="slider-row">
+          <input type="range" id="pos-pct" min="2" max="30" value="4" step="1">
+          <span class="slider-val" id="pos-pct-out">4%</span>
+        </div>
+        <p class="field-hint">Min. 2% — guarantees ≥4 wells on a 96-well plate</p>
+      </div>
+      <div class="field">
+        <label>Replicates per compound</label>
+        <div class="slider-row">
+          <input type="range" id="reps" min="1" max="10" value="3" step="1">
+          <span class="slider-val" id="reps-out">3</span>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:1rem">
+      <label style="font-size:12px; color:var(--text2); display:block; margin-bottom:6px">Control placement</label>
+      <div class="seg" id="seg-dist">
+        <button class="active" data-mode="random">Random</button>
+        <button data-mode="edge">Plate edges</button>
+        <button data-mode="uniform">Uniform grid</button>
+      </div>
+      <p class="field-hint" id="dist-hint" style="margin-top:6px">Controls are placed at random positions among available wells.</p>
+    </div>
+
+    <div class="warn-box" id="warn-box"></div>
+  </div>
+
+  <!-- Summary -->
+  <div class="card">
+    <p class="card-title">Summary</p>
+    <div class="metrics" id="metrics-row"></div>
+  </div>
+
+  <!-- Plate view -->
+  <div class="card">
+    <p class="card-title">Plate view</p>
+    <div class="plate-nav" id="plate-nav">
+      <span class="pn-label">Plate</span>
+      <input type="range" id="plate-slider" min="1" max="1" value="1" step="1">
+      <span class="pn-badge" id="plate-badge">1 / 1</span>
+    </div>
+    <div class="plate-wrap">
+      <div class="plate-outer" id="plate-outer"></div>
+    </div>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:var(--neg)"></div>Negative control (NC)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#f07a38"></div>Positive control (PC, shade = compound)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#4a84f4"></div>Compound (shade = index)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--empty)"></div>Empty</div>
+    </div>
+  </div>
+
+  <!-- File naming -->
+  <div class="card">
+    <p class="card-title">Output file naming</p>
+    <div class="row">
+      <div class="field">
+        <label>Cohort name</label>
+        <input type="text" id="cohort-name" placeholder="e.g. NaturalProducts2025" value="">
+        <p class="field-hint">Leave blank to omit from filename</p>
+      </div>
+      <div class="field">
+        <label>Plate name pattern</label>
+        <div class="seg" id="seg-naming" style="margin-bottom:6px">
+          <button class="active" data-mode="number">Auto-number</button>
+          <button data-mode="prefix">Prefix + number</button>
+          <button data-mode="custom">Custom list</button>
+        </div>
+      </div>
+    </div>
+    <div id="naming-number" class="field-hint" style="margin-top:4px">Plates named: Plate01, Plate02, …</div>
+    <div id="naming-prefix" style="display:none; margin-top:6px">
+      <div class="field" style="max-width:280px">
+        <label>Plate prefix</label>
+        <input type="text" id="plate-prefix" placeholder="e.g. BR00115" value="BR00115">
+        <p class="field-hint">Result: BR00115_001, BR00115_002, …</p>
+      </div>
+    </div>
+    <div id="naming-custom" style="display:none; margin-top:6px">
+      <div class="field">
+        <label>Plate names (one per line, in order)</label>
+        <textarea id="custom-plate-names" placeholder="BR00115125&#10;BR00115126&#10;BR00115127" style="height:70px"></textarea>
+        <p class="field-hint">If fewer names than plates, remaining plates are auto-numbered.</p>
+      </div>
+    </div>
+    <div class="fname-preview" id="fname-preview"></div>
+  </div>
+
+  <div class="actions">
+    <button class="btn primary" onclick="downloadAllCSV()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      Download CSV (all plates)
+    </button>
+    <button class="btn" onclick="rebuild()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/></svg>
+      Reshuffle
+    </button>
+  </div>
+</div>
+
+<div class="tooltip" id="tooltip">
+  <div class="tt-well" id="tt-well"></div>
+  <div class="tt-label" id="tt-label"></div>
+  <div class="tt-type" id="tt-type"></div>
+</div>
+
+<script>
+const ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const BLUE_SHADES = [
+  '#0a1f52','#0d2a6e','#113490','#1a44b0','#2257cc','#326de8','#4a84f4','#6097f8',
+  '#78a8fa','#92bafc'
+];
+const ORANGE_SHADES = [
+  '#5c1f00','#7a2c00','#9e3d00','#c45200','#e06520','#f07a38','#f89258','#fbaa78',
+  '#fcc09a','#fdd4b8'
+];
+const DIST_HINTS = {
+  random: 'Controls are placed at random positions among available wells.',
+  edge:   'Controls fill the plate border first (row 1, last row, col 1, last col).',
+  uniform:'Controls are distributed on a regularly spaced grid across the plate.'
+};
+
+let state = {
+  rows:8, cols:12, negPct:8, posPct:4, reps:3,
+  compounds:[], mode:'paste', distMode:'random',
+  currentPlate:1, namingMode:'number'
+};
+let allPlatemaps = [];
+
+function wellName(r, c, rows) {
+  if (rows <= 26) return ALPHA[r] + String(c+1).padStart(2,'0');
+  return ALPHA[Math.floor(r/26)] + ALPHA[r%26] + String(c+1).padStart(2,'0');
+}
+
+function getPlateName(idx, total) {
+  const cohort = document.getElementById('cohort-name').value.trim().replace(/[^a-zA-Z0-9_\-]/g,'_');
+  const pad = String(total).length;
+  let platePart = '';
+  if (state.namingMode === 'number') {
+    platePart = 'Plate' + String(idx+1).padStart(Math.max(2,pad),'0');
+  } else if (state.namingMode === 'prefix') {
+    const pfx = document.getElementById('plate-prefix').value.trim().replace(/[^a-zA-Z0-9_\-]/g,'_') || 'Plate';
+    platePart = pfx + '_' + String(idx+1).padStart(Math.max(3,pad),'0');
+  } else {
+    const lines = document.getElementById('custom-plate-names').value.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+    if (idx < lines.length) {
+      platePart = lines[idx].replace(/[^a-zA-Z0-9_\-]/g,'_');
+    } else {
+      platePart = 'Plate' + String(idx+1).padStart(Math.max(2,pad),'0');
+    }
+  }
+  const parts = [cohort, platePart, 'platemap'].filter(Boolean);
+  return parts.join('_') + '.csv';
+}
+
+function updateFilenamePreview(numPlates) {
+  const ex = numPlates > 1
+    ? getPlateName(0, numPlates) + (numPlates > 2 ? ' … ' : ', ') + getPlateName(numPlates-1, numPlates)
+    : getPlateName(0, 1);
+  document.getElementById('fname-preview').textContent = '📄 ' + ex;
+}
+
+document.getElementById('cohort-name').addEventListener('input', () => updateFilenamePreview(allPlatemaps.length || 1));
+document.getElementById('plate-prefix').addEventListener('input', () => updateFilenamePreview(allPlatemaps.length || 1));
+document.getElementById('custom-plate-names').addEventListener('input', () => updateFilenamePreview(allPlatemaps.length || 1));
+
+document.querySelectorAll('#seg-naming button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#seg-naming button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    state.namingMode = btn.dataset.mode;
+    ['number','prefix','custom'].forEach(m => {
+      document.getElementById('naming-'+m).style.display = m === state.namingMode ? '' : 'none';
+    });
+    updateFilenamePreview(allPlatemaps.length || 1);
+  });
+});
+
+function switchTab(t) {
+  state.mode = t;
+  ['paste','file','n'].forEach(k => {
+    document.getElementById('tab-'+k).classList.toggle('active', k===t);
+    document.getElementById('panel-'+k).style.display = k===t ? '' : 'none';
+  });
+  rebuild();
+}
+
+document.querySelectorAll('#seg-size button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#seg-size button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const r = +btn.dataset.rows, c = +btn.dataset.cols;
+    const isCustom = r === 0;
+    document.getElementById('custom-row').style.display = isCustom ? 'flex' : 'none';
+    if (!isCustom) { state.rows = r; state.cols = c; }
+    updateSliderMins();
+    rebuild();
+  });
+});
+
+document.querySelectorAll('#seg-dist button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#seg-dist button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    state.distMode = btn.dataset.mode;
+    document.getElementById('dist-hint').textContent = DIST_HINTS[state.distMode];
+    rebuild();
+  });
+});
+
+['custom-rows','custom-cols'].forEach(id => {
+  document.getElementById(id).addEventListener('input', () => {
+    state.rows = +document.getElementById('custom-rows').value || 8;
+    state.cols = +document.getElementById('custom-cols').value || 12;
+    updateSliderMins();
+    rebuild();
+  });
+});
+
+function bindSlider(id, outId, key, suffix='') {
+  const el = document.getElementById(id);
+  el.addEventListener('input', () => {
+    state[key] = +el.value;
+    document.getElementById(outId).textContent = el.value + suffix;
+    rebuild();
+  });
+}
+bindSlider('neg-pct','neg-pct-out','negPct','%');
+bindSlider('pos-pct','pos-pct-out','posPct','%');
+bindSlider('reps','reps-out','reps','');
+document.getElementById('txt-compounds').addEventListener('input', rebuild);
+document.getElementById('n-compounds').addEventListener('input', rebuild);
+document.getElementById('file-in').addEventListener('change', e => {
+  const f = e.target.files[0]; if (!f) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const lines = ev.target.result.split(/\r?\n/).map(l => l.split(',')[0].trim()).filter(Boolean);
+    state.compounds = lines;
+    const prev = document.getElementById('file-preview');
+    prev.style.display = 'block';
+    prev.textContent = lines.slice(0,20).join('\n') + (lines.length > 20 ? '\n…('+lines.length+' total)':'');
+    rebuild();
+  };
+  reader.readAsText(f);
+});
+
+document.getElementById('plate-slider').addEventListener('input', e => {
+  state.currentPlate = +e.target.value;
+  document.getElementById('plate-badge').textContent = state.currentPlate + ' / ' + allPlatemaps.length;
+  renderPlate(allPlatemaps[state.currentPlate-1], state.rows, state.cols);
+});
+
+function updateSliderMins() {
+  const total = state.rows * state.cols;
+  const negSlider = document.getElementById('neg-pct');
+  const posSlider = document.getElementById('pos-pct');
+  negSlider.min = Math.max(2, Math.ceil(600 / total));
+  posSlider.min = Math.max(1, Math.ceil(400 / total));
+  if (+negSlider.value < +negSlider.min) {
+    negSlider.value = negSlider.min;
+    state.negPct = +negSlider.min;
+    document.getElementById('neg-pct-out').textContent = negSlider.min + '%';
+  }
+  if (+posSlider.value < +posSlider.min) {
+    posSlider.value = posSlider.min;
+    state.posPct = +posSlider.min;
+    document.getElementById('pos-pct-out').textContent = posSlider.min + '%';
+  }
+}
+
+function getCompounds() {
+  if (state.mode === 'paste') {
+    return document.getElementById('txt-compounds').value.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  } else if (state.mode === 'file') {
+    return state.compounds;
+  } else {
+    const n = +document.getElementById('n-compounds').value || 0;
+    return Array.from({length:n}, (_,i) => 'Cmpd_'+(i+1));
+  }
+}
+
+function getEdgeIndices(rows, cols) {
+  const idxs = new Set();
+  for (let c=0; c<cols; c++) { idxs.add(c); idxs.add((rows-1)*cols+c); }
+  for (let r=0; r<rows; r++) { idxs.add(r*cols); idxs.add(r*cols+(cols-1)); }
+  return [...idxs];
+}
+
+function getUniformIndices(rows, cols, n) {
+  const total = rows * cols;
+  if (n >= total) return Array.from({length:total},(_,i)=>i);
+  const step = total / n;
+  return Array.from({length:n}, (_,i) => Math.round(i * step));
+}
+
+function shuffle(arr) {
+  for (let i=arr.length-1; i>0; i--) {
+    const j = Math.floor(Math.random()*(i+1));
+    [arr[i],arr[j]] = [arr[j],arr[i]];
+  }
+  return arr;
+}
+
+function buildSinglePlatemap(compounds, negN, posN, rows, cols) {
+  const total = rows * cols;
+  const allIdx = Array.from({length:total},(_,i)=>i);
+  const nControls = negN + posN;
+
+  let controlIdxs;
+  if (state.distMode === 'random') {
+    controlIdxs = shuffle([...allIdx]).slice(0, nControls);
+  } else if (state.distMode === 'edge') {
+    const edge = shuffle(getEdgeIndices(rows, cols));
+    const rest = shuffle(allIdx.filter(i => !new Set(edge).has(i)));
+    controlIdxs = [...edge, ...rest].slice(0, nControls);
+  } else {
+    controlIdxs = getUniformIndices(rows, cols, nControls);
+  }
+
+  const negIdxs = controlIdxs.slice(0, negN);
+  const posIdxs = controlIdxs.slice(negN, nControls);
+  const controlSet = new Set(controlIdxs);
+  const compoundPositions = shuffle(allIdx.filter(i => !controlSet.has(i)));
+
+  const plate = Array.from({length:total}, (_,i) => {
+    const r = Math.floor(i/cols), c = i%cols;
+    return { row:r, col:c, type:'empty', label:'', compoundIdx:-1, posCompoundIdx:-1, well:wellName(r,c,rows) };
+  });
+
+  negIdxs.forEach(i => { plate[i].type='neg'; plate[i].label='NC'; });
+
+  // Distribute pos wells across named PC compounds, each getting `reps` wells
+  // n_pos_compounds = floor(posN / reps); leftover wells stay empty
+  const nPosCompounds = Math.max(1, Math.floor(posN / state.reps));
+  const posNames = Array.from({length:nPosCompounds}, (_,i) => 'PC_'+(i+1));
+  let posSlot = 0;
+  for (let pi=0; pi<nPosCompounds; pi++) {
+    for (let rep=0; rep<state.reps; rep++) {
+      if (posSlot >= posIdxs.length) break;
+      const idx = posIdxs[posSlot++];
+      plate[idx].type = 'pos';
+      plate[idx].label = posNames[pi];
+      plate[idx].posCompoundIdx = pi;
+    }
+  }
+  // remaining posIdxs (leftover from non-exact division) stay empty
+  for (let i=posSlot; i<posIdxs.length; i++) {
+    plate[posIdxs[i]].type = 'empty';
+  }
+
+  let slot = 0;
+  for (let ci=0; ci<compounds.length; ci++) {
+    for (let rep=0; rep<state.reps; rep++) {
+      if (slot >= compoundPositions.length) break;
+      const idx = compoundPositions[slot++];
+      plate[idx].type = 'cmpd';
+      plate[idx].label = compounds[ci];
+      plate[idx].compoundIdx = ci;
+    }
+  }
+  return plate;
+}
+
+function rebuild() {
+  const total = state.rows * state.cols;
+  const negN = Math.round(total * state.negPct / 100);
+  const posN = Math.round(total * state.posPct / 100);
+  const compounds = getCompounds();
+  const compoundsPerPlate = Math.max(1, Math.floor((total - negN - posN) / state.reps));
+  const numPlates = compounds.length > 0 ? Math.ceil(compounds.length / compoundsPerPlate) : 1;
+  const empty = total - negN - posN - Math.min(compounds.length, compoundsPerPlate) * state.reps;
+
+  const msgs = [];
+  if (negN < 6) msgs.push('⚠ Negative controls: '+negN+' wells (hard minimum: 6). Increase the percentage.');
+  if (posN < 4) msgs.push('⚠ Positive controls: '+posN+' wells (hard minimum: 4). Increase the percentage.');
+  const warn = document.getElementById('warn-box');
+  warn.innerHTML = msgs.join('<br>');
+  warn.classList.toggle('show', msgs.length > 0);
+
+  const nPosCompounds = Math.max(1, Math.floor(posN / state.reps));
+  const posEmpty = posN - nPosCompounds * state.reps;
+
+  document.getElementById('metrics-row').innerHTML = `
+    <div class="metric"><div class="val">${total}</div><div class="lbl">Wells/plate</div></div>
+    <div class="metric"><div class="val">${negN}</div><div class="lbl">Neg. controls</div></div>
+    <div class="metric"><div class="val">${posN}</div><div class="lbl">Pos. wells</div></div>
+    <div class="metric"><div class="val">${nPosCompounds}</div><div class="lbl">PC compounds</div></div>
+    <div class="metric"><div class="val">${compoundsPerPlate}</div><div class="lbl">Compounds/plate</div></div>
+    <div class="metric${numPlates>1?' warn':''}"><div class="val">${numPlates}</div><div class="lbl">Plate${numPlates>1?'s':''}</div></div>
+    <div class="metric"><div class="val">${Math.max(0,empty)}</div><div class="lbl">Empty/plate</div></div>
+  `;
+
+  allPlatemaps = [];
+  let remaining = [...compounds];
+  for (let p=0; p<numPlates; p++) {
+    const batch = remaining.splice(0, compoundsPerPlate);
+    allPlatemaps.push(buildSinglePlatemap(batch, negN, posN, state.rows, state.cols));
+  }
+
+  const nav = document.getElementById('plate-nav');
+  const slider = document.getElementById('plate-slider');
+  if (numPlates > 1) {
+    nav.classList.add('show');
+    slider.max = numPlates;
+    if (+slider.value > numPlates) slider.value = 1;
+    state.currentPlate = +slider.value;
+    document.getElementById('plate-badge').textContent = state.currentPlate + ' / ' + numPlates;
+  } else {
+    nav.classList.remove('show');
+    state.currentPlate = 1;
+  }
+
+  updateFilenamePreview(numPlates);
+  renderPlate(allPlatemaps[state.currentPlate-1], state.rows, state.cols);
+}
+
+function renderPlate(plate, rows, cols) {
+  const maxW = 820;
+  const rowHeaderW = rows <= 26 ? 20 : 28;
+  const sz = Math.max(5, Math.min(22, Math.floor((maxW - rowHeaderW - cols*2) / cols)));
+  const outer = document.getElementById('plate-outer');
+  outer.innerHTML = '';
+
+  const colHead = document.createElement('div');
+  colHead.className = 'plate-col-headers';
+  colHead.style.paddingLeft = rowHeaderW + 'px';
+  for (let c=0; c<cols; c++) {
+    const h = document.createElement('div');
+    h.className = 'col-header';
+    h.style.cssText = `width:${sz}px; height:16px; line-height:16px; margin-right:2px; flex-shrink:0`;
+    if (sz >= 10) h.textContent = c+1;
+    colHead.appendChild(h);
+  }
+  outer.appendChild(colHead);
+
+  const rowsWrap = document.createElement('div');
+  rowsWrap.className = 'plate-rows';
+  for (let r=0; r<rows; r++) {
+    const rowDiv = document.createElement('div');
+    rowDiv.className = 'plate-row';
+    const rh = document.createElement('div');
+    rh.className = 'row-header';
+    rh.style.cssText = `width:${rowHeaderW}px; height:${sz}px; line-height:${sz}px`;
+    if (sz >= 8) rh.textContent = rows<=26 ? ALPHA[r] : ALPHA[Math.floor(r/26)]+ALPHA[r%26];
+    rowDiv.appendChild(rh);
+    const cells = document.createElement('div');
+    cells.className = 'plate-cells';
+    for (let c=0; c<cols; c++) {
+      const w = plate[r*cols+c];
+      const el = document.createElement('div');
+      el.className = 'pwell';
+      el.style.cssText = `width:${sz}px; height:${sz}px;`;
+      if (w.type==='neg') el.style.background = 'var(--neg)';
+      else if (w.type==='pos') el.style.background = ORANGE_SHADES[w.posCompoundIdx % ORANGE_SHADES.length];
+      else if (w.type==='cmpd') el.style.background = BLUE_SHADES[w.compoundIdx % BLUE_SHADES.length];
+      else el.style.background = 'var(--empty)';
+      el.addEventListener('mouseenter', e => showTooltip(e, w));
+      el.addEventListener('mousemove', moveTooltip);
+      el.addEventListener('mouseleave', hideTooltip);
+      cells.appendChild(el);
+    }
+    rowDiv.appendChild(cells);
+    rowsWrap.appendChild(rowDiv);
+  }
+  outer.appendChild(rowsWrap);
+}
+
+const tooltip = document.getElementById('tooltip');
+function showTooltip(e, w) {
+  const TYPE_LABELS = {neg:'Negative control', pos:'Positive control', cmpd:'Compound', empty:'Empty'};
+  document.getElementById('tt-well').textContent = w.well;
+  document.getElementById('tt-label').textContent = w.label || '—';
+  const typeEl = document.getElementById('tt-type');
+  typeEl.textContent = w.type==='pos' ? 'Positive control · ' + w.label : TYPE_LABELS[w.type];
+  typeEl.className = 'tt-type ' + (w.type==='empty' ? '' : w.type);
+  tooltip.style.display = 'block';
+  moveTooltip(e);
+}
+function moveTooltip(e) {
+  let x = e.clientX+14, y = e.clientY+14;
+  if (x+220 > window.innerWidth) x = e.clientX-230;
+  if (y+80 > window.innerHeight) y = e.clientY-80;
+  tooltip.style.left = x+'px';
+  tooltip.style.top = y+'px';
+}
+function hideTooltip() { tooltip.style.display = 'none'; }
+
+function downloadAllCSV() {
+  const numPlates = allPlatemaps.length;
+  allPlatemaps.forEach((plate, pi) => {
+    const fname = getPlateName(pi, numPlates);
+    const rows = ['Well,Row,Column,Type,Label,Replicate'];
+    const repCount = {};
+    plate.forEach(w => {
+      let rep = '';
+      if (w.type==='cmpd') {
+        repCount[w.label] = (repCount[w.label]||0)+1;
+        rep = repCount[w.label];
+      }
+      rows.push([w.well, ALPHA[Math.min(w.row,25)], w.col+1, w.type, w.label, rep].join(','));
+    });
+    const blob = new Blob([rows.join('\n')], {type:'text/csv'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = fname;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+}
+
+updateSliderMins();
+rebuild();
+</script>
+</body>
+</html>
