@@ -5,9 +5,9 @@ Cell Painting plate collage builder + interactive HTML QC report.
 
 Outputs
 -------
-  <plate>_QC.jpg          High-resolution collage (scale, q=80)
-  <plate>_QC_web.jpg      Compressed thumbnail embedded in the HTML (~scale*0.4)
   <cohort>_QC_report.html Self-contained interactive report (Plotly embedded)
+                          Includes: plate overview grid, well montages for flagged
+                          wells, QC heatmaps (all channels), cell count maps.
 
 Usage
 -----
@@ -781,17 +781,93 @@ def _fetch_plotly_js() -> str:
         return f'/* CDN fallback */\ndocument.write(\'<script src="{url}"></script>\');'
 
 
-def _collage_to_b64(collage_arr: np.ndarray, web_scale: float = 0.2) -> str:
-    """Resize collage for web and return as base64 JPEG string."""
-    h, w    = collage_arr.shape[:2]
-    web_img = Image.fromarray(collage_arr).resize(
-        (max(1, int(w * web_scale)), max(1, int(h * web_scale))),
-        Image.LANCZOS
-    )
+def _collage_to_b64(collage_arr: np.ndarray, web_scale: float = 1.0,
+                    quality: int = 72) -> str:
+    """Resize array and return as base64 JPEG string."""
+    h, w = collage_arr.shape[:2]
+    if web_scale != 1.0:
+        pil = Image.fromarray(collage_arr).resize(
+            (max(1, int(w * web_scale)), max(1, int(h * web_scale))),
+            Image.LANCZOS)
+    else:
+        pil = Image.fromarray(collage_arr)
     buf = io.BytesIO()
-    web_img.save(buf, format="JPEG", quality=72,
-                 optimize=True, progressive=True, subsampling=2)
+    pil.save(buf, format="JPEG", quality=quality,
+             optimize=True, progressive=True, subsampling=2)
     return base64.b64encode(buf.getvalue()).decode()
+
+
+def _well_montage_b64(montages: dict, well_key: tuple,
+                      scale_factor: float = 0.30) -> str | None:
+    """
+    Build a web-ready b64 JPEG for a single well montage (already assembled
+    as a 3x3 site grid at self.scale). scale_factor shrinks it further.
+    Returns None if the well has no montage.
+    """
+    mont = montages.get(well_key)
+    if mont is None:
+        return None
+    h, w   = mont.shape[:2]
+    target = (max(1, int(w * scale_factor)), max(1, int(h * scale_factor)))
+    pil    = Image.fromarray(mont if mont.ndim == 3
+                             else np.stack([mont] * 3, axis=-1))
+    pil    = pil.resize(target, Image.LANCZOS)
+    buf    = io.BytesIO()
+    pil.save(buf, format="JPEG", quality=75, optimize=True, subsampling=2)
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def _make_overview_grid(montages: dict, plate_qc: dict, plate_map: dict,
+                        plate_rows: int = 8, plate_cols: int = 12,
+                        well_px: int = 90) -> tuple:
+    """
+    Build a plate overview image: real microscopy thumbnails in an 8x12 grid.
+    Each well thumbnail is well_px x well_px.
+    Returns (image_array, cell_w, cell_h) — cell dimensions needed for SVG overlay.
+    well_px=90 -> ~1080x720 px total.
+    """
+    CW = CH = well_px
+    W  = CW * plate_cols
+    H  = CH * plate_rows
+
+    canvas = Image.new("RGB", (W, H), color=(8, 10, 20))
+    fdraw  = ImageDraw.Draw(canvas)
+    flabel = _font(9, bold=True)
+    slope_cols = METRIC_COLS["PowerLogLogSlope"]
+
+    for r in range(plate_rows):
+        for c in range(plate_cols):
+            wl      = well_label(r + 1, c + 1)
+            metrics = plate_qc.get(wl, {})
+            x0, y0  = c * CW, r * CH
+
+            mont = montages.get((r + 1, c + 1))
+            if mont is not None:
+                thumb = Image.fromarray(
+                    mont if mont.ndim == 3 else np.stack([mont] * 3, axis=-1)
+                ).resize((CW, CH), Image.LANCZOS)
+                canvas.paste(thumb, (x0, y0))
+            else:
+                fdraw.rectangle([x0, y0, x0 + CW - 1, y0 + CH - 1],
+                                fill=(15, 18, 30))
+
+            # Border colour by slope pass/fail
+            results = [
+                p for col in slope_cols
+                if (v := metrics.get(col)) is not None
+                and not (isinstance(v, float) and np.isnan(v))
+                and (p := _passes_absolute(v, "PowerLogLogSlope")) is not None
+            ]
+            n_pass = sum(results) if results else -1
+            border = ((40, 45, 70)   if n_pass < 0 else
+                      (55, 200, 70)  if n_pass == len(results) else
+                      (210, 35, 35)  if n_pass == 0 else
+                      (220, 130, 0))
+            fdraw.rectangle([x0, y0, x0 + CW - 1, y0 + CH - 1],
+                            outline=border, width=2)
+            fdraw.text((x0 + 2, y0 + 1), wl, fill=(220, 230, 255), font=flabel)
+
+    return np.array(canvas), CW, CH
 
 
 def _round_floats(obj, decimals: int = 3):
@@ -914,17 +990,55 @@ def generate_html(cohort_name: str, plates_data: list[dict],
         pname = pd_["name"]
         pqc   = pd_["plate_qc"]
         pmap  = pd_["plate_map"] or {}
+        adp   = pd_.get("engine_adaptive", {})
 
-        # Generate readable QC grid for the HTML (not the microscopy collage)
+        # QC summary grid (text-based, always included)
         report_grid = _make_report_collage(pd_["collage_arr"], pqc, pmap)
 
+        # Per-well flag classification: absolute vs adaptive
+        well_flags = {}
+        for well, m in pqc.items():
+            abs_fails, adp_fails = [], []
+            for mk, cols in METRIC_COLS.items():
+                for col in cols:
+                    v  = m.get(col)
+                    ch = COL_TO_CHANNEL.get(col, "")
+                    if v is None or (isinstance(v, float) and np.isnan(v)):
+                        continue
+                    # Absolute
+                    if mk == "LocalFocusScore":
+                        lo, hi = THRESHOLDS_LOCAL_FOCUS.get(ch, (None, None))
+                    else:
+                        lo, hi = THRESHOLDS.get(mk, (None, None))
+                    abs_fail = (lo is not None and v < lo) or (hi is not None and v > hi)
+                    # Adaptive
+                    adp_col = adp.get(mk, {}).get(col)
+                    adp_fail = False
+                    if adp_col:
+                        adp_lo, adp_hi = adp_col
+                        adp_fail = (v < adp_lo and lo is not None and v < lo) or                                    (v > adp_hi and hi is not None and v > hi)
+                    ch_lbl = CHANNEL_LABELS.get(ch, ch)
+                    met_lbl = METRIC_LABELS.get(mk, mk)
+                    tag = f"{met_lbl}/{ch_lbl}"
+                    if abs_fail:
+                        abs_fails.append(tag)
+                    elif adp_fail:
+                        adp_fails.append(tag)
+            if abs_fails or adp_fails:
+                well_flags[well] = {"abs": abs_fails, "adp": adp_fails}
+
         payload[pname] = {
-            "collage_b64": _collage_to_b64(report_grid, 1.0),   # already small, no extra scale
-            "pass_rate":   round(pd_["pass_rate"], 1),
-            "n_wells":     pd_["n_wells"],
-            "n_pass":      pd_["n_pass"],
-            "n_illum":     pd_["n_illum_pass"],
-            "n_focus":     pd_["n_focus_pass"],
+            "collage_b64":  _collage_to_b64(report_grid, 1.0),
+            "overview_b64": _collage_to_b64(pd_["overview_arr"], 1.0, quality=75),
+            "overview_cw":  pd_["overview_cw"],
+            "overview_ch":  pd_["overview_ch"],
+            "flagged_b64":  pd_.get("flagged_b64", {}),
+            "well_flags":   well_flags,
+            "pass_rate":    round(pd_["pass_rate"], 1),
+            "n_wells":      pd_["n_wells"],
+            "n_pass":       pd_["n_pass"],
+            "n_illum":      pd_["n_illum_pass"],
+            "n_focus":      pd_["n_focus_pass"],
             "wells": _round_floats({
                 well: {
                     "compound": pmap.get(well, ""),
@@ -934,27 +1048,64 @@ def generate_html(cohort_name: str, plates_data: list[dict],
             }),
         }
 
-    data_json    = json.dumps(payload)
+    data_json = json.dumps(payload)
 
-    # Build per-metric tab specs — all channels for Slope and LocalFocus
+    # ── Compute cohort-wide scale for every metric column ─────────────────────
+    # Uses p2/p98 percentiles so extreme outliers don't compress the scale.
+    # Falls back to absolute threshold bounds if insufficient data.
+    def _cohort_range(col: str, fallback_lo: float, fallback_hi: float,
+                      plo: float = 2, phi: float = 98) -> tuple:
+        vals = [
+            m for pd_ in plates_data
+            for m in pd_["plate_qc"].values()
+            if (v := m.get(col)) is not None
+            and not (isinstance(v, float) and np.isnan(v))
+            for m in [v]
+        ]
+        if len(vals) < 10:
+            return fallback_lo, fallback_hi
+        lo = float(np.percentile(vals, plo))
+        hi = float(np.percentile(vals, phi))
+        # Never exceed the absolute threshold bounds (clip outward slightly)
+        lo = min(lo, fallback_lo) if fallback_lo is not None else lo
+        hi = max(hi, fallback_hi) if fallback_hi is not None else hi
+        return round(lo, 3), round(hi, 3)
+
+    # RdBu: red=bad(low) white=borderline blue=good(high) for Slope/Focus
+    # RdBu_r: red=bad(high) white=borderline blue=good(low) for MaxInt
     slope_specs = json.dumps([
-        {"col": f"ImageQuality_PowerLogLogSlope_{ch}",
+        {"col": col,
          "title": f"Slope — {CHANNEL_LABELS.get(ch, ch)}",
-         "cmin": -2.5, "cmax": -1.0, "cs": "RdYlGn"}
+         "cmin": _cohort_range(col, -2.5, -1.0)[0],
+         "cmax": _cohort_range(col, -2.5, -1.0)[1],
+         "cs": "RdBu"}
         for ch in CHANNELS
+        for col in [f"ImageQuality_PowerLogLogSlope_{ch}"]
     ])
     focus_specs = json.dumps([
-        {"col": f"ImageQuality_LocalFocusScore_{ch}_10",
+        {"col": col,
          "title": f"LocalFocus — {CHANNEL_LABELS.get(ch, ch)}",
-         "cmin": 0, "cmax": 3, "cs": "Blues"}
+         "cmin": _cohort_range(col, 0, None)[0],
+         "cmax": _cohort_range(col, 0, None)[1],
+         "cs": "RdBu"}
         for ch in CHANNELS
+        for col in [f"ImageQuality_LocalFocusScore_{ch}_10"]
     ])
     maxint_specs = json.dumps([
-        {"col": f"ImageQuality_MaxIntensity_{ch}",
+        {"col": col,
          "title": f"MaxInt — {CHANNEL_LABELS.get(ch, ch)}",
-         "cmin": 0, "cmax": 1, "cs": "RdYlGn_r"}
+         "cmin": _cohort_range(col, 0, 1)[0],
+         "cmax": _cohort_range(col, 0, 1)[1],
+         "cs": "RdBu_r"}
         for ch in CHANNELS
+        for col in [f"ImageQuality_MaxIntensity_{ch}"]
     ])
+
+    # Count columns: cohort-wide p2/p98 so all plates share the same colour scale
+    count_ranges_json = json.dumps({
+        col: list(_cohort_range(col, 0, None))
+        for col in ["Count_Cells", "Count_Nuclei", "Count_Illum_artifacts"]
+    })
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -965,36 +1116,25 @@ def generate_html(cohort_name: str, plates_data: list[dict],
 <script>{plotly_js}</script>
 <style>
   :root {{
-    --bg:     #0d0f1a;
-    --panel:  #13162a;
-    --border: #1e2540;
-    --text:   #c8d8f0;
-    --muted:  #6a7a9a;
-    --pass:   #4bd760;
-    --fail:   #ff4444;
-    --warn:   #ffbe00;
-    --accent: #3a7bd5;
+    --bg:     #0d0f1a; --panel: #13162a; --border: #1e2540;
+    --text:   #c8d8f0; --muted: #6a7a9a;
+    --pass:   #4bd760; --fail:  #ff4444; --warn: #ffbe00; --accent: #3a7bd5;
   }}
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
   body {{ background: var(--bg); color: var(--text);
-          font-family: 'Segoe UI', system-ui, sans-serif;
-          font-size: 13px; line-height: 1.5; }}
+          font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; line-height: 1.5; }}
   h1 {{ font-size: 1.5rem; color: #a8c8ff; padding: 24px 32px 4px; }}
   h2 {{ font-size: 1.05rem; color: #8ab0e0; margin-bottom: 12px; letter-spacing: 0.03em; }}
   .subtitle {{ color: var(--muted); padding: 0 32px 20px; font-size: 0.82rem; }}
-  .container {{ max-width: 1500px; margin: 0 auto; padding: 0 32px 56px; }}
+  .container {{ max-width: 1600px; margin: 0 auto; padding: 0 32px 56px; }}
   .section {{ margin-bottom: 44px; }}
 
-  /* Summary table */
+  /* Summary */
   .summary-table {{ width: 100%; border-collapse: collapse; }}
-  .summary-table th, .summary-table td {{
-    padding: 8px 14px; border: 1px solid var(--border); text-align: center;
-  }}
-  .summary-table th {{ background: #1a2040; color: #8ab0e0;
-                        font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }}
+  .summary-table th, .summary-table td {{ padding: 8px 14px; border: 1px solid var(--border); text-align: center; }}
+  .summary-table th {{ background: #1a2040; color: #8ab0e0; font-size: 0.75rem; text-transform: uppercase; }}
   .summary-table tr:hover {{ background: #161c35; }}
-  .badge {{ display: inline-block; padding: 2px 8px; border-radius: 10px;
-            font-size: 0.75rem; font-weight: bold; }}
+  .badge {{ display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.75rem; font-weight: bold; }}
   .badge-pass {{ background: #1a4020; color: var(--pass); }}
   .badge-warn {{ background: #3a2e00; color: var(--warn); }}
   .badge-fail {{ background: #3a0f0f; color: var(--fail); }}
@@ -1007,15 +1147,44 @@ def generate_html(cohort_name: str, plates_data: list[dict],
   #plate-slider {{ flex: 1; min-width: 120px; accent-color: var(--accent); cursor: pointer; }}
   #plate-select {{ background: #1a2040; color: var(--text); border: 1px solid var(--border);
                    border-radius: 4px; padding: 5px 10px; font-size: 0.88rem; cursor: pointer; }}
-  .plate-name-display {{ font-size: 1rem; color: #a8c8ff; font-weight: bold;
-                          min-width: 110px; text-align: center; }}
-  .collage-wrap {{ background: #080a14; border: 1px solid var(--border);
-                   border-radius: 8px; padding: 6px; overflow: auto; }}
-  .collage-wrap img {{ display: block; border-radius: 4px; max-width: 100%; height: auto; }}
+  .plate-name-display {{ font-size: 1rem; color: #a8c8ff; font-weight: bold; min-width: 110px; text-align: center; }}
+
+  /* Well detail panel */
+  .browser-body {{ display: grid; grid-template-columns: 260px 1fr; gap: 14px; margin-bottom: 14px; }}
+  .well-info-panel {{ background: var(--panel); border: 1px solid var(--border);
+                      border-radius: 8px; padding: 14px; overflow-y: auto; max-height: 480px; }}
+  .well-info-panel h3 {{ font-size: 0.95rem; color: #a8c8ff; margin-bottom: 8px; }}
+  .well-compound {{ font-size: 0.82rem; color: #90c870; margin-bottom: 10px; }}
+  .metric-row {{ display: flex; justify-content: space-between; align-items: center;
+                 padding: 3px 0; border-bottom: 1px solid #1a1f35; font-size: 0.78rem; }}
+  .metric-label {{ color: var(--muted); }}
+  .metric-val {{ font-weight: bold; font-family: monospace; }}
+  .metric-val.fail-abs  {{ color: var(--fail); }}
+  .metric-val.fail-adp  {{ color: var(--warn); }}
+  .metric-val.pass      {{ color: var(--pass); }}
+  .fail-tag {{ font-size: 0.68rem; padding: 1px 5px; border-radius: 8px; margin-left: 4px; }}
+  .fail-tag.abs {{ background: #3a0f0f; color: var(--fail); }}
+  .fail-tag.adp {{ background: #3a2e00; color: var(--warn); }}
+  .no-well {{ color: var(--muted); font-size: 0.82rem; font-style: italic; padding: 8px 0; }}
+  .well-montage {{ background: var(--panel); border: 1px solid var(--border);
+                   border-radius: 8px; padding: 8px; display: flex;
+                   align-items: center; justify-content: center; min-height: 200px; }}
+  .well-montage img {{ max-width: 100%; max-height: 440px; border-radius: 4px; }}
+  .well-montage .no-img {{ color: var(--muted); font-size: 0.82rem; text-align: center; }}
+  .section-label {{ font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.07em;
+                    color: var(--muted); margin: 10px 0 4px; }}
+
+  /* Overview */
+  .overview-wrap {{ position: relative; background: #080a14; border: 1px solid var(--border);
+                    border-radius: 8px; overflow: hidden; cursor: crosshair; }}
+  .overview-wrap img {{ display: block; width: 100%; height: auto; }}
+  .overview-wrap svg {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; }}
+  .well-cell {{ fill: transparent; }}
+  .well-cell:hover {{ fill: rgba(255,255,255,0.12); }}
+  .well-cell.selected {{ fill: rgba(58,123,213,0.35); stroke: #3a7bd5; stroke-width: 2; }}
 
   /* Tabs */
-  .tabs {{ display: flex; gap: 2px; flex-wrap: wrap;
-            margin-bottom: 0; border-bottom: 2px solid var(--border); }}
+  .tabs {{ display: flex; gap: 2px; flex-wrap: wrap; margin-bottom: 0; border-bottom: 2px solid var(--border); }}
   .tab {{ padding: 7px 16px; cursor: pointer; color: var(--muted); font-size: 0.8rem;
            border-radius: 4px 4px 0 0; transition: background 0.12s; white-space: nowrap; }}
   .tab:hover {{ background: #181d35; color: var(--text); }}
@@ -1024,28 +1193,20 @@ def generate_html(cohort_name: str, plates_data: list[dict],
   .tab-content {{ display: none; }}
   .tab-content.active {{ display: block; }}
   .tab-group-label {{ padding: 7px 12px 7px 6px; color: var(--muted);
-                       font-size: 0.72rem; text-transform: uppercase;
-                       letter-spacing: 0.08em; align-self: center; white-space: nowrap; }}
-
-  /* Metric channel grid */
-  .channel-grid {{ display: grid;
-                   grid-template-columns: repeat(3, 1fr);
-                   gap: 12px; padding: 12px;
-                   background: var(--panel); border: 1px solid var(--border);
-                   border-radius: 0 0 8px 8px; }}
+                       font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em;
+                       align-self: center; white-space: nowrap; }}
+  .channel-grid {{ display: grid; grid-template-columns: repeat(3, 1fr);
+                   gap: 10px; padding: 10px; background: var(--panel);
+                   border: 1px solid var(--border); border-radius: 0 0 8px 8px; }}
   .channel-card {{ background: #0d1020; border: 1px solid var(--border);
                    border-radius: 6px; padding: 4px; }}
 
   /* Cell counts */
-  .counts-grid {{ display: grid;
-                  grid-template-columns: repeat(3, 1fr);
-                  gap: 16px; }}
-  .count-card {{ background: var(--panel); border: 1px solid var(--border);
-                 border-radius: 8px; padding: 8px; }}
+  .counts-grid {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }}
+  .count-card {{ background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px; }}
 
   /* Compound filter */
-  .compound-toolbar {{ display: flex; align-items: center; gap: 10px;
-                        flex-wrap: wrap; margin-bottom: 12px; }}
+  .compound-toolbar {{ display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }}
   .compound-toolbar label {{ color: var(--muted); font-size: 0.8rem; white-space: nowrap; }}
   .cmpd-btn {{ padding: 4px 10px; border-radius: 14px; border: 1px solid var(--border);
                background: #1a2040; color: var(--text); font-size: 0.78rem;
@@ -1061,11 +1222,8 @@ def generate_html(cohort_name: str, plates_data: list[dict],
                   border-radius: 4px; padding: 6px 10px; width: 320px; font-size: 0.85rem; }}
   #flag-filter::placeholder {{ color: var(--muted); }}
   .flag-table {{ width: 100%; border-collapse: collapse; }}
-  .flag-table th, .flag-table td {{
-    padding: 7px 10px; border: 1px solid var(--border); text-align: left; font-size: 0.8rem;
-  }}
-  .flag-table th {{ background: #1a2040; color: #8ab0e0;
-                    text-transform: uppercase; font-size: 0.72rem; }}
+  .flag-table th, .flag-table td {{ padding: 7px 10px; border: 1px solid var(--border); text-align: left; font-size: 0.8rem; }}
+  .flag-table th {{ background: #1a2040; color: #8ab0e0; text-transform: uppercase; font-size: 0.72rem; }}
   .flag-table tr.hidden {{ display: none; }}
   .flag-table tr:hover {{ background: #161c35; }}
 </style>
@@ -1076,7 +1234,6 @@ def generate_html(cohort_name: str, plates_data: list[dict],
   &nbsp;·&nbsp; {len(plates_data)} plate(s)
   &nbsp;·&nbsp; Thresholds: absolute + adaptive MAD (3&sigma;)
 </p>
-
 <div class="container">
 
 <!-- 1. COHORT SUMMARY -->
@@ -1100,14 +1257,32 @@ def generate_html(cohort_name: str, plates_data: list[dict],
     <span class="plate-name-display" id="plate-name-display"></span>
     <select id="plate-select"></select>
   </div>
-  <div class="collage-wrap">
-    <img id="collage-img" src="" alt="Plate QC grid">
+
+  <!-- Well detail row: info panel (left) + montage (right) -->
+  <div class="browser-body">
+    <div class="well-info-panel" id="well-info">
+      <p class="no-well">Click a well in the overview below to inspect it.</p>
+    </div>
+    <div class="well-montage" id="well-montage">
+      <span class="no-img">Select a well to see its site montage.</span>
+    </div>
+  </div>
+
+  <!-- Overview: microscopy thumbnails, clickable via SVG overlay -->
+  <div class="overview-wrap" id="overview-wrap">
+    <img id="overview-img" src="" alt="Plate overview">
+    <svg id="overview-svg" viewBox="0 0 1 1" preserveAspectRatio="none"></svg>
   </div>
 </div>
 
 <!-- 3. QC METRICS -->
 <div class="section">
   <h2>QC Metrics</h2>
+  <div class="compound-toolbar" id="compound-toolbar" style="margin-bottom:10px;">
+    <label>Filter by compound:</label>
+    <button class="cmpd-btn ctrl" id="btn-show-all">All</button>
+    <button class="cmpd-btn ctrl" id="btn-hide-all">None</button>
+  </div>
   <div class="tabs" id="metrics-tabs"></div>
   <div id="metrics-contents"></div>
 </div>
@@ -1124,53 +1299,47 @@ def generate_html(cohort_name: str, plates_data: list[dict],
   <div class="flag-controls">
     <input id="flag-filter" type="text" placeholder="Filter by plate, well, compound, or metric…">
   </div>
-
-  <!-- Compound filter buttons -->
-  <div class="compound-toolbar" id="compound-toolbar">
-    <label>Compounds:</label>
-    <button class="cmpd-btn ctrl" id="btn-hide-all">Hide all</button>
-    <button class="cmpd-btn ctrl" id="btn-show-all">Show all</button>
-  </div>
-
   <table class="flag-table">
     <thead>
-      <tr><th>Plate</th><th>Well</th><th>Compound</th><th>Failing metrics</th></tr>
+      <tr><th>Plate</th><th>Well</th><th>Compound</th><th>Absolute fails</th><th>Adaptive outliers</th></tr>
     </thead>
     <tbody id="flag-tbody"></tbody>
   </table>
 </div>
 
 </div><!-- /container -->
-
 <script>
 const DATA   = {data_json};
+const COUNT_RANGES = {count_ranges_json};  // cohort-wide p2/p98 per count column
 const PLATES = Object.keys(DATA);
 
-// All metric tab specs, grouped — fixed scales per metric across all channels
 const SLOPE_SPECS  = {slope_specs};
 const FOCUS_SPECS  = {focus_specs};
 const MAXINT_SPECS = {maxint_specs};
-
 const METRIC_GROUPS = [
-  {{ label: 'Slope', specs: SLOPE_SPECS }},
-  {{ label: 'LocalFocus', specs: FOCUS_SPECS }},
+  {{ label: 'Slope',        specs: SLOPE_SPECS  }},
+  {{ label: 'LocalFocus',   specs: FOCUS_SPECS  }},
   {{ label: 'MaxIntensity', specs: MAXINT_SPECS }},
 ];
+
+const ROWS = ['H','G','F','E','D','C','B','A'];  // reversed: A at top in Plotly
+const COLS = Array.from({{length:12}}, (_,i) => String(i+1).padStart(2,'0'));
+const PLATE_ROWS = 8, PLATE_COLS = 12;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function badge(pct) {{
   const cls = pct >= 80 ? 'pass' : pct >= 50 ? 'warn' : 'fail';
   return `<span class="badge badge-${{cls}}">${{pct}}%</span>`;
 }}
+function fmt3(v) {{ return v != null ? v.toFixed(3) : '—'; }}
 
-// ── 1. Summary table ──────────────────────────────────────────────────────────
+// ── 1. Summary ────────────────────────────────────────────────────────────────
 (function() {{
   const tbody = document.getElementById('summary-tbody');
   PLATES.forEach(p => {{
     const d = DATA[p];
     tbody.insertAdjacentHTML('beforeend', `<tr>
-      <td><strong>${{p}}</strong></td>
-      <td>${{d.n_wells}}</td>
+      <td><strong>${{p}}</strong></td><td>${{d.n_wells}}</td>
       <td>${{badge(d.pass_rate)}} ${{d.n_pass}}/${{d.n_wells}}</td>
       <td>${{badge(Math.round(d.n_illum/d.n_wells*100))}} ${{d.n_illum}}/${{d.n_wells}}</td>
       <td>${{badge(Math.round(d.n_focus/d.n_wells*100))}} ${{d.n_focus}}/${{d.n_wells}}</td>
@@ -1183,48 +1352,213 @@ function badge(pct) {{
 const slider   = document.getElementById('plate-slider');
 const pSelect  = document.getElementById('plate-select');
 const nameDisp = document.getElementById('plate-name-display');
-const img      = document.getElementById('collage-img');
 
 slider.max = PLATES.length - 1;
 PLATES.forEach((p, i) =>
   pSelect.insertAdjacentHTML('beforeend', `<option value="${{i}}">${{p}}</option>`)
 );
 
+let currentPlate = null;
+let selectedWell = null;
+
 function renderPlate(idx) {{
-  const name = PLATES[idx];
-  img.src              = `data:image/jpeg;base64,${{DATA[name].collage_b64}}`;
+  const name    = PLATES[idx];
+  currentPlate  = name;
+  selectedWell  = null;
   nameDisp.textContent = name;
-  slider.value         = idx;
-  pSelect.value        = idx;
+  slider.value  = idx;
+  pSelect.value = idx;
+
+  // Overview image + SVG overlay
+  const pd = DATA[name];
+  document.getElementById('overview-img').src =
+    `data:image/jpeg;base64,${{pd.overview_b64}}`;
+  buildOverlaySVG(name);
+
+  // Reset well panels
+  document.getElementById('well-info').innerHTML =
+    '<p class="no-well">Click a well in the overview below to inspect it.</p>';
+  document.getElementById('well-montage').innerHTML =
+    '<span class="no-img">Select a well to see its site montage.</span>';
+
   renderMetrics(name);
   renderCounts(name);
 }}
 
-slider.oninput  = () => renderPlate(+slider.value);
+function buildOverlaySVG(plateName) {{
+  const pd  = DATA[plateName];
+  const cw  = pd.overview_cw;   // cell px in source image
+  const ch  = pd.overview_ch;
+  const svg = document.getElementById('overview-svg');
+
+  // viewBox matches source image pixel dimensions
+  const imgW = cw * PLATE_COLS;
+  const imgH = ch * PLATE_ROWS;
+  svg.setAttribute('viewBox', `0 0 ${{imgW}} ${{imgH}}`);
+  svg.innerHTML = '';
+
+  ROWS.forEach((r, ri) => {{
+    COLS.forEach((c, ci) => {{
+      const well = r + c;
+      const x0   = ci * cw, y0 = ri * ch;
+      const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      rect.setAttribute('class', 'well-cell');
+      rect.setAttribute('id', `sv-${{well}}`);
+      rect.setAttribute('x', x0); rect.setAttribute('y', y0);
+      rect.setAttribute('width', cw); rect.setAttribute('height', ch);
+      rect.setAttribute('data-well', well);
+      rect.onclick = () => selectWell(plateName, well);
+      svg.appendChild(rect);
+    }});
+  }});
+}}
+
+function selectWell(plateName, well) {{
+  // Deselect previous
+  if (selectedWell) {{
+    const prev = document.getElementById(`sv-${{selectedWell}}`);
+    if (prev) prev.classList.remove('selected');
+  }}
+  selectedWell = well;
+  const rect = document.getElementById(`sv-${{well}}`);
+  if (rect) rect.classList.add('selected');
+
+  renderWellInfo(plateName, well);
+  renderWellMontage(plateName, well);
+}}
+
+// ── Well info panel ───────────────────────────────────────────────────────────
+const ALL_METRIC_SPECS = [...SLOPE_SPECS, ...FOCUS_SPECS, ...MAXINT_SPECS];
+
+function renderWellInfo(plateName, well) {{
+  const pd     = DATA[plateName];
+  const m      = pd.wells[well] || {{}};
+  const flags  = pd.well_flags[well] || {{}};
+  const absSet = new Set(flags.abs || []);
+  const adpSet = new Set(flags.adp || []);
+  const cmpd   = m.compound || '—';
+
+  let html = `<h3>${{well}}</h3>
+    <div class="well-compound">${{cmpd}}</div>`;
+
+  // Counts
+  html += `<div class="section-label">Cell counts</div>`;
+  [['Cells','Count_Cells'],['Nuclei','Count_Nuclei'],
+   ['Raw nuclei','Count_Raw_nuclei'],['Artifacts','Count_Illum_artifacts']].forEach(([lbl,col]) => {{
+    const v = m[col];
+    html += `<div class="metric-row">
+      <span class="metric-label">${{lbl}}</span>
+      <span class="metric-val">${{v != null ? Math.round(v) : '—'}}</span>
+    </div>`;
+  }});
+
+  // QC metrics
+  ALL_METRIC_SPECS.forEach(spec => {{
+    const v      = m[spec.col];
+    if (v == null) return;
+    const parts  = spec.col.split('_');
+    // Build tag: e.g. "Slope/DNA"
+    const metKey = spec.title.split('—')[0].trim();
+    const chKey  = spec.title.split('—')[1]?.trim() || '';
+    const tag    = `${{metKey}}/${{chKey}}`;
+    const isAbs  = absSet.has(tag);
+    const isAdp  = adpSet.has(tag);
+    const cls    = isAbs ? 'fail-abs' : isAdp ? 'fail-adp' : 'pass';
+    const badge  = isAbs ? '<span class="fail-tag abs">ABS</span>'
+                 : isAdp ? '<span class="fail-tag adp">ADJ</span>' : '';
+    html += `<div class="metric-row">
+      <span class="metric-label">${{spec.title}}</span>
+      <span class="metric-val ${{cls}}">${{fmt3(v)}}${{badge}}</span>
+    </div>`;
+  }});
+
+  document.getElementById('well-info').innerHTML = html;
+}}
+
+// ── Well montage panel ────────────────────────────────────────────────────────
+function renderWellMontage(plateName, well) {{
+  const pd  = DATA[plateName];
+  const b64 = pd.flagged_b64[well];
+  const el  = document.getElementById('well-montage');
+  if (b64) {{
+    el.innerHTML = `<img src="data:image/jpeg;base64,${{b64}}" alt="Well ${{well}} montage">`;
+  }} else {{
+    const flags = pd.well_flags[well];
+    if (flags) {{
+      el.innerHTML = '<span class="no-img">Flagged well — montage not pre-generated<br>(only wells with absolute failures include images).</span>';
+    }} else {{
+      el.innerHTML = '<span class="no-img">Well passes all QC thresholds — no image preloaded.</span>';
+    }}
+  }}
+}}
+
+slider.oninput   = () => renderPlate(+slider.value);
 pSelect.onchange = () => renderPlate(+pSelect.value);
 
-// ── 3. QC Metrics — channel grid with fixed scale per metric ──────────────────
-const ROWS = ['A','B','C','D','E','F','G','H'];
-const COLS = Array.from({{length:12}}, (_,i) => String(i+1).padStart(2,'0'));
+// ── Compound filter state ────────────────────────────────────────────────────
+let activeCompounds = new Set();   // empty = show all
+let hideAllMode     = false;
 
+function compoundVisible(cmpd) {{
+  if (hideAllMode)              return false;
+  if (activeCompounds.size===0) return true;
+  return activeCompounds.has(cmpd);
+}}
+
+// ── 3. QC Metrics ─────────────────────────────────────────────────────────────
+// wellMatrix respects compound filter: masked wells become null (shown as blank)
 function wellMatrix(plateData, colName) {{
-  return ROWS.map(r => COLS.map(c => plateData.wells[r+c]?.[colName] ?? null));
+  return ROWS.map(r => COLS.map(c => {{
+    const w    = r + c;
+    const well = plateData.wells[w];
+    if (!well) return null;
+    if (!compoundVisible(well.compound || '')) return null;
+    return well[colName] ?? null;
+  }}));
+}}
+
+function isFiltered() {{
+  return hideAllMode || activeCompounds.size > 0;
 }}
 
 function makeHeatmap(plateData, spec) {{
   const z    = wellMatrix(plateData, spec.col);
   const text = ROWS.map(r => COLS.map(c => {{
-    const w = r + c;
-    const v = plateData.wells[w]?.[colName = spec.col];
+    const w    = r + c;
+    const v    = plateData.wells[w]?.[spec.col];
     const cmpd = plateData.wells[w]?.compound || '';
-    const label = spec.col.split('_').slice(2, -1).join(' ');
-    return `<b>${{w}}</b><br>${{cmpd}}<br>${{label}}: ${{v != null ? v.toFixed(3) : 'N/A'}}`;
+    const vis  = compoundVisible(cmpd);
+    return vis
+      ? `<b>${{w}}</b><br>${{cmpd}}<br>${{spec.title}}: ${{v != null ? v.toFixed(3) : 'N/A'}}`
+      : `<b>${{w}}</b><br>${{cmpd}}<br>(hidden)`;
   }}));
   return {{
-    type: 'heatmap', z, text, hoverinfo: 'text',
-    x: COLS, y: ROWS, colorscale: spec.cs,
+    type:'heatmap', z, text, hoverinfo:'text',
+    x:COLS, y:ROWS, colorscale: spec.cs,
     zmin: spec.cmin, zmax: spec.cmax,
-    colorbar: {{ thickness: 10, len: 0.9, tickfont: {{ size: 9 }} }},
+    colorbar:{{ thickness:10, len:0.85, tickfont:{{size:9}} }},
+  }};
+}}
+
+function heatmapLayout(title, extraY) {{
+  const filtered = isFiltered();
+  const gridcolor = filtered ? 'rgba(0,0,0,0)' : 'rgba(80,90,120,0.4)';
+  return {{
+    paper_bgcolor:'rgba(0,0,0,0)',
+    plot_bgcolor: '#0a0c18',
+    font:{{color:'#c8d8f0', size:10}},
+    margin:{{t:32,b:42,l:42,r:16}},
+    height: 300,
+    title:{{text:title, font:{{size:11,color:'#8ab0e0'}}, x:0.5}},
+    xaxis:{{
+      tickfont:{{size:9}}, showgrid:!filtered,
+      gridcolor, zeroline:false,
+    }},
+    yaxis:{{
+      tickfont:{{size:9}}, showgrid:!filtered,
+      gridcolor, zeroline:false,
+      title: extraY ? {{text:'Row', font:{{size:9}}}} : undefined,
+    }},
   }};
 }}
 
@@ -1232,226 +1566,177 @@ const tabsEl     = document.getElementById('metrics-tabs');
 const contentsEl = document.getElementById('metrics-contents');
 
 function renderMetrics(plateName) {{
-  tabsEl.innerHTML     = '';
-  contentsEl.innerHTML = '';
+  tabsEl.innerHTML = ''; contentsEl.innerHTML = '';
   const pd = DATA[plateName];
   let firstGroup = true;
 
   METRIC_GROUPS.forEach((grp, gi) => {{
-    // Group label in tab bar
+    // One tab per group only — no per-channel tabs
+    const isFirst = firstGroup;
     tabsEl.insertAdjacentHTML('beforeend',
-      `<span class="tab-group-label">${{grp.label}}</span>`);
+      `<div class="tab${{isFirst?' active':''}}" data-group="${{gi}}">${{grp.label}}</div>`);
 
-    grp.specs.forEach((spec, ci) => {{
-      const isFirst = firstGroup && ci === 0;
-      const tabId   = `tab-g${{gi}}-c${{ci}}`;
-      const divId   = `cnt-g${{gi}}-c${{ci}}`;
+    contentsEl.insertAdjacentHTML('beforeend',
+      `<div class="tab-content${{isFirst?' active':''}}" id="grp-${{gi}}">
+         <div class="channel-grid" id="chgrid-${{gi}}"></div>
+       </div>`);
 
-      tabsEl.insertAdjacentHTML('beforeend',
-        `<div class="tab${{isFirst?' active':''}}" data-tab="${{divId}}"
-              data-group="${{gi}}">${{spec.title.split('—')[1]?.trim() || spec.title}}</div>`);
+    setTimeout(() => {{
+      const grid = document.getElementById(`chgrid-${{gi}}`);
+      if (!grid) return;
+      grp.specs.forEach((s, si) => {{
+        const cid  = `ch-${{gi}}-${{si}}`;
+        const card = document.createElement('div');
+        card.className = 'channel-card';
+        card.innerHTML = `<div id="${{cid}}"></div>`;
+        grid.appendChild(card);
+        Plotly.react(cid, [makeHeatmap(pd, s)],
+          heatmapLayout(s.title, si % 3 === 0),
+          {{responsive:true, displayModeBar:false}});
+      }});
+    }}, 0);
 
-      // One shared content div per group (reuse for channel switching)
-      if (ci === 0) {{
-        contentsEl.insertAdjacentHTML('beforeend',
-          `<div class="tab-content${{isFirst?' active':''}}" id="grp-${{gi}}">
-             <div class="channel-grid" id="chgrid-${{gi}}"></div>
-           </div>`);
-      }}
-
-      // Render all channels for this group as a grid
-      const gridId = `chgrid-${{gi}}`;
-      if (ci === 0) {{
-        // Populate grid after DOM is inserted
-        setTimeout(() => {{
-          const grid = document.getElementById(gridId);
-          if (!grid) return;
-          grp.specs.forEach((s, si) => {{
-            const cid = `ch-${{gi}}-${{si}}`;
-            const card = document.createElement('div');
-            card.className = 'channel-card';
-            card.innerHTML = `<div id="${{cid}}"></div>`;
-            grid.appendChild(card);
-            const layout = {{
-              paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)',
-              font: {{ color:'#c8d8f0', size:10 }},
-              margin: {{ t:28, b:36, l:36, r:16 }},
-              height: 240,
-              title: {{ text: s.title, font: {{ size:11, color:'#8ab0e0' }}, x:0.5 }},
-              xaxis: {{ tickfont:{{size:9}} }},
-              yaxis: {{ tickfont:{{size:9}} }},
-            }};
-            Plotly.react(cid, [makeHeatmap(pd, s)], layout,
-                         {{responsive:true, displayModeBar:false}});
-          }});
-        }}, 0);
-      }}
-      if (isFirst) firstGroup = false;
-    }});
+    if (isFirst) firstGroup = false;
   }});
 
-  // Tab group switching — show the right group content div
   tabsEl.querySelectorAll('.tab').forEach(tab => {{
     tab.onclick = () => {{
       const gi = tab.dataset.group;
       tabsEl.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
       contentsEl.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-      // Activate all tabs of this group
-      tabsEl.querySelectorAll(`.tab[data-group="${{gi}}"]`).forEach(t => t.classList.add('active'));
+      document.querySelector(`.tab[data-group="${{gi}}"]`).classList.add('active');
       document.getElementById(`grp-${{gi}}`).classList.add('active');
     }};
   }});
 }}
 
-// ── 4. Cell counts — larger grid, full labels ─────────────────────────────────
+// ── 4. Cell counts ────────────────────────────────────────────────────────────
 const COUNT_SPECS = [
-  {{ col:'Count_Cells',            title:'Cells',           cs:'Viridis' }},
-  {{ col:'Count_Nuclei',           title:'Nuclei (filtered)',cs:'Viridis' }},
-  {{ col:'Count_Illum_artifacts',  title:'Illum. Artifacts',cs:'YlOrRd'  }},
+  {{col:'Count_Cells',           title:'Cells',            cs:'Viridis'}},
+  {{col:'Count_Nuclei',          title:'Nuclei (filtered)',cs:'Viridis'}},
+  {{col:'Count_Illum_artifacts', title:'Illum. Artifacts', cs:'YlOrRd' }},
 ];
 
 function renderCounts(plateName) {{
   const grid = document.getElementById('counts-grid');
   grid.innerHTML = '';
   const pd = DATA[plateName];
-
   COUNT_SPECS.forEach(spec => {{
     const cid  = `cnt-${{spec.col.replace(/[^a-z0-9]/gi,'_')}}`;
     const card = document.createElement('div');
     card.className = 'count-card';
     card.innerHTML = `<div id="${{cid}}"></div>`;
     grid.appendChild(card);
-
     const z    = wellMatrix(pd, spec.col);
     const text = ROWS.map(r => COLS.map(c => {{
-      const w = r + c;
-      const v = pd.wells[w]?.[spec.col];
-      const cmpd = pd.wells[w]?.compound || '';
-      return `<b>${{w}}</b><br>${{cmpd}}<br>${{spec.title}}: ${{v != null ? Math.round(v) : 'N/A'}}`;
+      const w = r+c, v = pd.wells[w]?.[spec.col];
+      return `<b>${{w}}</b><br>${{pd.wells[w]?.compound||''}}<br>${{spec.title}}: ${{v!=null?Math.round(v):'N/A'}}`;
     }}));
-
-    const layout = {{
-      paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)',
-      font: {{ color:'#c8d8f0', size:11 }},
-      margin: {{ t:40, b:50, l:50, r:20 }},
-      height: 340,
-      title: {{ text: spec.title, font: {{ size:13, color:'#a8c8ff' }}, x:0.5 }},
-      xaxis: {{ title:'Column', tickfont:{{size:10}}, tickvals: COLS,
-                ticktext: COLS.map(c => parseInt(c)) }},
-      yaxis: {{ title:'Row', tickfont:{{size:10}} }},
-    }};
+    const filtered = isFiltered();
+    const gridcolor = filtered ? 'rgba(0,0,0,0)' : 'rgba(80,90,120,0.4)';
+    const cRange = COUNT_RANGES[spec.col] || [null, null];
     Plotly.react(cid,
-      [{{ type:'heatmap', z, text, hoverinfo:'text',
-          x:COLS, y:ROWS, colorscale:spec.cs,
-          colorbar:{{ thickness:14, len:0.85, tickfont:{{size:10}} }} }}],
-      layout, {{responsive:true, displayModeBar:false}});
+      [{{type:'heatmap',z,text,hoverinfo:'text',x:COLS,y:ROWS,colorscale:spec.cs,
+         zmin:cRange[0], zmax:cRange[1],
+         colorbar:{{thickness:14,len:0.85,tickfont:{{size:10}}}}}}],
+      {{paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'#0a0c18',
+        font:{{color:'#c8d8f0',size:11}},
+        margin:{{t:40,b:50,l:50,r:20}}, height:340,
+        title:{{text:spec.title, font:{{size:13,color:'#a8c8ff'}}, x:0.5}},
+        xaxis:{{title:'Column', tickfont:{{size:10}}, tickvals:COLS,
+                ticktext:COLS.map(c=>parseInt(c)),
+                showgrid:!filtered, gridcolor, zeroline:false}},
+        yaxis:{{title:'Row', tickfont:{{size:10}},
+                showgrid:!filtered, gridcolor, zeroline:false}},
+      }}, {{responsive:true, displayModeBar:false}});
   }});
 }}
 
-// ── 5. Flagged wells + compound filter buttons ────────────────────────────────
+// ── 5. Flagged wells ──────────────────────────────────────────────────────────
 const ABSOLUTE_CHECKS = [
-  {{ cols: {json.dumps(METRIC_COLS["PowerLogLogSlope"])}, lo: -2.5, hi: -1.0, label: 'Slope' }},
-  {{ cols: {json.dumps(METRIC_COLS["MaxIntensity"])},     lo: null,  hi: 0.95, label: 'MaxInt' }},
-  {{ cols: {json.dumps(METRIC_COLS["FocusScore"])},       lo: 0.005, hi: null, label: 'Focus' }},
+  {{cols:{json.dumps(METRIC_COLS["PowerLogLogSlope"])}, lo:-2.5, hi:-1.0, label:'Slope'}},
+  {{cols:{json.dumps(METRIC_COLS["MaxIntensity"])},     lo:null,  hi:0.95, label:'MaxInt'}},
+  {{cols:{json.dumps(METRIC_COLS["FocusScore"])},       lo:0.005, hi:null, label:'Focus'}},
 ];
 
-let activeCompounds = new Set();   // empty = show all
-let hideAllMode     = false;
-
-(function buildFlagTable() {{
-  const tbody   = document.getElementById('flag-tbody');
-  const toolbar = document.getElementById('compound-toolbar');
+// Collect ALL compounds across all plates (not just flagged wells)
+(function buildCompoundToolbar() {{
+  const toolbar  = document.getElementById('compound-toolbar');
   const allCmpds = new Set();
-
   PLATES.forEach(p => {{
-    const pd = DATA[p];
-    Object.entries(pd.wells).forEach(([well, m]) => {{
-      const failing = [];
-      ABSOLUTE_CHECKS.forEach(chk => {{
-        chk.cols.forEach(col => {{
-          const v = m[col];
-          if (v == null) return;
-          const lo_fail = chk.lo != null && v < chk.lo;
-          const hi_fail = chk.hi != null && v > chk.hi;
-          if (lo_fail || hi_fail) {{
-            const ch = col.split('_').pop();
-            failing.push(`${{chk.label}}/${{ch}}`);
-          }}
-        }});
-      }});
-
-      const cmpd = m.compound || '';
-      if (cmpd) allCmpds.add(cmpd);
-
-      if (failing.length > 0) {{
-        tbody.insertAdjacentHTML('beforeend',
-          `<tr data-plate="${{p}}" data-well="${{well}}"
-               data-compound="${{cmpd}}" data-metrics="${{failing.join(',')}}">
-            <td>${{p}}</td><td>${{well}}</td>
-            <td>${{cmpd || '—'}}</td>
-            <td>${{[...new Set(failing)].join(', ')}}</td>
-          </tr>`);
-      }}
+    Object.values(DATA[p].wells).forEach(m => {{
+      if (m.compound) allCmpds.add(m.compound);
     }});
   }});
 
-  // Build compound buttons
   [...allCmpds].sort().forEach(cmpd => {{
     const btn = document.createElement('button');
-    btn.className    = 'cmpd-btn';
-    btn.textContent  = cmpd;
-    btn.dataset.cmpd = cmpd;
+    btn.className = 'cmpd-btn'; btn.textContent = cmpd; btn.dataset.cmpd = cmpd;
     btn.onclick = () => {{
       hideAllMode = false;
       btn.classList.toggle('active');
-      if (btn.classList.contains('active')) activeCompounds.add(cmpd);
-      else activeCompounds.delete(cmpd);
-      applyFilters();
+      btn.classList.contains('active') ? activeCompounds.add(cmpd) : activeCompounds.delete(cmpd);
+      applyGlobalFilter();
     }};
     toolbar.appendChild(btn);
   }});
 
-  document.getElementById('btn-hide-all').onclick = () => {{
-    hideAllMode = true;
-    activeCompounds.clear();
-    toolbar.querySelectorAll('.cmpd-btn:not(.ctrl)').forEach(b => b.classList.remove('active'));
-    applyFilters();
-  }};
   document.getElementById('btn-show-all').onclick = () => {{
-    hideAllMode = false;
-    activeCompounds.clear();
+    hideAllMode = false; activeCompounds.clear();
     toolbar.querySelectorAll('.cmpd-btn:not(.ctrl)').forEach(b => b.classList.remove('active'));
-    applyFilters();
+    applyGlobalFilter();
+  }};
+  document.getElementById('btn-hide-all').onclick = () => {{
+    hideAllMode = true; activeCompounds.clear();
+    toolbar.querySelectorAll('.cmpd-btn:not(.ctrl)').forEach(b => b.classList.remove('active'));
+    applyGlobalFilter();
   }};
 }})();
 
-function applyFilters() {{
-  const q = document.getElementById('flag-filter').value.toLowerCase();
-  document.querySelectorAll('#flag-tbody tr').forEach(tr => {{
-    const text = [tr.dataset.plate, tr.dataset.well,
-                  tr.dataset.compound, tr.dataset.metrics].join(' ').toLowerCase();
-    const cmpd  = tr.dataset.compound;
-    const textOk  = !q || text.includes(q);
-    let   cmpdOk;
-    if (hideAllMode) {{
-      cmpdOk = false;
-    }} else if (activeCompounds.size === 0) {{
-      cmpdOk = true;   // no filter active → show all
-    }} else {{
-      cmpdOk = activeCompounds.has(cmpd);
-    }}
-    tr.classList.toggle('hidden', !(textOk && cmpdOk));
-  }});
+// Global filter: re-renders heatmaps + counts + filters flag table
+function applyGlobalFilter() {{
+  if (!currentPlate) return;
+  // Re-render all currently visible Plotly charts with masked data
+  renderMetrics(currentPlate);
+  renderCounts(currentPlate);
+  applyFlagFilter();
 }}
 
-document.getElementById('flag-filter').oninput = applyFilters;
+(function buildFlagTable() {{
+  const tbody = document.getElementById('flag-tbody');
+  PLATES.forEach(p => {{
+    const pd = DATA[p];
+    Object.entries(pd.well_flags || {{}}).forEach(([well, flags]) => {{
+      const m      = pd.wells[well] || {{}};
+      const cmpd   = m.compound || '';
+      const absTxt = (flags.abs||[]).join(', ') || '—';
+      const adpTxt = (flags.adp||[]).join(', ') || '—';
+      tbody.insertAdjacentHTML('beforeend',
+        `<tr data-plate="${{p}}" data-well="${{well}}"
+             data-compound="${{cmpd}}" data-metrics="${{[...(flags.abs||[]),...(flags.adp||[])].join(',')}}">
+          <td>${{p}}</td><td>${{well}}</td><td>${{cmpd||'—'}}</td>
+          <td style="color:var(--fail)">${{absTxt}}</td>
+          <td style="color:var(--warn)">${{adpTxt}}</td>
+        </tr>`);
+    }});
+  }});
+}})();
+
+function applyFlagFilter() {{
+  const q = document.getElementById('flag-filter').value.toLowerCase();
+  document.querySelectorAll('#flag-tbody tr').forEach(tr => {{
+    const text   = [tr.dataset.plate,tr.dataset.well,tr.dataset.compound,tr.dataset.metrics].join(' ').toLowerCase();
+    const cmpdOk = compoundVisible(tr.dataset.compound);
+    tr.classList.toggle('hidden', !(!q||text.includes(q)) || !cmpdOk);
+  }});
+}}
+document.getElementById('flag-filter').oninput = applyFlagFilter;
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 renderPlate(0);
 </script>
 </body>
 </html>"""
-
     output_path.write_text(html, encoding="utf-8")
     size_mb = output_path.stat().st_size / 1e6
     print(f"[html] → {output_path}  ({size_mb:.1f} MB)")
@@ -1467,7 +1752,7 @@ class Collage:
                  sites_per_well: int = 9, scale: float = 0.5,
                  workers: int = 8, band_height: int = 280,
                  font_size: int = 18, n_sigma: float = 3.0,
-                 jpeg_quality: int = 80, web_scale: float = 0.2):
+                 web_scale: float = 0.2):
 
         self.input_dir    = Path(input_dir)
         self.output_path  = Path(output_path)
@@ -1479,7 +1764,6 @@ class Collage:
         self.workers      = workers
         self.band_height  = band_height
         self.font_size    = font_size
-        self.jpeg_quality = jpeg_quality
         self.web_scale    = web_scale
         self.engine       = ThresholdEngine(n_sigma=n_sigma)
         self.output_path.mkdir(parents=True, exist_ok=True)
@@ -1600,30 +1884,49 @@ class Collage:
                                           self.engine, self.font_size, plate_map)
             collage = np.concatenate([collage, footer], axis=0)
 
-        # High-res JPEG
-        out_jpg = self.output_path / f"{plate_name}_QC.jpg"
-        Image.fromarray(collage).save(str(out_jpg), format="JPEG",
-                                      quality=self.jpeg_quality,
-                                      optimize=True, subsampling=2)
-        jpg_mb = out_jpg.stat().st_size / 1e6
-        print(f"  → {out_jpg}  ({collage.shape[1]}×{collage.shape[0]} px, "
-              f"JPEG q={self.jpeg_quality})  {jpg_mb:.1f} MB")
+        print(f"  [plate] {plate_name}  {collage.shape[1]}×{collage.shape[0]} px — overview + HTML only")
 
         # Accumulate HTML data
-        n_wells     = len(plate_qc)
-        n_pass      = sum(1 for m in plate_qc.values() if _well_passes_all(m, self.engine))
-        n_illum     = sum(1 for m in plate_qc.values() if _well_passes_group(m, ILLUM_METRICS, self.engine))
-        n_focus     = sum(1 for m in plate_qc.values() if _well_passes_group(m, FOCUS_METRICS, self.engine))
+        n_wells = len(plate_qc)
+        n_pass  = sum(1 for m in plate_qc.values() if _well_passes_all(m, self.engine))
+        n_illum = sum(1 for m in plate_qc.values() if _well_passes_group(m, ILLUM_METRICS, self.engine))
+        n_focus = sum(1 for m in plate_qc.values() if _well_passes_group(m, FOCUS_METRICS, self.engine))
+
+        # Overview grid: real microscopy thumbnails for all wells
+        overview_arr, ov_cw, ov_ch = _make_overview_grid(
+            montages, plate_qc, plate_map,
+            plate_rows=self.plate_rows, plate_cols=self.plate_cols)
+
+        # Flagged well montages (absolute OR adaptive failures)
+        flagged_b64 = {}
+        for wl, m in plate_qc.items():
+            is_flagged = any(
+                self.engine.passes(m.get(col), mk, COL_TO_CHANNEL.get(col, "")) is False
+                for mk, cols in METRIC_COLS.items() for col in cols
+            )
+            if is_flagged:
+                r_idx = ord(wl[0]) - ord("A") + 1
+                c_idx = int(wl[1:])
+                b64   = _well_montage_b64(montages, (r_idx, c_idx),
+                                          scale_factor=0.33)
+                if b64:
+                    flagged_b64[wl] = b64
+
         self._html_plates.append({
-            "name":        plate_name,
-            "collage_arr": collage,
-            "plate_qc":    plate_qc,
-            "plate_map":   plate_map,
-            "pass_rate":   100 * n_pass / n_wells if n_wells else 0,
-            "n_wells":     n_wells,
-            "n_pass":      n_pass,
-            "n_illum_pass": n_illum,
-            "n_focus_pass": n_focus,
+            "name":          plate_name,
+            "collage_arr":   collage,
+            "overview_arr":  overview_arr,
+            "overview_cw":   ov_cw,
+            "overview_ch":   ov_ch,
+            "plate_qc":      plate_qc,
+            "plate_map":     plate_map,
+            "flagged_b64":   flagged_b64,
+            "engine_adaptive": self.engine._adaptive,
+            "pass_rate":     100 * n_pass / n_wells if n_wells else 0,
+            "n_wells":       n_wells,
+            "n_pass":        n_pass,
+            "n_illum_pass":  n_illum,
+            "n_focus_pass":  n_focus,
         })
 
 
@@ -1655,7 +1958,6 @@ def parse_args():
     p.add_argument("--font",               type=int,   default=18)
     p.add_argument("--n-sigma",            type=float, default=3.0,
                    help="MAD-sigma for adaptive outlier detection.")
-    p.add_argument("--jpeg-quality",       type=int,   default=80)
     p.add_argument("--web-scale",          type=float, default=0.2,
                    help="Scale factor for collage thumbnails in HTML.")
     return p.parse_args()
@@ -1677,6 +1979,5 @@ if __name__ == "__main__":
         band_height    = args.band_height,
         font_size      = args.font,
         n_sigma        = args.n_sigma,
-        jpeg_quality   = args.jpeg_quality,
         web_scale      = args.web_scale,
     )
