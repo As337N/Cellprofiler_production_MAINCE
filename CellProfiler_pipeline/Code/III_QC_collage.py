@@ -116,11 +116,11 @@ CHANNEL_COLORS = {
 }
 
 ILLUM_METRICS  = ["PowerLogLogSlope", "MaxIntensity"]
-FOCUS_METRICS  = ["FocusScore", "LocalFocusScore"]
+FOCUS_METRICS  = ["FocusScore", "FocusScore"]
 BORDER_METRIC  = "PowerLogLogSlope"
 METRIC_LABELS  = {
     "PowerLogLogSlope": "Slope", "MaxIntensity": "MaxInt",
-    "FocusScore": "Focus",       "LocalFocusScore": "LocalFoc",
+    "FocusScore": "Focus",       "FocusScore": "LocalFoc",
 }
 
 COL_PASS    = (75,  215,  95)
@@ -136,16 +136,16 @@ DEFAULT_IMAGE_AREA = 1_166_400   # 1080×1080 px fallback
 
 
 def _miq_col(metric: str, channel: str) -> str:
-    if metric == "LocalFocusScore":
-        return f"ImageQuality_LocalFocusScore_{channel}_10"
+    if metric == "FocusScore":
+        return f"ImageQuality_FocusScore_{channel}"
     return f"ImageQuality_{metric}_{channel}"
 
 
 METRIC_COLS: dict[str, list[str]] = {
     mk: [_miq_col(mk, ch) for ch in CHANNELS]
-    for mk in ("PowerLogLogSlope", "MaxIntensity", "FocusScore", "LocalFocusScore")
+    for mk in ("PowerLogLogSlope", "MaxIntensity", "FocusScore", "FocusScore")
 }
-for mk in ("FocusScore", "LocalFocusScore"):
+for mk in ("FocusScore", "FocusScore"):
     METRIC_COLS[mk] += [_miq_col(mk, ch) for ch in CHANNELS_EXTRA]
 
 COL_TO_CHANNEL: dict[str, str] = {
@@ -168,7 +168,7 @@ class ThresholdEngine:
     PowerLogLogSlope  (-2.5, -1.0)   Log-log power spectrum slope; primary blur metric.
     MaxIntensity      (None, 0.95)   Saturation guard.
     FocusScore        (0.005, None)  Loose — catches blank/fully out-of-focus only.
-    LocalFocusScore   per-channel    Main focus metric; thresholds vary by signal density.
+    FocusScore   per-channel    Main focus metric; thresholds vary by signal density.
 
     Adaptive bounds (MAD-based, fitted per plate)
     ----------------------------------------------
@@ -218,7 +218,7 @@ class ThresholdEngine:
             return None
 
         # Absolute check
-        if metric_key == "LocalFocusScore":
+        if metric_key == "FocusScore":
             abs_lo, abs_hi = THRESHOLDS_LOCAL_FOCUS.get(channel, (None, None))
         else:
             abs_lo, abs_hi = THRESHOLDS.get(metric_key, (None, None))
@@ -772,7 +772,7 @@ def make_report_footer(width: int, plate_name: str, plate_qc: dict,
         fc_ = COL_PASS if n_focus_p / max(n_wells, 1) >= 0.8 else \
               (COL_FAIL if n_focus_p / max(n_wells, 1) < 0.5 else (255, 190, 0))
         line(f"  Illumination:  {n_illum_p}/{n_wells} pass ({pct(n_illum_p)})  [Slope + MaxInt]", ic, fb)
-        line(f"  Focus:         {n_focus_p}/{n_wells} pass ({pct(n_focus_p)})  [FocusScore + LocalFocusScore]", fc_, fb)
+        line(f"  Focus:         {n_focus_p}/{n_wells} pass ({pct(n_focus_p)})  [FocusScore + FocusScore]", fc_, fb)
         rule(); y += 4
 
         for grp_lbl, grp_col, grp_metrics in (
@@ -792,7 +792,7 @@ def make_report_footer(width: int, plate_name: str, plate_qc: dict,
                     ch_short = CHANNEL_LABELS.get(ch, ch[:4])
                     ch_color = CHANNEL_COLORS.get(ch, (150, 170, 200))
 
-                    if mk == "LocalFocusScore":
+                    if mk == "FocusScore":
                         lo, hi = THRESHOLDS_LOCAL_FOCUS.get(ch, (None, None))
                     else:
                         lo, hi = THRESHOLDS.get(mk, (None, None))
@@ -1091,7 +1091,7 @@ def _passes_absolute(value, metric_key: str, channel: str = "") -> bool | None:
     """Standalone absolute-only pass check used by the report collage."""
     if value is None or (isinstance(value, float) and np.isnan(value)):
         return None
-    if metric_key == "LocalFocusScore":
+    if metric_key == "FocusScore":
         lo, hi = THRESHOLDS_LOCAL_FOCUS.get(channel, (None, None))
     else:
         lo, hi = THRESHOLDS.get(metric_key, (None, None))
@@ -1137,7 +1137,7 @@ def generate_html(cohort_name: str, plates_data: list[dict],
                     if v is None or (isinstance(v, float) and np.isnan(v)):
                         continue
                     # Absolute
-                    if mk == "LocalFocusScore":
+                    if mk == "FocusScore":
                         lo, hi = THRESHOLDS_LOCAL_FOCUS.get(ch, (None, None))
                     else:
                         lo, hi = THRESHOLDS.get(mk, (None, None))
@@ -1221,7 +1221,7 @@ def generate_html(cohort_name: str, plates_data: list[dict],
          "cmax": _cohort_range(col, 0, None)[1],
          "cs": "RdBu"}
         for ch in CHANNELS
-        for col in [f"ImageQuality_LocalFocusScore_{ch}_10"]
+        for col in [f"ImageQuality_FocusScore_{ch}"] 
     ])
     maxint_specs = json.dumps([
         {"col": col,
@@ -1503,7 +1503,6 @@ def generate_html(cohort_name: str, plates_data: list[dict],
     <div class="audit-row">
       <span class="audit-label">Focus</span>
       <span class="thresh">ImageQuality_FocusScore_*</span>
-      <span class="thresh">ImageQuality_LocalFocusScore_*_10</span>
       <span class="audit-source">← Image.txt</span>
     </div>
     <hr class="audit-sep">
@@ -1539,8 +1538,8 @@ def generate_html(cohort_name: str, plates_data: list[dict],
       <span class="thresh">Count_Cells / Count_Nuclei</span>
       &nbsp;
       <span style="color:#4bd760;font-size:0.78rem;">■ 1.00</span>
-      <span style="color:#ffbe00;font-size:0.78rem;">■ 0.99</span>
-      <span style="color:#ff4444;font-size:0.78rem;">■ &lt;0.99</span>
+      <span style="color:#ffbe00;font-size:0.78rem;">■ 0.99-0.95</span>
+      <span style="color:#ff4444;font-size:0.78rem;">■ &lt;0.95</span>
     </div>
   </div>
   <div class="counts-grid" id="counts-grid"></div>
@@ -1960,7 +1959,7 @@ function renderCounts(plateName) {{
       }},{{responsive:true,displayModeBar:false}});
   }})();
 
-  // Card 2: Cells/Nuclei ratio with custom colour scale (1=green, 0.99=yellow, <0.99=red)
+  // Card 2: Cells/Nuclei ratio with custom colour scale (1=green, 0.99-095=yellow, <0.95=red)
   (function() {{
     const cid  = `cnt-ratio`;
     const card = document.createElement('div');
@@ -1968,7 +1967,7 @@ function renderCounts(plateName) {{
     card.innerHTML = `<div id="${{cid}}"></div>`;
     grid.appendChild(card);
 
-    const ratioCS = [[0,'#ff4444'],[0.98,'#ff4444'],[0.99,'#ffbe00'],[1.0,'#4bd760']];
+    const ratioCS = [[0,'#ff4444'],[0.94,'#ff4444'],[0.95,'#ffbe00'],[1.0,'#4bd760']];
 
     const z    = ROWS_PLOTLY.map(r => COLS.map(c => {{
       const w = r+c, well = pd.wells[w];
@@ -1992,9 +1991,9 @@ function renderCounts(plateName) {{
     const gridcolor = filtered ? 'rgba(0,0,0,0)' : 'rgba(80,90,120,0.4)';
     Plotly.react(cid,
       [{{type:'heatmap',z,text,hoverinfo:'text',x:COLS,y:ROWS_PLOTLY,
-         colorscale:ratioCS, zmin:0.97, zmax:1.0,
+         colorscale:ratioCS, zmin:0.93, zmax:1.0,
          colorbar:{{thickness:14,len:0.85,tickfont:{{size:10}},
-                    tickvals:[0.97,0.99,1.0],ticktext:['<0.99','0.99','1.00']}}}}],
+                    tickvals:[0.93,0.95-0.99,1.0],ticktext:['<0.95','0.95-0.99','1.00']}}}}],
       {{paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#0a0c18',
         font:{{color:'#c8d8f0',size:11}},margin:{{t:40,b:50,l:50,r:20}},height:340,
         title:{{text:'Cells / Nuclei ratio',font:{{size:13,color:'#a8c8ff'}},x:0.5}},
