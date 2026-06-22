@@ -1395,7 +1395,7 @@ def generate_html(cohort_name: str, plates_data: list[dict],
                    border-radius: 6px; padding: 4px; }}
 
   /* Cell counts */
-  .counts-grid {{ display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }}
+  .counts-grid {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }}
   .count-card {{ background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px; }}
 
   /* Compound filter */
@@ -1427,7 +1427,7 @@ def generate_html(cohort_name: str, plates_data: list[dict],
                          display: flex; align-items: center; gap: 10px; }}
   .mfi-ch-dot {{ width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }}
   .mfi-channel-header h3 {{ font-size: 0.9rem; color: #a8c8ff; margin: 0; }}
-  .mfi-body {{ display: grid; grid-template-columns: 320px 1fr; gap: 0; }}
+  .mfi-body {{ display: grid; grid-template-columns: 260px 1fr; gap: 0; }}
   .mfi-stats-panel {{ background: #0e1020; border-right: 1px solid var(--border);
                       padding: 14px; display: flex; flex-direction: column; gap: 8px; }}
   .mfi-stats-panel h4 {{ font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em;
@@ -1440,7 +1440,8 @@ def generate_html(cohort_name: str, plates_data: list[dict],
   .mfi-stat-delta.pos {{ color: #4bd760; }}
   .mfi-stat-delta.neg {{ color: #ff6060; }}
   .mfi-plots {{ padding: 8px; background: var(--panel); display: grid;
-                grid-template-columns: 1fr 1fr 1fr; gap: 8px; }}
+                grid-template-columns: 1fr 1fr; gap: 8px; }}
+  .mfi-heatmap-row {{ grid-column: 1 / -1; }}
 </style>
 </head>
 <body>
@@ -1540,6 +1541,14 @@ def generate_html(cohort_name: str, plates_data: list[dict],
       <span style="color:#4bd760;font-size:0.78rem;">■ 1.00</span>
       <span style="color:#ffbe00;font-size:0.78rem;">■ 0.99-0.95</span>
       <span style="color:#ff4444;font-size:0.78rem;">■ &lt;0.95</span>
+    </div>
+    <div class="audit-row">
+      <span class="audit-label">Illum. Artifacts</span>
+      <span class="thresh">Count_Illum_artifacts</span>
+      <span class="audit-source">← Image.txt</span>
+      &nbsp;—
+      <span style="color:#ffffff;font-size:0.78rem;">■ 0</span>
+      <span style="color:#cc1111;font-size:0.78rem;">■ ≥500</span>
     </div>
   </div>
   <div class="counts-grid" id="counts-grid"></div>
@@ -1793,14 +1802,11 @@ function renderWellInfo(plateName, well) {{
     const metKey = spec.title.split('—')[0].trim();
     const chKey  = spec.title.split('—')[1]?.trim() || '';
     const tag    = `${{metKey}}/${{chKey}}`;
-    const isAbs  = absSet.has(tag);
-    const isAdp  = adpSet.has(tag);
-    const cls    = isAbs ? 'fail-abs' : isAdp ? 'fail-adp' : 'pass';
-    const bdg    = isAbs ? '<span class="fail-tag abs">ABS</span>'
-                 : isAdp ? '<span class="fail-tag adp">ADJ</span>' : '';
+    const isFail = absSet.has(tag) || adpSet.has(tag);
+    const cls    = isFail ? 'fail-abs' : 'pass';
     html += `<div class="metric-row">
       <span class="metric-label">${{spec.title}}</span>
-      <span class="metric-val ${{cls}}">${{fmt3(v)}}${{bdg}}</span>
+      <span class="metric-val ${{cls}}">${{fmt3(v)}}</span>
     </div>`;
   }});
 
@@ -1967,7 +1973,13 @@ function renderCounts(plateName) {{
     card.innerHTML = `<div id="${{cid}}"></div>`;
     grid.appendChild(card);
 
-    const ratioCS = [[0,'#ff4444'],[0.94,'#ff4444'],[0.95,'#ffbe00'],[1.0,'#4bd760']];
+    const ratioCS = [
+      [0,    '#ff4444'],
+      [0.94, '#ff4444'],
+      [0.95, '#ffbe00'],
+      [0.99, '#ffbe00'],
+      [1.0,  '#4bd760'],
+    ];
 
     const z    = ROWS_PLOTLY.map(r => COLS.map(c => {{
       const w = r+c, well = pd.wells[w];
@@ -1993,13 +2005,58 @@ function renderCounts(plateName) {{
       [{{type:'heatmap',z,text,hoverinfo:'text',x:COLS,y:ROWS_PLOTLY,
          colorscale:ratioCS, zmin:0.93, zmax:1.0,
          colorbar:{{thickness:14,len:0.85,tickfont:{{size:10}},
-                    tickvals:[0.93,0.95-0.99,1.0],ticktext:['<0.95','0.95-0.99','1.00']}}}}],
+                    tickvals:[0.93, 0.95, 0.99, 1.0],
+                    ticktext:['<0.95','0.95','0.99','1.00']}}}}],
       {{paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#0a0c18',
         font:{{color:'#c8d8f0',size:11}},margin:{{t:40,b:50,l:50,r:20}},height:340,
         title:{{text:'Cells / Nuclei ratio',font:{{size:13,color:'#a8c8ff'}},x:0.5}},
         xaxis:{{title:'Column',tickfont:{{size:10}},tickvals:COLS,ticktext:COLS.map(c=>parseInt(c)),
                 showgrid:!filtered,gridcolor,zeroline:false}},
         yaxis:{{title:'Row',tickfont:{{size:10}},showgrid:!filtered,gridcolor,zeroline:false}},
+      }},{{responsive:true,displayModeBar:false}});
+  }})();
+
+  // Card 3: Illumination Artifacts count heatmap (white=0, dark red=500+)
+  (function() {{
+    const cid  = `cnt-artifacts`;
+    const card = document.createElement('div');
+    card.className = 'count-card';
+    card.innerHTML = `<div id="${{cid}}"></div>`;
+    grid.appendChild(card);
+
+    // White (0 artifacts) -> dark red (500+ artifacts)
+    const artifactCS = [
+      [0,   '#ffffff'],
+      [0.1, '#ffcccc'],
+      [0.3, '#ff6666'],
+      [0.6, '#cc2222'],
+      [1.0, '#660000'],
+    ];
+
+    const z    = ROWS_PLOTLY.map(r => COLS.map(c => {{
+      const w = r+c, well = pd.wells[w];
+      if (!well || !compoundVisible(well.compound||'')) return null;
+      return well['Count_Illum_artifacts'] ?? null;
+    }}));
+    const text = ROWS_PLOTLY.map(r => COLS.map(c => {{
+      const w    = r+c, well = pd.wells[w];
+      const n    = well?.['Count_Illum_artifacts'];
+      const cmpd = well?.compound || '';
+      return `<b>${{w}}</b><br>${{cmpd}}<br>Illum. Artifacts: ${{n!=null?Math.round(n):'N/A'}}`;
+    }}));
+    const filtered2 = isFiltered();
+    const gridcolor2 = filtered2 ? 'rgba(0,0,0,0)' : 'rgba(80,90,120,0.4)';
+    Plotly.react(cid,
+      [{{type:'heatmap',z,text,hoverinfo:'text',x:COLS,y:ROWS_PLOTLY,
+         colorscale:artifactCS, zmin:0, zmax:500,
+         colorbar:{{thickness:14,len:0.85,tickfont:{{size:10}},
+                    tickvals:[0,100,250,500],ticktext:['0','100','250','≥500']}}}}],
+      {{paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#0a0c18',
+        font:{{color:'#c8d8f0',size:11}},margin:{{t:40,b:50,l:50,r:20}},height:340,
+        title:{{text:'Illum. Artifacts',font:{{size:13,color:'#a8c8ff'}},x:0.5}},
+        xaxis:{{title:'Column',tickfont:{{size:10}},tickvals:COLS,ticktext:COLS.map(c=>parseInt(c)),
+                showgrid:!filtered2,gridcolor:gridcolor2,zeroline:false}},
+        yaxis:{{title:'Row',tickfont:{{size:10}},showgrid:!filtered2,gridcolor:gridcolor2,zeroline:false}},
       }},{{responsive:true,displayModeBar:false}});
   }})();
 }}
@@ -2073,7 +2130,7 @@ function renderMFI() {{
         <div class="mfi-plots">
           <div id="mfi-box-row-${{ch}}"></div>
           <div id="mfi-box-col-${{ch}}"></div>
-          <div id="mfi-heatmap-${{ch}}"></div>
+          <div class="mfi-heatmap-row" id="mfi-heatmap-${{ch}}"></div>
         </div>
       </div>`;
     container.appendChild(sec);
