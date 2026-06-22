@@ -12,24 +12,24 @@ run_section() { [[ " ${SECTIONS[*]} " == *" $1 "* ]]; }
 
 # ============================================================
 create_output_dirs $OUTPUT $IMAGES_WORKSPACE
-BATCH_SIZE=5000
+BATCH_SIZE=10000
 
 #### --- 3) Obtain plate collage for quality control --- ####
 if run_section 3; then
   echo "===***=== [3] QC outlines generation ===***==="
-  NAME_QC="III_QC"
+  #NAME_QC="III_QC"
   #python $SCRIPT_PY_CELLPROFILER -i $IMAGES_WORKSPACE -o $PATH_CSV --name_csv $NAME_QC --illum --masks
 
-  CSV_COUNT=$(find "$PATH_CPPIPE" -maxdepth 1 -name "*.csv" | wc -l)
-  echo "[INFO] Se van a procesar $CSV_COUNT archivos CSV en $PATH_CPPIPE"
+  #CSV_COUNT=$(find "$PATH_CPPIPE" -maxdepth 1 -name "*.csv" | wc -l)
+  #echo "[INFO] Se van a procesar $CSV_COUNT archivos CSV en $PATH_CPPIPE"
 
   #generar_batchfiles "$PATH_CSV/$NAME_QC.csv" "$TEMPLATE_CPPIPE_QC" "$PATH_CPPIPE" "$PATH_BATCH_PIPELINES" "$PATH_QC_IMAGES" 1
   #mv "$PATH_BATCH_PIPELINES/Batch_data.h5" \
   #   "$PATH_BATCH_PIPELINES/Batch_data_QC.h5"
-  echo "[INFO] Batchfiles generated"
+  #echo "[INFO] Batchfiles generated for QC"
 
   #ejecutar_pipeline "$PATH_BATCH_PIPELINES/Batch_data_QC.h5" 0 "$PATH_QC_IMAGES" "$PATH_CSV/$NAME_QC.csv" $BATCH_SIZE
-  python $SCRIPT_PY_COLLAGE -i $PATH_QC_IMAGES -o $PATH_QC_COLLAGES --platemap /workspace_images/platemap_${COHORT}.csv
+  python $SCRIPT_PY_COLLAGE -i $PATH_QC_IMAGES -o $PATH_QC_COLLAGES --platemap /workspace_images/platemap_${COHORT}.csv 
 fi
 
 #### --- 4) Calculate CellProfiler features --- ####

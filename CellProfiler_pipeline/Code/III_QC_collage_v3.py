@@ -252,7 +252,7 @@ class ThresholdEngine:
 # ── Data loaders ───────────────────────────────────────────────────────────────
 
 def load_qc_tsv(tsv_path) -> dict:
-    """Load CellProfiler Image.txt TSV -> {plate: {well: {col: value}}}."""
+    """Load CellProfiler Image.txt TSV → {plate: {well: {col: value}}}."""
     if tsv_path is None:
         return {}
     tsv_path = Path(tsv_path)
@@ -298,7 +298,7 @@ def load_qc_tsv(tsv_path) -> dict:
 
 
 def load_platemap(platemap_path) -> dict:
-    """Load platemap CSV -> {plate: {well: compound}}."""
+    """Load platemap CSV → {plate: {well: compound}}."""
     if platemap_path is None:
         return {}
     platemap_path = Path(platemap_path)
@@ -324,139 +324,8 @@ def load_platemap(platemap_path) -> dict:
         plate = raw_p if raw_p.startswith("P") else f"P{raw_p}"
         result[plate][well] = cmpd
 
-    print(f"[platemap] {sum(len(v) for v in result.values())} well->compound mappings.")
+    print(f"[platemap] {sum(len(v) for v in result.values())} well→compound mappings.")
     return result
-
-
-def load_mfi_tsv(measurements_dir) -> dict:
-    """
-    Load MFI data from Nuclei.txt and Cells.txt in the measurements directory.
-    Also loads per-image MFI from Image.txt (Intensity_MeanIntensity_* columns)
-    as background reference values.
-
-    Returns {plate: {well: {
-        "{ObjType}_{ch}":          float,   # median of per-object MFI across the well
-        "{ObjType}_{ch}_iqr_lo":   float,   # Q1 (25th percentile)
-        "{ObjType}_{ch}_iqr_hi":   float,   # Q3 (75th percentile)
-        "{ObjType}_{ch}_n":        int,     # number of objects
-        "{ObjType}_{ch}_n_img":    int,     # number of images (sites)
-        "{ObjType}_{ch}_img":      float,   # median of per-image MFI (from Image.txt)
-    }}}
-    """
-    if measurements_dir is None:
-        return {}
-    mdir = Path(measurements_dir)
-    if not mdir.exists():
-        print(f"[mfi] Measurements dir not found: {mdir}")
-        return {}
-
-    result: dict = defaultdict(lambda: defaultdict(dict))
-    found_any = False
-
-    # Infer channel name: Intensity_MeanIntensity_OrigDNA -> DNA
-    def _ch_name(col: str) -> str:
-        raw = col.replace("Intensity_MeanIntensity_", "")
-        for pfx in ("Orig", "orig"):
-            if raw.startswith(pfx):
-                raw = raw[len(pfx):]
-        return raw
-
-    # ── Load per-image MFI from Image.txt for background reference ────────────
-    img_mfi: dict = defaultdict(lambda: defaultdict(dict))  # {plate:{well:{ch: median}}}
-    img_n:   dict = defaultdict(lambda: defaultdict(dict))  # {plate:{well:{ch: count}}}
-    img_txt  = mdir / "Image.txt"
-    if img_txt.exists():
-        try:
-            df_img = pd.read_csv(img_txt, sep="\t", low_memory=False)
-            img_plate_col = "Metadata_Plate" if "Metadata_Plate" in df_img.columns else None
-            img_well_col  = "Metadata_Well"  if "Metadata_Well"  in df_img.columns else None
-            # ImageQuality_MeanIntensity_* or Intensity_MeanIntensity_* in Image.txt
-            img_mfi_cols = [c for c in df_img.columns
-                            if "MeanIntensity" in c and "ImageQuality" not in c
-                            and "PowerLogLog" not in c]
-            if img_well_col and img_mfi_cols:
-                ig = [img_plate_col, img_well_col] if img_plate_col else [img_well_col]
-                for _, row in df_img.iterrows():
-                    plate = str(row[img_plate_col]).strip() if img_plate_col else "Plate"
-                    well  = str(row[img_well_col]).strip().upper()
-                    for col in img_mfi_cols:
-                        ch = _ch_name(col)
-                        v  = row[col]
-                        if pd.notna(v):
-                            if ch not in img_mfi[plate][well]:
-                                img_mfi[plate][well][ch] = []
-                            img_mfi[plate][well][ch].append(float(v))
-                # Aggregate per-well median and count
-                for plate, wells in img_mfi.items():
-                    for well, chs in wells.items():
-                        for ch, vals in chs.items():
-                            img_mfi[plate][well][ch] = float(np.median(vals))
-                            img_n[plate][well][ch]   = len(vals)
-        except Exception as e:
-            print(f"[mfi] Could not read Image.txt for background MFI: {e}")
-
-    # ── Load per-object MFI from Nuclei.txt / Cells.txt ──────────────────────
-    for fname in ("Nuclei.txt", "Cells.txt"):
-        fpath = mdir / fname
-        if not fpath.exists():
-            continue
-        found_any = True
-        print(f"[mfi] Loading {fpath} …")
-        try:
-            df = pd.read_csv(fpath, sep="\t", low_memory=False)
-        except Exception as e:
-            print(f"[mfi] Could not read {fpath}: {e}")
-            continue
-
-        plate_col = "Metadata_Plate" if "Metadata_Plate" in df.columns else None
-        well_col  = "Metadata_Well"  if "Metadata_Well"  in df.columns else None
-        if well_col is None:
-            print(f"[mfi] {fname}: Metadata_Well column not found, skipping.")
-            continue
-
-        mfi_cols = [c for c in df.columns if c.startswith("Intensity_MeanIntensity_")]
-        if not mfi_cols:
-            print(f"[mfi] {fname}: no Intensity_MeanIntensity_* columns found.")
-            continue
-
-        gkeys     = [plate_col, well_col] if plate_col else [well_col]
-        grp       = df.groupby(gkeys)
-        obj_label = fname.replace(".txt", "")   # "Nuclei" or "Cells"
-
-        agg_med = grp[mfi_cols].median().reset_index()
-        agg_q1  = grp[mfi_cols].quantile(0.25).reset_index()
-        agg_q3  = grp[mfi_cols].quantile(0.75).reset_index()
-        agg_n   = grp[mfi_cols].count().reset_index()
-
-        for idx in range(len(agg_med)):
-            row_med = agg_med.iloc[idx]
-            row_q1  = agg_q1.iloc[idx]
-            row_q3  = agg_q3.iloc[idx]
-            row_n   = agg_n.iloc[idx]
-            plate   = str(row_med[plate_col]).strip() if plate_col else "Plate"
-            well    = str(row_med[well_col]).strip().upper()
-            for col in mfi_cols:
-                ch  = _ch_name(col)
-                key = f"{obj_label}_{ch}"
-                v   = row_med[col]
-                if pd.notna(v):
-                    result[plate][well][key]          = float(v)
-                    result[plate][well][f"{key}_iqr_lo"] = float(row_q1[col]) if pd.notna(row_q1[col]) else None
-                    result[plate][well][f"{key}_iqr_hi"] = float(row_q3[col]) if pd.notna(row_q3[col]) else None
-                    result[plate][well][f"{key}_n"]   = int(row_n[col])       if pd.notna(row_n[col])  else 0
-                    # n_img and img_mfi from Image.txt lookup
-                    img_v   = img_mfi.get(plate, {}).get(well, {}).get(ch)
-                    img_cnt = img_n.get(plate, {}).get(well, {}).get(ch, 0)
-                    result[plate][well][f"{key}_img"]   = img_v
-                    result[plate][well][f"{key}_n_img"] = img_cnt
-
-    if not found_any:
-        print(f"[mfi] Neither Nuclei.txt nor Cells.txt found in {mdir}")
-    else:
-        n_wells = sum(len(v) for v in result.values())
-        print(f"[mfi] {n_wells} wells with MFI data across {len(result)} plate(s).")
-
-    return dict(result)
 
 
 # ── Image helpers ──────────────────────────────────────────────────────────────
@@ -1107,7 +976,7 @@ def generate_html(cohort_name: str, plates_data: list[dict],
 
     plates_data: list of dicts, one per plate:
         {name, collage_arr, plate_qc, plate_map, pass_rate,
-         n_wells, n_pass, n_illum_pass, n_focus_pass, mfi_data}
+         n_wells, n_pass, n_illum_pass, n_focus_pass}
     """
     plotly_js = _fetch_plotly_js()
 
@@ -1170,7 +1039,6 @@ def generate_html(cohort_name: str, plates_data: list[dict],
             "n_pass":       pd_["n_pass"],
             "n_illum":      pd_["n_illum_pass"],
             "n_focus":      pd_["n_focus_pass"],
-            "mfi":          pd_.get("mfi_data", {}),
             "wells": _round_floats({
                 well: {
                     "compound": pmap.get(well, ""),
@@ -1239,36 +1107,6 @@ def generate_html(cohort_name: str, plates_data: list[dict],
         for col in ["Count_Cells", "Count_Nuclei", "Count_Illum_artifacts"]
     })
 
-    # ── MFI channel detection ─────────────────────────────────────────────────
-    # Collect all MFI keys present across all plates (e.g. "Nuclei_DNA", "Cells_Syto")
-    _all_mfi_keys: set = set()
-    for pd_ in plates_data:
-        for well_mfi in pd_.get("mfi_data", {}).values():
-            _all_mfi_keys.update(well_mfi.keys())
-    # Split into Nuclei_* and Cells_* channel sets
-    _mfi_nuclei_channels = sorted({k[len("Nuclei_"):] for k in _all_mfi_keys if k.startswith("Nuclei_")})
-    _mfi_cells_channels  = sorted({k[len("Cells_"):] for k in _all_mfi_keys  if k.startswith("Cells_")})
-    # Use Nuclei channels as primary (fallback to Cells)
-    _mfi_channels = _mfi_nuclei_channels or _mfi_cells_channels
-    mfi_channels_json   = json.dumps(_mfi_channels)
-    mfi_has_nuclei_json = json.dumps(bool(_mfi_nuclei_channels))
-    mfi_has_cells_json  = json.dumps(bool(_mfi_cells_channels))
-
-    # ── Cohort-wide MFI colour ranges (p2/p98) ───────────────────────────────
-    def _mfi_range(key: str) -> list:
-        vals = [
-            v for pd_ in plates_data
-            for well_mfi in pd_.get("mfi_data", {}).values()
-            if (v := well_mfi.get(key)) is not None
-        ]
-        if len(vals) < 4:
-            return [None, None]
-        return [round(float(np.percentile(vals, 2)), 5),
-                round(float(np.percentile(vals, 98)), 5)]
-    mfi_ranges_json = json.dumps({
-        key: _mfi_range(key) for key in _all_mfi_keys
-    })
-
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1286,44 +1124,10 @@ def generate_html(cohort_name: str, plates_data: list[dict],
   body {{ background: var(--bg); color: var(--text);
           font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; line-height: 1.5; }}
   h1 {{ font-size: 1.5rem; color: #a8c8ff; padding: 24px 32px 4px; }}
-  h2 {{ font-size: 1.05rem; color: #8ab0e0; margin-bottom: 6px; letter-spacing: 0.03em; }}
+  h2 {{ font-size: 1.05rem; color: #8ab0e0; margin-bottom: 12px; letter-spacing: 0.03em; }}
   .subtitle {{ color: var(--muted); padding: 0 32px 20px; font-size: 0.82rem; }}
   .container {{ max-width: 1600px; margin: 0 auto; padding: 0 32px 56px; }}
   .section {{ margin-bottom: 44px; }}
-
-  /* ── Feature audit label ── */
-  .feature-audit {{
-    background: linear-gradient(135deg, #0d1830 0%, #111d38 100%);
-    border: 1px solid #2a4070;
-    border-left: 3px solid #3a7bd5;
-    border-radius: 6px; padding: 10px 16px; margin-bottom: 16px;
-    font-size: 0.77rem; color: #8ab4d8; line-height: 1.8;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-  }}
-  .feature-audit .audit-row {{
-    display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
-  }}
-  .feature-audit .audit-label {{
-    color: #a8c8f0; font-weight: 600; font-size: 0.78rem;
-    min-width: 90px; flex-shrink: 0;
-  }}
-  .feature-audit .audit-source {{
-    color: #4a8fd8; font-weight: 600; font-size: 0.75rem;
-  }}
-  .feature-audit .thresh {{
-    color: #7ac0f0; font-family: monospace; font-size: 0.72rem;
-    background: rgba(58,123,213,0.12); border-radius: 3px;
-    padding: 0 4px;
-  }}
-  .feature-audit .thresh-val {{
-    color: #f0c060; font-family: monospace; font-size: 0.72rem;
-    background: rgba(200,140,0,0.12); border-radius: 3px;
-    padding: 0 4px;
-  }}
-  .feature-audit .audit-sep {{
-    color: #2a4070; margin: 4px 0;
-    border: none; border-top: 1px solid #1e3055;
-  }}
 
   /* Summary */
   .summary-table {{ width: 100%; border-collapse: collapse; }}
@@ -1388,6 +1192,9 @@ def generate_html(cohort_name: str, plates_data: list[dict],
                   border: 1px solid var(--border); border-bottom: 2px solid var(--bg); }}
   .tab-content {{ display: none; }}
   .tab-content.active {{ display: block; }}
+  .tab-group-label {{ padding: 7px 12px 7px 6px; color: var(--muted);
+                       font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em;
+                       align-self: center; white-space: nowrap; }}
   .channel-grid {{ display: grid; grid-template-columns: repeat(3, 1fr);
                    gap: 10px; padding: 10px; background: var(--panel);
                    border: 1px solid var(--border); border-radius: 0 0 8px 8px; }}
@@ -1395,7 +1202,7 @@ def generate_html(cohort_name: str, plates_data: list[dict],
                    border-radius: 6px; padding: 4px; }}
 
   /* Cell counts */
-  .counts-grid {{ display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }}
+  .counts-grid {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }}
   .count-card {{ background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px; }}
 
   /* Compound filter */
@@ -1419,28 +1226,6 @@ def generate_html(cohort_name: str, plates_data: list[dict],
   .flag-table th {{ background: #1a2040; color: #8ab0e0; text-transform: uppercase; font-size: 0.72rem; }}
   .flag-table tr.hidden {{ display: none; }}
   .flag-table tr:hover {{ background: #161c35; }}
-
-  /* MFI section */
-  .mfi-channel-section {{ margin-bottom: 32px; border: 1px solid var(--border);
-                          border-radius: 8px; overflow: hidden; }}
-  .mfi-channel-header {{ background: #131828; padding: 10px 16px;
-                         display: flex; align-items: center; gap: 10px; }}
-  .mfi-ch-dot {{ width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }}
-  .mfi-channel-header h3 {{ font-size: 0.9rem; color: #a8c8ff; margin: 0; }}
-  .mfi-body {{ display: grid; grid-template-columns: 320px 1fr; gap: 0; }}
-  .mfi-stats-panel {{ background: #0e1020; border-right: 1px solid var(--border);
-                      padding: 14px; display: flex; flex-direction: column; gap: 8px; }}
-  .mfi-stats-panel h4 {{ font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em;
-                         color: var(--muted); margin-bottom: 4px; }}
-  .mfi-stat-row {{ display: flex; justify-content: space-between; align-items: center;
-                   padding: 3px 0; border-bottom: 1px solid #14182a; font-size: 0.8rem; }}
-  .mfi-stat-label {{ color: #8ab0d0; }}
-  .mfi-stat-val   {{ font-family: monospace; color: #c8d8f0; }}
-  .mfi-stat-delta {{ font-family: monospace; font-size: 0.76rem; }}
-  .mfi-stat-delta.pos {{ color: #4bd760; }}
-  .mfi-stat-delta.neg {{ color: #ff6060; }}
-  .mfi-plots {{ padding: 8px; background: var(--panel); display: grid;
-                grid-template-columns: 1fr 1fr 1fr; gap: 8px; }}
 </style>
 </head>
 <body>
@@ -1457,7 +1242,7 @@ def generate_html(cohort_name: str, plates_data: list[dict],
   <table class="summary-table">
     <thead>
       <tr><th>Plate</th><th>Wells</th><th>Overall pass</th>
-          <th>Illumination</th><th>Focus</th><th>Flagged wells</th><th>MFI Δ Hoechst</th><th>MFI Δ Syto</th></tr>
+          <th>Illumination</th><th>Focus</th><th>Flagged wells</th></tr>
     </thead>
     <tbody id="summary-tbody"></tbody>
   </table>
@@ -1493,29 +1278,6 @@ def generate_html(cohort_name: str, plates_data: list[dict],
 <!-- 3. QC METRICS -->
 <div class="section">
   <h2>QC Metrics</h2>
-  <div class="feature-audit">
-    <div class="audit-row">
-      <span class="audit-label">Illumination</span>
-      <span class="thresh">ImageQuality_PowerLogLogSlope_*</span>
-      <span class="thresh">ImageQuality_MaxIntensity_*</span>
-      <span class="audit-source">← Image.txt</span>
-    </div>
-    <div class="audit-row">
-      <span class="audit-label">Focus</span>
-      <span class="thresh">ImageQuality_FocusScore_*</span>
-      <span class="thresh">ImageQuality_LocalFocusScore_*_10</span>
-      <span class="audit-source">← Image.txt</span>
-    </div>
-    <hr class="audit-sep">
-    <div class="audit-row">
-      <span class="audit-label">Thresholds</span>
-      Slope <span class="thresh-val">[−2.5, −1.0]</span>
-      &nbsp;·&nbsp; MaxInt <span class="thresh-val">≤ 0.95</span>
-      &nbsp;·&nbsp; Focus <span class="thresh-val">≥ 0.005</span>
-      &nbsp;·&nbsp; LocalFocus per-channel
-      &nbsp;·&nbsp; Adaptive: median ± 3σ MAD per plate
-    </div>
-  </div>
   <div class="compound-toolbar" id="compound-toolbar" style="margin-bottom:10px;">
     <label>Filter by compound:</label>
     <button class="cmpd-btn ctrl" id="btn-show-all">All</button>
@@ -1528,62 +1290,10 @@ def generate_html(cohort_name: str, plates_data: list[dict],
 <!-- 4. CELL COUNTS -->
 <div class="section">
   <h2>Cell Counts</h2>
-  <div class="feature-audit">
-    <div class="audit-row">
-      <span class="audit-label">Cells</span>
-      <span class="thresh">Count_Cells</span>
-      <span class="audit-source">← Image.txt</span>
-    </div>
-    <div class="audit-row">
-      <span class="audit-label">Ratio</span>
-      <span class="thresh">Count_Cells / Count_Nuclei</span>
-      &nbsp;
-      <span style="color:#4bd760;font-size:0.78rem;">■ 1.00</span>
-      <span style="color:#ffbe00;font-size:0.78rem;">■ 0.99</span>
-      <span style="color:#ff4444;font-size:0.78rem;">■ &lt;0.99</span>
-    </div>
-  </div>
   <div class="counts-grid" id="counts-grid"></div>
 </div>
 
-<!-- 5. MFI (Median Fluorescence Intensity) -->
-<div class="section">
-  <h2>Median Fluorescence Intensity (MFI)</h2>
-  <div class="feature-audit">
-    <div class="audit-row">
-      <span class="audit-label">Object MFI</span>
-      <span class="thresh">Intensity_MeanIntensity_*</span>
-      <span class="audit-source">← Nuclei.txt / Cells.txt</span>
-      &nbsp;— median per-object, aggregated per well
-    </div>
-    <div class="audit-row">
-      <span class="audit-label">Image MFI (bg)</span>
-      <span class="thresh">Intensity_MeanIntensity_*</span>
-      <span class="audit-source">← Image.txt</span>
-      &nbsp;— median per-site, aggregated per well
-    </div>
-    <hr class="audit-sep">
-    <div class="audit-row">
-      <span class="audit-label">Δ (obj−img)</span>
-      difference between object MFI and image background MFI
-      &nbsp;·&nbsp; IQR = Q1–Q3 across objects in the well
-    </div>
-  </div>
-  <div id="mfi-plate-select-row" style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
-    <label style="color:var(--muted);font-size:0.8rem;">Plate</label>
-    <select id="mfi-plate-select" style="background:#1a2040;color:var(--text);border:1px solid var(--border);
-            border-radius:4px;padding:5px 10px;font-size:0.88rem;cursor:pointer;"></select>
-    <label style="color:var(--muted);font-size:0.8rem;">Object</label>
-    <select id="mfi-obj-select" style="background:#1a2040;color:var(--text);border:1px solid var(--border);
-            border-radius:4px;padding:5px 10px;font-size:0.88rem;cursor:pointer;">
-      <option value="Nuclei">Nuclei</option>
-      <option value="Cells">Cells</option>
-    </select>
-  </div>
-  <div id="mfi-content"></div>
-</div>
-
-<!-- 6. FLAGGED WELLS -->
+<!-- 5. FLAGGED WELLS -->
 <div class="section">
   <h2>Flagged Wells</h2>
   <div class="flag-controls">
@@ -1600,8 +1310,7 @@ def generate_html(cohort_name: str, plates_data: list[dict],
 </div><!-- /container -->
 <script>
 const DATA   = {data_json};
-const COUNT_RANGES = {count_ranges_json};
-const MFI_RANGES   = {mfi_ranges_json};
+const COUNT_RANGES = {count_ranges_json};  // cohort-wide p2/p98 per count column
 const PLATES = Object.keys(DATA);
 
 const SLOPE_SPECS  = {slope_specs};
@@ -1613,27 +1322,9 @@ const METRIC_GROUPS = [
   {{ label: 'MaxIntensity', specs: MAXINT_SPECS }},
 ];
 
-// ROWS: A at top (index 0) -> H at bottom (index 7)
-// Plotly heatmap y-axis goes bottom->top, so we reverse for display.
-const ROW_LABELS  = ['A','B','C','D','E','F','G','H'];
-const ROWS_PLOTLY = ['H','G','F','E','D','C','B','A'];  // reversed for Plotly
+const ROWS = ['H','G','F','E','D','C','B','A'];  // reversed: A at top in Plotly
 const COLS = Array.from({{length:12}}, (_,i) => String(i+1).padStart(2,'0'));
 const PLATE_ROWS = 8, PLATE_COLS = 12;
-
-// MFI channel colours (channel name -> CSS colour)
-const MFI_COLORS = {{
-  DNA:'#6495ed', Hoechst:'#6495ed', DAPI:'#6495ed',
-  Syto:'#4bc870', RNA:'#4bc870',
-  Golgi_c:'#ffc04d', AGP:'#ffc04d',
-  ER_c:'#b06aff', ER:'#b06aff',
-  Mito_c:'#ff5555', Mito:'#ff5555',
-  Brightfield_c:'#909090', BF:'#909090',
-}};
-function _chColor(ch) {{
-  for (const [k,v] of Object.entries(MFI_COLORS))
-    if (ch.toLowerCase().includes(k.toLowerCase())) return v;
-  return '#8ab0d0';
-}}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function badge(pct) {{
@@ -1641,36 +1332,18 @@ function badge(pct) {{
   return `<span class="badge badge-${{cls}}">${{pct}}%</span>`;
 }}
 function fmt3(v) {{ return v != null ? v.toFixed(3) : '—'; }}
-function fmt5(v) {{ return v != null ? v.toFixed(5) : '—'; }}
-
-// Median of array (ignoring nulls)
-function arrMedian(arr) {{
-  const a = arr.filter(x => x != null && !isNaN(x)).sort((a,b)=>a-b);
-  if (!a.length) return null;
-  const m = Math.floor(a.length/2);
-  return a.length%2 ? a[m] : (a[m-1]+a[m])/2;
-}}
 
 // ── 1. Summary ────────────────────────────────────────────────────────────────
 (function() {{
   const tbody = document.getElementById('summary-tbody');
   PLATES.forEach(p => {{
     const d = DATA[p];
-    // Compute median MFI Δ for Hoechst/DNA and Syto across wells
-    const mfiDelta = (ch) => {{
-      const objKey = `Nuclei_${{ch}}`;
-      const vals = Object.values(d.mfi||{{}}).map(m=>m[objKey]).filter(x=>x!=null);
-      if (!vals.length) return '—';
-      return arrMedian(vals).toFixed(5);
-    }};
     tbody.insertAdjacentHTML('beforeend', `<tr>
       <td><strong>${{p}}</strong></td><td>${{d.n_wells}}</td>
       <td>${{badge(d.pass_rate)}} ${{d.n_pass}}/${{d.n_wells}}</td>
       <td>${{badge(Math.round(d.n_illum/d.n_wells*100))}} ${{d.n_illum}}/${{d.n_wells}}</td>
       <td>${{badge(Math.round(d.n_focus/d.n_wells*100))}} ${{d.n_focus}}/${{d.n_wells}}</td>
       <td>${{d.n_wells - d.n_pass}}</td>
-      <td style="font-family:monospace;">${{mfiDelta('DNA')||mfiDelta('Hoechst')}}</td>
-      <td style="font-family:monospace;">${{mfiDelta('Syto')||mfiDelta('RNA')}}</td>
     </tr>`);
   }});
 }})();
@@ -1696,11 +1369,13 @@ function renderPlate(idx) {{
   slider.value  = idx;
   pSelect.value = idx;
 
+  // Overview image + SVG overlay
   const pd = DATA[name];
   document.getElementById('overview-img').src =
     `data:image/jpeg;base64,${{pd.overview_b64}}`;
   buildOverlaySVG(name);
 
+  // Reset well panels
   document.getElementById('well-info').innerHTML =
     '<p class="no-well">Click a well in the overview below to inspect it.</p>';
   document.getElementById('well-montage').innerHTML =
@@ -1710,20 +1385,19 @@ function renderPlate(idx) {{
   renderCounts(name);
 }}
 
-// ── Fix #2: corrected SVG overlay (A=top, H=bottom) ──────────────────────────
 function buildOverlaySVG(plateName) {{
   const pd  = DATA[plateName];
-  const cw  = pd.overview_cw;
+  const cw  = pd.overview_cw;   // cell px in source image
   const ch  = pd.overview_ch;
   const svg = document.getElementById('overview-svg');
 
+  // viewBox matches source image pixel dimensions
   const imgW = cw * PLATE_COLS;
   const imgH = ch * PLATE_ROWS;
   svg.setAttribute('viewBox', `0 0 ${{imgW}} ${{imgH}}`);
   svg.innerHTML = '';
 
-  // ROW_LABELS[0]='A' -> ri=0 -> y0=0 (top). Correct: A01 maps to top-left.
-  ROW_LABELS.forEach((r, ri) => {{
+  ROWS.forEach((r, ri) => {{
     COLS.forEach((c, ci) => {{
       const well = r + c;
       const x0   = ci * cw, y0 = ri * ch;
@@ -1740,6 +1414,7 @@ function buildOverlaySVG(plateName) {{
 }}
 
 function selectWell(plateName, well) {{
+  // Deselect previous
   if (selectedWell) {{
     const prev = document.getElementById(`sv-${{selectedWell}}`);
     if (prev) prev.classList.remove('selected');
@@ -1766,6 +1441,7 @@ function renderWellInfo(plateName, well) {{
   let html = `<h3>${{well}}</h3>
     <div class="well-compound">${{cmpd}}</div>`;
 
+  // Counts
   html += `<div class="section-label">Cell counts</div>`;
   [['Cells','Count_Cells'],['Nuclei','Count_Nuclei'],
    ['Raw nuclei','Count_Raw_nuclei'],['Artifacts','Count_Illum_artifacts']].forEach(([lbl,col]) => {{
@@ -1776,38 +1452,30 @@ function renderWellInfo(plateName, well) {{
     </div>`;
   }});
 
-  // MFI for this well
-  const mfi = (pd.mfi||{{}})[well];
-  if (mfi && Object.keys(mfi).length) {{
-    html += `<div class="section-label">MFI (Nuclei)</div>`;
-    Object.entries(mfi).forEach(([key, v]) => {{
-      html += `<div class="metric-row">
-        <span class="metric-label">${{key}}</span>
-        <span class="metric-val" style="color:${{_chColor(key)}}">${{v!=null?v.toFixed(5):'—'}}</span>
-      </div>`;
-    }});
-  }}
-
+  // QC metrics
   ALL_METRIC_SPECS.forEach(spec => {{
     const v      = m[spec.col];
     if (v == null) return;
+    const parts  = spec.col.split('_');
+    // Build tag: e.g. "Slope/DNA"
     const metKey = spec.title.split('—')[0].trim();
     const chKey  = spec.title.split('—')[1]?.trim() || '';
     const tag    = `${{metKey}}/${{chKey}}`;
     const isAbs  = absSet.has(tag);
     const isAdp  = adpSet.has(tag);
     const cls    = isAbs ? 'fail-abs' : isAdp ? 'fail-adp' : 'pass';
-    const bdg    = isAbs ? '<span class="fail-tag abs">ABS</span>'
+    const badge  = isAbs ? '<span class="fail-tag abs">ABS</span>'
                  : isAdp ? '<span class="fail-tag adp">ADJ</span>' : '';
     html += `<div class="metric-row">
       <span class="metric-label">${{spec.title}}</span>
-      <span class="metric-val ${{cls}}">${{fmt3(v)}}${{bdg}}</span>
+      <span class="metric-val ${{cls}}">${{fmt3(v)}}${{badge}}</span>
     </div>`;
   }});
 
   document.getElementById('well-info').innerHTML = html;
 }}
 
+// ── Well montage panel ────────────────────────────────────────────────────────
 function renderWellMontage(plateName, well) {{
   const pd  = DATA[plateName];
   const b64 = pd.flagged_b64[well];
@@ -1816,9 +1484,11 @@ function renderWellMontage(plateName, well) {{
     el.innerHTML = `<img src="data:image/jpeg;base64,${{b64}}" alt="Well ${{well}} montage">`;
   }} else {{
     const flags = pd.well_flags[well];
-    el.innerHTML = flags
-      ? '<span class="no-img">Flagged well — montage not pre-generated.</span>'
-      : '<span class="no-img">Well passes all QC thresholds — no image preloaded.</span>';
+    if (flags) {{
+      el.innerHTML = '<span class="no-img">Flagged well — montage not pre-generated<br>(only wells with absolute failures include images).</span>';
+    }} else {{
+      el.innerHTML = '<span class="no-img">Well passes all QC thresholds — no image preloaded.</span>';
+    }}
   }}
 }}
 
@@ -1826,8 +1496,9 @@ slider.oninput   = () => renderPlate(+slider.value);
 pSelect.onchange = () => renderPlate(+pSelect.value);
 
 // ── Compound filter state ────────────────────────────────────────────────────
-let activeCompounds = new Set();
+let activeCompounds = new Set();   // empty = show all
 let hideAllMode     = false;
+
 function compoundVisible(cmpd) {{
   if (hideAllMode)              return false;
   if (activeCompounds.size===0) return true;
@@ -1835,8 +1506,9 @@ function compoundVisible(cmpd) {{
 }}
 
 // ── 3. QC Metrics ─────────────────────────────────────────────────────────────
+// wellMatrix respects compound filter: masked wells become null (shown as blank)
 function wellMatrix(plateData, colName) {{
-  return ROWS_PLOTLY.map(r => COLS.map(c => {{
+  return ROWS.map(r => COLS.map(c => {{
     const w    = r + c;
     const well = plateData.wells[w];
     if (!well) return null;
@@ -1851,7 +1523,7 @@ function isFiltered() {{
 
 function makeHeatmap(plateData, spec) {{
   const z    = wellMatrix(plateData, spec.col);
-  const text = ROWS_PLOTLY.map(r => COLS.map(c => {{
+  const text = ROWS.map(r => COLS.map(c => {{
     const w    = r + c;
     const v    = plateData.wells[w]?.[spec.col];
     const cmpd = plateData.wells[w]?.compound || '';
@@ -1862,7 +1534,7 @@ function makeHeatmap(plateData, spec) {{
   }}));
   return {{
     type:'heatmap', z, text, hoverinfo:'text',
-    x:COLS, y:ROWS_PLOTLY, colorscale: spec.cs,
+    x:COLS, y:ROWS, colorscale: spec.cs,
     zmin: spec.cmin, zmax: spec.cmax,
     colorbar:{{ thickness:10, len:0.85, tickfont:{{size:9}} }},
   }};
@@ -1872,13 +1544,21 @@ function heatmapLayout(title, extraY) {{
   const filtered = isFiltered();
   const gridcolor = filtered ? 'rgba(0,0,0,0)' : 'rgba(80,90,120,0.4)';
   return {{
-    paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'#0a0c18',
+    paper_bgcolor:'rgba(0,0,0,0)',
+    plot_bgcolor: '#0a0c18',
     font:{{color:'#c8d8f0', size:10}},
-    margin:{{t:32,b:42,l:42,r:16}}, height:300,
+    margin:{{t:32,b:42,l:42,r:16}},
+    height: 300,
     title:{{text:title, font:{{size:11,color:'#8ab0e0'}}, x:0.5}},
-    xaxis:{{ tickfont:{{size:9}}, showgrid:!filtered, gridcolor, zeroline:false }},
-    yaxis:{{ tickfont:{{size:9}}, showgrid:!filtered, gridcolor, zeroline:false,
-             title: extraY ? {{text:'Row', font:{{size:9}}}} : undefined }},
+    xaxis:{{
+      tickfont:{{size:9}}, showgrid:!filtered,
+      gridcolor, zeroline:false,
+    }},
+    yaxis:{{
+      tickfont:{{size:9}}, showgrid:!filtered,
+      gridcolor, zeroline:false,
+      title: extraY ? {{text:'Row', font:{{size:9}}}} : undefined,
+    }},
   }};
 }}
 
@@ -1889,13 +1569,18 @@ function renderMetrics(plateName) {{
   tabsEl.innerHTML = ''; contentsEl.innerHTML = '';
   const pd = DATA[plateName];
   let firstGroup = true;
+
   METRIC_GROUPS.forEach((grp, gi) => {{
+    // One tab per group only — no per-channel tabs
     const isFirst = firstGroup;
     tabsEl.insertAdjacentHTML('beforeend',
       `<div class="tab${{isFirst?' active':''}}" data-group="${{gi}}">${{grp.label}}</div>`);
+
     contentsEl.insertAdjacentHTML('beforeend',
       `<div class="tab-content${{isFirst?' active':''}}" id="grp-${{gi}}">
-         <div class="channel-grid" id="chgrid-${{gi}}"></div></div>`);
+         <div class="channel-grid" id="chgrid-${{gi}}"></div>
+       </div>`);
+
     setTimeout(() => {{
       const grid = document.getElementById(`chgrid-${{gi}}`);
       if (!grid) return;
@@ -1910,8 +1595,10 @@ function renderMetrics(plateName) {{
           {{responsive:true, displayModeBar:false}});
       }});
     }}, 0);
+
     if (isFirst) firstGroup = false;
   }});
+
   tabsEl.querySelectorAll('.tab').forEach(tab => {{
     tab.onclick = () => {{
       const gi = tab.dataset.group;
@@ -1923,313 +1610,56 @@ function renderMetrics(plateName) {{
   }});
 }}
 
-// ── 4. Cell counts — Cells heatmap + Cells/Nuclei ratio ──────────────────────
+// ── 4. Cell counts ────────────────────────────────────────────────────────────
+const COUNT_SPECS = [
+  {{col:'Count_Cells',           title:'Cells',            cs:'Viridis'}},
+  {{col:'Count_Nuclei',          title:'Nuclei (filtered)',cs:'Viridis'}},
+  {{col:'Count_Illum_artifacts', title:'Illum. Artifacts', cs:'YlOrRd' }},
+];
+
 function renderCounts(plateName) {{
   const grid = document.getElementById('counts-grid');
   grid.innerHTML = '';
   const pd = DATA[plateName];
-
-  // Card 1: Cells count heatmap
-  (function() {{
-    const cid  = `cnt-cells`;
+  COUNT_SPECS.forEach(spec => {{
+    const cid  = `cnt-${{spec.col.replace(/[^a-z0-9]/gi,'_')}}`;
     const card = document.createElement('div');
     card.className = 'count-card';
     card.innerHTML = `<div id="${{cid}}"></div>`;
     grid.appendChild(card);
-    const z    = ROWS_PLOTLY.map(r => COLS.map(c => {{
-      const w = r+c, well = pd.wells[w];
-      if (!well || !compoundVisible(well.compound||'')) return null;
-      return well['Count_Cells'] ?? null;
-    }}));
-    const text = ROWS_PLOTLY.map(r => COLS.map(c => {{
-      const w = r+c, v = pd.wells[w]?.['Count_Cells'];
-      return `<b>${{w}}</b><br>${{pd.wells[w]?.compound||''}}<br>Cells: ${{v!=null?Math.round(v):'N/A'}}`;
+    const z    = wellMatrix(pd, spec.col);
+    const text = ROWS.map(r => COLS.map(c => {{
+      const w = r+c, v = pd.wells[w]?.[spec.col];
+      return `<b>${{w}}</b><br>${{pd.wells[w]?.compound||''}}<br>${{spec.title}}: ${{v!=null?Math.round(v):'N/A'}}`;
     }}));
     const filtered = isFiltered();
     const gridcolor = filtered ? 'rgba(0,0,0,0)' : 'rgba(80,90,120,0.4)';
-    const cRange = COUNT_RANGES['Count_Cells'] || [null,null];
+    const cRange = COUNT_RANGES[spec.col] || [null, null];
     Plotly.react(cid,
-      [{{type:'heatmap',z,text,hoverinfo:'text',x:COLS,y:ROWS_PLOTLY,colorscale:'Viridis',
-         zmin:cRange[0],zmax:cRange[1],colorbar:{{thickness:14,len:0.85,tickfont:{{size:10}}}}}}],
-      {{paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#0a0c18',
-        font:{{color:'#c8d8f0',size:11}},margin:{{t:40,b:50,l:50,r:20}},height:340,
-        title:{{text:'Cells',font:{{size:13,color:'#a8c8ff'}},x:0.5}},
-        xaxis:{{title:'Column',tickfont:{{size:10}},tickvals:COLS,ticktext:COLS.map(c=>parseInt(c)),
-                showgrid:!filtered,gridcolor,zeroline:false}},
-        yaxis:{{title:'Row',tickfont:{{size:10}},showgrid:!filtered,gridcolor,zeroline:false}},
-      }},{{responsive:true,displayModeBar:false}});
-  }})();
-
-  // Card 2: Cells/Nuclei ratio with custom colour scale (1=green, 0.99=yellow, <0.99=red)
-  (function() {{
-    const cid  = `cnt-ratio`;
-    const card = document.createElement('div');
-    card.className = 'count-card';
-    card.innerHTML = `<div id="${{cid}}"></div>`;
-    grid.appendChild(card);
-
-    const ratioCS = [[0,'#ff4444'],[0.98,'#ff4444'],[0.99,'#ffbe00'],[1.0,'#4bd760']];
-
-    const z    = ROWS_PLOTLY.map(r => COLS.map(c => {{
-      const w = r+c, well = pd.wells[w];
-      if (!well || !compoundVisible(well.compound||'')) return null;
-      const cells  = well['Count_Cells'];
-      const nuclei = well['Count_Nuclei'];
-      if (cells == null || nuclei == null || nuclei === 0) return null;
-      return Math.min(1, cells / nuclei);
-    }}));
-    const text = ROWS_PLOTLY.map(r => COLS.map(c => {{
-      const w    = r+c, well = pd.wells[w];
-      const cells  = well?.['Count_Cells'];
-      const nuclei = well?.['Count_Nuclei'];
-      const ratio  = (cells != null && nuclei != null && nuclei > 0)
-                     ? (cells/nuclei).toFixed(4) : 'N/A';
-      return `<b>${{w}}</b><br>${{well?.compound||''}}<br>` +
-             `Ratio: ${{ratio}}<br>Cells: ${{cells!=null?Math.round(cells):'—'}} · ` +
-             `Nuclei: ${{nuclei!=null?Math.round(nuclei):'—'}}`;
-    }}));
-    const filtered = isFiltered();
-    const gridcolor = filtered ? 'rgba(0,0,0,0)' : 'rgba(80,90,120,0.4)';
-    Plotly.react(cid,
-      [{{type:'heatmap',z,text,hoverinfo:'text',x:COLS,y:ROWS_PLOTLY,
-         colorscale:ratioCS, zmin:0.97, zmax:1.0,
-         colorbar:{{thickness:14,len:0.85,tickfont:{{size:10}},
-                    tickvals:[0.97,0.99,1.0],ticktext:['<0.99','0.99','1.00']}}}}],
-      {{paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#0a0c18',
-        font:{{color:'#c8d8f0',size:11}},margin:{{t:40,b:50,l:50,r:20}},height:340,
-        title:{{text:'Cells / Nuclei ratio',font:{{size:13,color:'#a8c8ff'}},x:0.5}},
-        xaxis:{{title:'Column',tickfont:{{size:10}},tickvals:COLS,ticktext:COLS.map(c=>parseInt(c)),
-                showgrid:!filtered,gridcolor,zeroline:false}},
-        yaxis:{{title:'Row',tickfont:{{size:10}},showgrid:!filtered,gridcolor,zeroline:false}},
-      }},{{responsive:true,displayModeBar:false}});
-  }})();
-}}
-
-// ── 5. MFI section ────────────────────────────────────────────────────────────
-const MFI_CHANNELS     = {mfi_channels_json};
-const MFI_HAS_NUCLEI   = {mfi_has_nuclei_json};
-const MFI_HAS_CELLS    = {mfi_has_cells_json};
-
-PLATES.forEach(p =>
-  document.getElementById('mfi-plate-select').insertAdjacentHTML(
-    'beforeend', `<option value="${{p}}">${{p}}</option>`)
-);
-document.getElementById('mfi-plate-select').onchange = renderMFI;
-document.getElementById('mfi-obj-select').onchange   = renderMFI;
-if (!MFI_HAS_NUCLEI) document.getElementById('mfi-obj-select').querySelector('[value=Nuclei]').disabled = true;
-if (!MFI_HAS_CELLS)  document.getElementById('mfi-obj-select').querySelector('[value=Cells]').disabled  = true;
-
-function renderMFI() {{
-  const plateName = document.getElementById('mfi-plate-select').value;
-  const objType   = document.getElementById('mfi-obj-select').value;   // "Nuclei" or "Cells"
-  const pd        = DATA[plateName];
-  const mfiData   = pd.mfi || {{}};
-  const container = document.getElementById('mfi-content');
-  container.innerHTML = '';
-
-  if (!MFI_CHANNELS.length) {{
-    container.innerHTML = '<p style="color:var(--muted);padding:16px;">No MFI data found — check that Nuclei.txt or Cells.txt exists in the Measurements directory.</p>';
-    return;
-  }}
-
-  MFI_CHANNELS.forEach(ch => {{
-    const key = `${{objType}}_${{ch}}`;
-    const color = _chColor(ch);
-
-    // Collect well values
-    const wellVals = {{}};  // well -> value
-    ROW_LABELS.forEach(r => COLS.forEach(c => {{
-      const w = r+c;
-      const v = mfiData[w]?.[key];
-      if (v != null) wellVals[w] = v;
-    }}));
-
-    const allVals = Object.values(wellVals).filter(x=>x!=null);
-    if (!allVals.length) return;
-
-    const plateMedian = arrMedian(allVals);
-
-    // ── Stats panel data ──────────────────────────────────────────────────────
-    // Per-row and per-column medians
-    const rowStats = ROW_LABELS.map(r => {{
-      const vals = COLS.map(c => wellVals[r+c]).filter(x=>x!=null);
-      return {{ r, median: arrMedian(vals), n: vals.length }};
-    }});
-    const colStats = COLS.map(c => {{
-      const vals = ROW_LABELS.map(r => wellVals[r+c]).filter(x=>x!=null);
-      return {{ c: parseInt(c), median: arrMedian(vals), n: vals.length }};
-    }});
-
-    // ── Section DOM ───────────────────────────────────────────────────────────
-    const sec = document.createElement('div');
-    sec.className = 'mfi-channel-section';
-    sec.innerHTML = `
-      <div class="mfi-channel-header">
-        <div class="mfi-ch-dot" style="background:${{color}}"></div>
-        <h3>${{ch}} <span style="color:var(--muted);font-size:0.8rem;font-weight:normal;">
-          — ${{objType}} · plate median: ${{plateMedian!=null?plateMedian.toFixed(5):'—'}}</span></h3>
-      </div>
-      <div class="mfi-body">
-        <div class="mfi-stats-panel" id="mfi-stats-${{ch}}"></div>
-        <div class="mfi-plots">
-          <div id="mfi-box-row-${{ch}}"></div>
-          <div id="mfi-box-col-${{ch}}"></div>
-          <div id="mfi-heatmap-${{ch}}"></div>
-        </div>
-      </div>`;
-    container.appendChild(sec);
-
-    // ── Stats panel ───────────────────────────────────────────────────────────
-    const statsEl = sec.querySelector(`#mfi-stats-${{ch}}`);
-    let statsHtml = `<h4>By Row</h4>`;
-    rowStats.forEach(rs => {{
-      if (rs.n === 0) return;
-      const delta = rs.median - plateMedian;
-      const dCls  = delta >= 0 ? 'pos' : 'neg';
-      const dSign = delta >= 0 ? '+' : '';
-      statsHtml += `<div class="mfi-stat-row">
-        <span class="mfi-stat-label">Row ${{rs.r}}</span>
-        <span class="mfi-stat-val">${{rs.median.toFixed(5)}}</span>
-        <span class="mfi-stat-delta ${{dCls}}">${{dSign}}${{delta.toFixed(5)}}</span>
-      </div>`;
-    }});
-    statsHtml += `<h4 style="margin-top:10px;">By Column</h4>`;
-    colStats.forEach(cs => {{
-      if (cs.n === 0) return;
-      const delta = cs.median - plateMedian;
-      const dCls  = delta >= 0 ? 'pos' : 'neg';
-      const dSign = delta >= 0 ? '+' : '';
-      statsHtml += `<div class="mfi-stat-row">
-        <span class="mfi-stat-label">Col ${{cs.c}}</span>
-        <span class="mfi-stat-val">${{cs.median.toFixed(5)}}</span>
-        <span class="mfi-stat-delta ${{dCls}}">${{dSign}}${{delta.toFixed(5)}}</span>
-      </div>`;
-    }});
-    statsEl.innerHTML = statsHtml;
-
-    // ── Common layout base ────────────────────────────────────────────────────
-    const baseLayout = {{
-      paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'#0a0c18',
-      font:{{color:'#c8d8f0', size:10}},
-      margin:{{t:36,b:48,l:52,r:12}}, height:280,
-      showlegend:false,
-    }};
-
-    // ── Boxplot by row ────────────────────────────────────────────────────────
-    setTimeout(() => {{
-      const traces = ROW_LABELS.map(r => {{
-        const vals = COLS.map(c => wellVals[r+c]).filter(x=>x!=null);
-        const texts = vals.map((v,i) => {{
-          const well = r + COLS[i];
-          return `${{well}}<br>${{pd.wells[well]?.compound||''}}<br>${{v.toFixed(5)}}`;
-        }});
-        return {{
-          type:'box', name: r, y: vals, text: texts, hoverinfo:'text',
-          marker:{{color,size:4}}, line:{{color,width:1}},
-          boxmean:true,
-        }};
-      }});
-      // Median reference lines
-      const shapes = [];
-      if (plateMedian != null) {{
-        shapes.push({{
-          type:'line', xref:'paper', yref:'y',
-          x0:0, x1:1, y0:plateMedian, y1:plateMedian,
-          line:{{color:'#ff9900',dash:'dot',width:1.5}},
-        }});
-      }}
-      Plotly.react(`mfi-box-row-${{ch}}`, traces,
-        {{...baseLayout, shapes,
-          title:{{text:`${{ch}} — by Row`,font:{{size:11,color:'#8ab0e0'}},x:0.5}},
-          xaxis:{{title:'Row',tickfont:{{size:9}}}},
-          yaxis:{{title:'MFI',tickfont:{{size:9}}}},
-          annotations:[{{
-            xref:'paper',yref:'y',x:1.01,y:plateMedian,
-            text:`img: ${{plateMedian?.toFixed(5)}}`,
-            showarrow:false,font:{{size:9,color:'#ff9900'}},xanchor:'left',
-          }}],
-        }},{{responsive:true,displayModeBar:false}});
-    }}, 0);
-
-    // ── Boxplot by column ─────────────────────────────────────────────────────
-    setTimeout(() => {{
-      const traces = COLS.map((c,ci) => {{
-        const vals  = ROW_LABELS.map(r => wellVals[r+c]).filter(x=>x!=null);
-        const texts = vals.map((v,i) => {{
-          const well = ROW_LABELS[i]+c;
-          return `${{well}}<br>${{pd.wells[well]?.compound||''}}<br>${{v.toFixed(5)}}`;
-        }});
-        return {{
-          type:'box', name: String(ci+1), y: vals, text: texts, hoverinfo:'text',
-          marker:{{color,size:4}}, line:{{color,width:1}},
-          boxmean:true,
-        }};
-      }});
-      const shapes = [];
-      if (plateMedian != null) {{
-        shapes.push({{
-          type:'line', xref:'paper', yref:'y',
-          x0:0, x1:1, y0:plateMedian, y1:plateMedian,
-          line:{{color:'#ff9900',dash:'dot',width:1.5}},
-        }});
-      }}
-      Plotly.react(`mfi-box-col-${{ch}}`, traces,
-        {{...baseLayout, shapes,
-          title:{{text:`${{ch}} — by Column`,font:{{size:11,color:'#8ab0e0'}},x:0.5}},
-          xaxis:{{title:'Column',tickfont:{{size:9}}}},
-          yaxis:{{title:'MFI',tickfont:{{size:9}}}},
-          annotations:[{{
-            xref:'paper',yref:'y',x:1.01,y:plateMedian,
-            text:`img: ${{plateMedian?.toFixed(5)}}`,
-            showarrow:false,font:{{size:9,color:'#ff9900'}},xanchor:'left',
-          }}],
-        }},{{responsive:true,displayModeBar:false}});
-    }}, 0);
-
-    // ── Heatmap platemap ──────────────────────────────────────────────────────
-    setTimeout(() => {{
-      const z    = ROWS_PLOTLY.map(r => COLS.map(c => wellVals[r+c] ?? null));
-      const text = ROWS_PLOTLY.map(r => COLS.map(c => {{
-        const w      = r+c;
-        const v      = wellVals[w];           // obj median
-        const mWell  = mfiData[w] || {{}};
-        const imgV   = mWell[`${{key}}_img`];   // image (bg) MFI
-        const iqrLo  = mWell[`${{key}}_iqr_lo`];
-        const iqrHi  = mWell[`${{key}}_iqr_hi`];
-        const nImg   = mWell[`${{key}}_n_img`] ?? '—';
-        const delta  = (v != null && imgV != null) ? v - imgV : null;
-        const cmpd   = pd.wells[w]?.compound || '';
-        const f5     = x => x != null ? x.toFixed(4) : 'N/A';
-        const fDelta = d => d != null ? (d >= 0 ? '+' : '') + d.toFixed(4) : 'N/A';
-        return `<b>${{w}}</b>  ${{cmpd}}<br>` +
-               `<b>Channel: ${{ch}}</b><br>` +
-               `Median obj MFI: <b>${{f5(v)}}</b><br>` +
-               `Image MFI (bg): ${{f5(imgV)}}<br>` +
-               `Δ (obj−img): <b>${{fDelta(delta)}}</b><br>` +
-               `IQR: ${{f5(iqrLo)}} – ${{f5(iqrHi)}}<br>` +
-               `n images: ${{nImg}}`;
-      }}));
-      const rng  = MFI_RANGES[key] || [null,null];
-      Plotly.react(`mfi-heatmap-${{ch}}`,
-        [{{type:'heatmap',z,text,hoverinfo:'text',x:COLS,y:ROWS_PLOTLY,
-           colorscale:[[0,'#0a0c18'],[0.5,color],[1,'#ffffff']],
-           zmin:rng[0],zmax:rng[1],
-           colorbar:{{thickness:10,len:0.85,tickfont:{{size:8}}}}}}],
-        {{...baseLayout,
-          title:{{text:`Platemap — median MFI`,font:{{size:11,color:'#8ab0e0'}},x:0.5}},
-          margin:{{t:36,b:48,l:42,r:20}},
-          xaxis:{{tickfont:{{size:8}},zeroline:false}},
-          yaxis:{{tickfont:{{size:8}},zeroline:false}},
-          hoverlabel:{{
-            bgcolor:'#101828', bordercolor:color,
-            font:{{size:12, color:'#e0ecff', family:'monospace'}},
-          }},
-        }},{{responsive:true,displayModeBar:false}});
-    }}, 0);
+      [{{type:'heatmap',z,text,hoverinfo:'text',x:COLS,y:ROWS,colorscale:spec.cs,
+         zmin:cRange[0], zmax:cRange[1],
+         colorbar:{{thickness:14,len:0.85,tickfont:{{size:10}}}}}}],
+      {{paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'#0a0c18',
+        font:{{color:'#c8d8f0',size:11}},
+        margin:{{t:40,b:50,l:50,r:20}}, height:340,
+        title:{{text:spec.title, font:{{size:13,color:'#a8c8ff'}}, x:0.5}},
+        xaxis:{{title:'Column', tickfont:{{size:10}}, tickvals:COLS,
+                ticktext:COLS.map(c=>parseInt(c)),
+                showgrid:!filtered, gridcolor, zeroline:false}},
+        yaxis:{{title:'Row', tickfont:{{size:10}},
+                showgrid:!filtered, gridcolor, zeroline:false}},
+      }}, {{responsive:true, displayModeBar:false}});
   }});
 }}
 
-// ── 6. Flagged wells ──────────────────────────────────────────────────────────
+// ── 5. Flagged wells ──────────────────────────────────────────────────────────
+const ABSOLUTE_CHECKS = [
+  {{cols:{json.dumps(METRIC_COLS["PowerLogLogSlope"])}, lo:-2.5, hi:-1.0, label:'Slope'}},
+  {{cols:{json.dumps(METRIC_COLS["MaxIntensity"])},     lo:null,  hi:0.95, label:'MaxInt'}},
+  {{cols:{json.dumps(METRIC_COLS["FocusScore"])},       lo:0.005, hi:null, label:'Focus'}},
+];
+
+// Collect ALL compounds across all plates (not just flagged wells)
 (function buildCompoundToolbar() {{
   const toolbar  = document.getElementById('compound-toolbar');
   const allCmpds = new Set();
@@ -2238,6 +1668,7 @@ function renderMFI() {{
       if (m.compound) allCmpds.add(m.compound);
     }});
   }});
+
   [...allCmpds].sort().forEach(cmpd => {{
     const btn = document.createElement('button');
     btn.className = 'cmpd-btn'; btn.textContent = cmpd; btn.dataset.cmpd = cmpd;
@@ -2249,6 +1680,7 @@ function renderMFI() {{
     }};
     toolbar.appendChild(btn);
   }});
+
   document.getElementById('btn-show-all').onclick = () => {{
     hideAllMode = false; activeCompounds.clear();
     toolbar.querySelectorAll('.cmpd-btn:not(.ctrl)').forEach(b => b.classList.remove('active'));
@@ -2261,8 +1693,10 @@ function renderMFI() {{
   }};
 }})();
 
+// Global filter: re-renders heatmaps + counts + filters flag table
 function applyGlobalFilter() {{
   if (!currentPlate) return;
+  // Re-render all currently visible Plotly charts with masked data
   renderMetrics(currentPlate);
   renderCounts(currentPlate);
   applyFlagFilter();
@@ -2300,16 +1734,16 @@ document.getElementById('flag-filter').oninput = applyFlagFilter;
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 renderPlate(0);
-renderMFI();
 </script>
 </body>
 </html>"""
     output_path.write_text(html, encoding="utf-8")
     size_mb = output_path.stat().st_size / 1e6
-    print(f"[html] -> {output_path}  ({size_mb:.1f} MB)")
+    print(f"[html] → {output_path}  ({size_mb:.1f} MB)")
 
 
 # ── Collage class ──────────────────────────────────────────────────────────────
+
 class Collage:
     def __init__(self, input_dir, output_path,
                  qc_tsv=None, platemap=None,
@@ -2337,38 +1771,12 @@ class Collage:
         # Auto-detect QC TSV
         self.qc = load_qc_tsv(qc_tsv)
         if not self.qc:
-            # Search candidate paths in order of priority
-            _qc_candidates = [
-                self.input_dir / "Measurements" / "Image.txt",
-                self.input_dir / "measurements" / "Image.txt",
-                self.input_dir / "Images_MEASUREMENTS" / "Image.txt",
-                self.input_dir / "Image.txt",
-            ]
-            for _p in _qc_candidates:
-                if _p.exists():
-                    print(f"[qc] Auto-detected: {_p}")
-                    self.qc = load_qc_tsv(_p)
-                    if self.qc:
-                        break
-            if not self.qc:
-                _searched = ", ".join(str(p) for p in _qc_candidates)
-                print(f"[warn] No QC measurements found. Searched: {_searched}")
-                print(f"[warn] Use --qc to specify the path explicitly.")
-        
-
-        # Auto-detect Measurements directory for MFI (Nuclei.txt / Cells.txt)
-        self._mfi_all: dict = {}   # {plate: {well: {key: value}}}
-        _meas_candidates = [
-            self.input_dir / "Measurements",
-            self.input_dir / "measurements",
-            self.input_dir / "Images_MEASUREMENTS",
-            self.input_dir,
-        ]
-        for _md in _meas_candidates:
-            _raw = load_mfi_tsv(_md)
-            if _raw:
-                self._mfi_all = _raw
-                break
+            for name in ("Image.txt", "image.txt", "Image.tsv", "image.tsv"):
+                p = self.input_dir / name
+                if p.exists():
+                    print(f"[qc] Auto-detected: {p}")
+                    self.qc = load_qc_tsv(p)
+                    break
 
         # Auto-detect platemap — explicit path or first platemap_*.csv in input dir
         self.platemap = load_platemap(platemap)
@@ -2422,67 +1830,17 @@ class Collage:
                     montages[(r, c)] = mont
         return montages
 
-    def _lookup_plate(self, mapping: dict, plate_name: str, label: str = "") -> dict:
-        """
-        Robust plate key lookup. Tries multiple normalizations of plate_name
-        against the keys in mapping, and logs a clear warning on miss.
-
-        Tries (in order):
-          1. Exact match:           "P4"  -> key "P4"
-          2. Strip leading P:       "P4"  -> key "4"
-          3. Add leading P:         "4"   -> key "P4"
-          4. Zero-padded variants:  "P04" -> key "P4" or "04" -> "4"
-          5. Case-insensitive match
-          6. Single-plate fallback: if mapping has exactly one entry, use it.
-        """
-        if not mapping:
-            return {}
-
-        # Build a normalised-key -> original-key lookup for the mapping
-        def _norm(k: str) -> str:
-            """Lowercase, strip leading zeros after optional P prefix."""
-            k = str(k).strip().lower()
-            if k.startswith("p"):
-                num = k[1:].lstrip("0") or "0"
-                return f"p{num}"
-            return k.lstrip("0") or "0"
-
-        norm_map: dict[str, str] = {_norm(k): k for k in mapping}
-        candidates = [
-            plate_name,                          # "P4" exact
-            plate_name.lstrip("P").lstrip("p"),  # "4"
-            f"P{plate_name.lstrip('P').lstrip('p')}",  # ensure "P" prefix
-        ]
-
-        for cand in candidates:
-            # Exact
-            if cand in mapping:
-                return mapping[cand]
-            # Normalised
-            nk = _norm(cand)
-            if nk in norm_map:
-                return mapping[norm_map[nk]]
-
-        # Single-entry fallback
-        if len(mapping) == 1:
-            key = next(iter(mapping))
-            print(f"  [warn] {label}: no key matched '{plate_name}' "
-                  f"(available: {list(mapping)[:5]}). "
-                  f"Using sole entry '{key}'.")
-            return mapping[key]
-
-        print(f"  [warn] {label}: no key matched '{plate_name}'. "
-              f"Available keys: {list(mapping)[:10]}. "
-              f"Run with --qc to check column 'Metadata_Plate' values.")
-        return {}
-
     def _render_plate(self, plate_name: str, montages: dict) -> None:
         if not montages:
             print(f"  No images for {plate_name}, skipping.")
             return
 
-        plate_qc  = self._lookup_plate(self.qc,      plate_name, label="QC")
-        plate_map = self._lookup_plate(self.platemap, plate_name, label="platemap")
+        plate_qc  = (self.qc.get(plate_name)
+                     or self.qc.get(plate_name.lstrip("P"))
+                     or (next(iter(self.qc.values())) if len(self.qc) == 1 else {}))
+        plate_map = (self.platemap.get(plate_name)
+                     or self.platemap.get(plate_name.lstrip("P"))
+                     or (next(iter(self.platemap.values())) if len(self.platemap) == 1 else {}))
 
         # Fit adaptive thresholds for this plate
         if plate_qc:
@@ -2564,7 +1922,6 @@ class Collage:
             "plate_map":     plate_map,
             "flagged_b64":   flagged_b64,
             "engine_adaptive": self.engine._adaptive,
-            "mfi_data":      self._lookup_plate(self._mfi_all, plate_name, label="MFI"),
             "pass_rate":     100 * n_pass / n_wells if n_wells else 0,
             "n_wells":       n_wells,
             "n_pass":        n_pass,

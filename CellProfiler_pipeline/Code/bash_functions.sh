@@ -52,7 +52,7 @@ generar_batchfiles() {
 
   sed -e "s|INPUT_PATH_CSV|$parent_dir_csv|g" \
       -e "s|SAVING_OUTPUT_PATH|$PATH_OUTPUT|g" \
-      -e "s|SAVING_OUTPUT_PATH_OBJECTS|$PATH_OUTPUT/Objects|g" \
+      -e "s|SAVING_MEASUREMENTS_OUTPUT_PATH|$PATH_OUTPUT/Measurements|g" \
       -e "s|SAVING_BATCH_PATH|$PATH_BATCH_FILE|g" \
       -e "s|FILE_CSV|$file_name_csv|g" \
       -e "s|INPUT_PATH_IMAGES|$PATH_IMAGES|g" \
@@ -96,6 +96,7 @@ create_output_dirs() {
 
         PATH_QC_IMAGES="$OUTPUT/QC/Images"
         PATH_QC_COLLAGES="$OUTPUT/QC/Collages"
+        PATH_QC_MEASUREMENTS="$OUTPUT/QC/Measurements"
         PATH_QC_REPORTS="$OUTPUT/QC/Reports"
 
         PATH_FINAL_PROFILES="$OUTPUT/Profiles/Treated_profiles"
@@ -118,6 +119,7 @@ create_output_dirs() {
             "$PATH_PROFILES" \
             "$PATH_QC_IMAGES" \
             "$PATH_QC_COLLAGES" \
+            "$PATH_QC_MEASUREMENTS" \
             "$PATH_QC_REPORTS" \
             "$PATH_FINAL_PROFILES" \
             "$PATH_CLUSTERS" \
