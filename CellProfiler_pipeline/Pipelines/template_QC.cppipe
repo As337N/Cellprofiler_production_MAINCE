@@ -2,7 +2,7 @@ CellProfiler Pipeline: http://www.cellprofiler.org
 Version:5
 DateRevision:428
 GitHash:
-ModuleCount:30
+ModuleCount:25
 HasImagePlaneDetails:False
 
 LoadData:[module_num:1|svn_version:'Unknown'|variable_revision_number:6|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
@@ -18,10 +18,10 @@ LoadData:[module_num:1|svn_version:'Unknown'|variable_revision_number:6|show_win
 
 IdentifyPrimaryObjects:[module_num:2|svn_version:'Unknown'|variable_revision_number:15|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select the input image:Hoechst
-    Name the primary objects to be identified:Illum_artifacts_raw
-    Typical diameter of objects, in pixel units (Min,Max):10,20
+    Name the primary objects to be identified:Illum_artifacts
+    Typical diameter of objects, in pixel units (Min,Max):10,15
     Discard objects outside the diameter range?:Yes
-    Discard objects touching the border of the image?:No
+    Discard objects touching the border of the image?:Yes
     Method to distinguish clumped objects:Intensity
     Method to draw dividing lines between clumped objects:Intensity
     Size of smoothing filter:10
@@ -54,14 +54,14 @@ IdentifyPrimaryObjects:[module_num:2|svn_version:'Unknown'|variable_revision_num
 
 MeasureObjectIntensity:[module_num:3|svn_version:'Unknown'|variable_revision_number:4|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select images to measure:Hoechst
-    Select objects to measure:Illum_artifacts_raw
+    Select objects to measure:Illum_artifacts
 
 FilterObjects:[module_num:4|svn_version:'Unknown'|variable_revision_number:10|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
-    Select the objects to filter:Illum_artifacts_raw
-    Name the output objects:Illum_artifacts
+    Select the objects to filter:Illum_artifacts
+    Name the output objects:Illum_artifacts_filtered
     Select the filtering mode:Measurements
     Select the filtering method:Limits
-    Select the objects that contain the filtered objects:Illum_artifacts_raw
+    Select the objects that contain the filtered objects:None
     Select the location of the rules or classifier file:Elsewhere...|
     Rules or classifier file name:rules.txt
     Class number:1
@@ -77,55 +77,14 @@ FilterObjects:[module_num:4|svn_version:'Unknown'|variable_revision_number:10|sh
     Maximum value:1.0
     Allow fuzzy feature matching?:No
 
-CorrectIlluminationApply:[module_num:5|svn_version:'Unknown'|variable_revision_number:5|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
-    Select the input image:Mito
-    Name the output image:Mito_c
-    Select the illumination function:Illum_Mito
-    Select how the illumination function is applied:Divide
-    Select the input image:Golgi
-    Name the output image:Golgi_c
-    Select the illumination function:Illum_Golgi
-    Select how the illumination function is applied:Divide
-    Select the input image:Brightfield
-    Name the output image:Brightfield_c
-    Select the illumination function:Illum_Brightfield
-    Select how the illumination function is applied:Divide
-    Select the input image:Syto
-    Name the output image:RNA
-    Select the illumination function:Illum_Syto
-    Select how the illumination function is applied:Divide
-    Select the input image:ER
-    Name the output image:ER_c
-    Select the illumination function:Illum_ER
-    Select how the illumination function is applied:Divide
-    Select the input image:Hoechst
-    Name the output image:DNA
-    Select the illumination function:Illum_Hoechst
-    Select how the illumination function is applied:Divide
-    Set output image values less than 0 equal to 0?:Yes
-    Set output image values greater than 1 equal to 1?:Yes
-
-MeasureImageQuality:[module_num:6|svn_version:'Unknown'|variable_revision_number:6|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+MeasureImageQuality:[module_num:5|svn_version:'Unknown'|variable_revision_number:6|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Calculate metrics for which images?:Select...
     Image count:2
     Scale count:1
     Threshold count:1
     Scale count:1
     Threshold count:1
-    Select the images to measure:ER_c, Golgi_c, Mito_c, Syto
-    Include the image rescaling value?:Yes
-    Calculate blur metrics?:Yes
-    Spatial scale for blur measurements:10
-    Calculate saturation metrics?:No
-    Calculate intensity metrics?:Yes
-    Calculate thresholds?:Yes
-    Use all thresholding methods?:No
-    Select a thresholding method:Otsu
-    Typical fraction of the image covered by objects:0.1
-    Two-class or three-class thresholding?:Three classes
-    Minimize the weighted variance or the entropy?:Weighted variance
-    Assign pixels in the middle intensity class to the foreground or the background?:Background
-    Select the images to measure:Brightfield_c, DNA
+    Select the images to measure:Hoechst
     Include the image rescaling value?:Yes
     Calculate blur metrics?:Yes
     Spatial scale for blur measurements:10
@@ -137,10 +96,23 @@ MeasureImageQuality:[module_num:6|svn_version:'Unknown'|variable_revision_number
     Typical fraction of the image covered by objects:0.1
     Two-class or three-class thresholding?:Two classes
     Minimize the weighted variance or the entropy?:Weighted variance
+    Assign pixels in the middle intensity class to the foreground or the background?:Background
+    Select the images to measure:ER, Golgi, Mito, Syto
+    Include the image rescaling value?:Yes
+    Calculate blur metrics?:Yes
+    Spatial scale for blur measurements:20
+    Calculate saturation metrics?:No
+    Calculate intensity metrics?:Yes
+    Calculate thresholds?:Yes
+    Use all thresholding methods?:No
+    Select a thresholding method:Otsu
+    Typical fraction of the image covered by objects:0.1
+    Two-class or three-class thresholding?:Three classes
+    Minimize the weighted variance or the entropy?:Weighted variance
     Assign pixels in the middle intensity class to the foreground or the background?:Foreground
 
-IdentifyPrimaryObjects:[module_num:7|svn_version:'Unknown'|variable_revision_number:15|show_window:False|notes:['Identifies ALL nuclei in image though we will only take measurements on those NOT touching the border of the image (filtered at a later step)']|batch_state:array(b'', dtype='|S1')|enabled:True|wants_pause:False]
-    Select the input image:DNA
+IdentifyPrimaryObjects:[module_num:6|svn_version:'Unknown'|variable_revision_number:15|show_window:False|notes:['Identifies ALL nuclei in image though we will only take measurements on those NOT touching the border of the image (filtered at a later step)']|batch_state:array(b'', dtype='|S1')|enabled:True|wants_pause:False]
+    Select the input image:Hoechst
     Name the primary objects to be identified:Raw_nuclei
     Typical diameter of objects, in pixel units (Min,Max):25,50
     Discard objects outside the diameter range?:Yes
@@ -175,16 +147,12 @@ IdentifyPrimaryObjects:[module_num:7|svn_version:'Unknown'|variable_revision_num
     # of deviations:2
     Thresholding method:Otsu
 
-MeasureObjectIntensity:[module_num:8|svn_version:'Unknown'|variable_revision_number:4|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
-    Select images to measure:DNA
-    Select objects to measure:Raw_nuclei
-
-MeasureObjectSizeShape:[module_num:9|svn_version:'Unknown'|variable_revision_number:3|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+MeasureObjectSizeShape:[module_num:7|svn_version:'Unknown'|variable_revision_number:3|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select object sets to measure:Raw_nuclei
     Calculate the Zernike features?:No
     Calculate the advanced features?:No
 
-FilterObjects:[module_num:10|svn_version:'Unknown'|variable_revision_number:10|show_window:False|notes:['Filtramos nucleos muy intensos (probablemente artefactos.', 'TODO: Establecer un threshold basados en q95 de los hitogramas de intensidad.']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+FilterObjects:[module_num:8|svn_version:'Unknown'|variable_revision_number:10|show_window:False|notes:['Filtramos nucleos muy intensos (probablemente artefactos.', 'TODO: Establecer un threshold basados en q95 de los hitogramas de intensidad.']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select the objects to filter:Raw_nuclei
     Name the output objects:Filtered_nuclei
     Select the filtering mode:Measurements
@@ -193,24 +161,19 @@ FilterObjects:[module_num:10|svn_version:'Unknown'|variable_revision_number:10|s
     Select the location of the rules or classifier file:Elsewhere...|
     Rules or classifier file name:rules.txt
     Class number:1
-    Measurement count:2
+    Measurement count:1
     Additional object count:0
     Assign overlapping child to:Both parents
     Keep removed objects as a separate set?:No
     Name the objects removed by the filter:RemovedObjects
-    Select the measurement to filter by:Intensity_MaxIntensity_DNA
+    Select the measurement to filter by:AreaShape_Area
     Filter using a minimum measurement value?:No
     Minimum value:0.0
     Filter using a maximum measurement value?:Yes
-    Maximum value:0.65
-    Select the measurement to filter by:AreaShape_Area
-    Filter using a minimum measurement value?:No
-    Minimum value:0.675
-    Filter using a maximum measurement value?:Yes
-    Maximum value:1400
+    Maximum value:1500
     Allow fuzzy feature matching?:No
 
-ConvertImageToObjects:[module_num:11|svn_version:'Unknown'|variable_revision_number:1|show_window:False|notes:['We load Cellpose masks as objects (Cells_cellpose)']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+ConvertImageToObjects:[module_num:9|svn_version:'Unknown'|variable_revision_number:1|show_window:False|notes:['We load Cellpose masks as objects (Cells_cellpose)']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select the input image:RNA_mask
     Name the output object:Cellls_cellpose
     Convert to boolean image:No
@@ -218,7 +181,7 @@ ConvertImageToObjects:[module_num:11|svn_version:'Unknown'|variable_revision_num
     Background label:0
     Connectivity:0
 
-FilterObjects:[module_num:12|svn_version:'Unknown'|variable_revision_number:10|show_window:False|notes:['The objects that are touching the borders are filtered.']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+FilterObjects:[module_num:10|svn_version:'Unknown'|variable_revision_number:10|show_window:False|notes:['The objects that are touching the borders are filtered.']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select the objects to filter:Cellls_cellpose
     Name the output objects:Complete_cells
     Select the filtering mode:Image or mask border
@@ -239,12 +202,12 @@ FilterObjects:[module_num:12|svn_version:'Unknown'|variable_revision_number:10|s
     Maximum value:1.0
     Allow fuzzy feature matching?:No
 
-MeasureObjectSizeShape:[module_num:13|svn_version:'Unknown'|variable_revision_number:3|show_window:False|notes:['We measure the size of the cells']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+MeasureObjectSizeShape:[module_num:11|svn_version:'Unknown'|variable_revision_number:3|show_window:False|notes:['We measure the size of the cells']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select object sets to measure:Complete_cells
     Calculate the Zernike features?:No
     Calculate the advanced features?:No
 
-FilterObjects:[module_num:14|svn_version:'Unknown'|variable_revision_number:10|show_window:False|notes:['We filter the cells that are to smal']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+FilterObjects:[module_num:12|svn_version:'Unknown'|variable_revision_number:10|show_window:False|notes:['We filter the cells that are to smal']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select the objects to filter:Complete_cells
     Name the output objects:Filtered_cells
     Select the filtering mode:Measurements
@@ -265,7 +228,7 @@ FilterObjects:[module_num:14|svn_version:'Unknown'|variable_revision_number:10|s
     Maximum value:70
     Allow fuzzy feature matching?:No
 
-MaskObjects:[module_num:15|svn_version:'Unknown'|variable_revision_number:3|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+MaskObjects:[module_num:13|svn_version:'Unknown'|variable_revision_number:3|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select objects to be masked:Filtered_nuclei
     Name the masked objects:masked_nuclei
     Mask using a region defined by other objects or by binary image?:Objects
@@ -276,19 +239,7 @@ MaskObjects:[module_num:15|svn_version:'Unknown'|variable_revision_number:3|show
     Numbering of resulting objects:Renumber
     Invert the mask?:No
 
-OverlayOutlines:[module_num:16|svn_version:'Unknown'|variable_revision_number:4|show_window:False|notes:['A visualization overlay to see wich cells passed the filters']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
-    Display outlines on a blank image?:No
-    Select image on which to display outlines:Syto
-    Name the output image:CellPose_seg
-    Outline display mode:Color
-    Select method to determine brightness of outlines:Max of image
-    How to outline:Inner
-    Select outline color:cyan
-    Select objects to display:Filtered_cells
-    Select outline color:Green
-    Select objects to display:masked_nuclei
-
-RelateObjects:[module_num:17|svn_version:'Unknown'|variable_revision_number:5|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+RelateObjects:[module_num:14|svn_version:'Unknown'|variable_revision_number:5|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:True]
     Parent objects:Filtered_cells
     Child objects:masked_nuclei
     Calculate child-parent distances?:None
@@ -298,7 +249,7 @@ RelateObjects:[module_num:17|svn_version:'Unknown'|variable_revision_number:5|sh
     Name the output object:Prefinal_nuclei
     Parent name:None
 
-FilterObjects:[module_num:18|svn_version:'Unknown'|variable_revision_number:10|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+FilterObjects:[module_num:15|svn_version:'Unknown'|variable_revision_number:10|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select the objects to filter:Filtered_cells
     Name the output objects:Final_cells
     Select the filtering mode:Measurements
@@ -307,16 +258,11 @@ FilterObjects:[module_num:18|svn_version:'Unknown'|variable_revision_number:10|s
     Select the location of the rules or classifier file:Elsewhere...|
     Rules or classifier file name:rules.txt
     Class number:1
-    Measurement count:2
+    Measurement count:1
     Additional object count:0
     Assign overlapping child to:Both parents
     Keep removed objects as a separate set?:No
     Name the objects removed by the filter:RemovedObjects
-    Select the measurement to filter by:Children_masked_nuclei_Count
-    Filter using a minimum measurement value?:No
-    Minimum value:0.0
-    Filter using a maximum measurement value?:Yes
-    Maximum value:1.0
     Select the measurement to filter by:Children_masked_nuclei_Count
     Filter using a minimum measurement value?:Yes
     Minimum value:1.0
@@ -324,7 +270,7 @@ FilterObjects:[module_num:18|svn_version:'Unknown'|variable_revision_number:10|s
     Maximum value:1.0
     Allow fuzzy feature matching?:No
 
-RelateObjects:[module_num:19|svn_version:'Unknown'|variable_revision_number:5|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+RelateObjects:[module_num:16|svn_version:'Unknown'|variable_revision_number:5|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Parent objects:Final_cells
     Child objects:masked_nuclei
     Calculate child-parent distances?:None
@@ -334,7 +280,7 @@ RelateObjects:[module_num:19|svn_version:'Unknown'|variable_revision_number:5|sh
     Name the output object:Nuclei
     Parent name:None
 
-RelateObjects:[module_num:20|svn_version:'Unknown'|variable_revision_number:5|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+RelateObjects:[module_num:17|svn_version:'Unknown'|variable_revision_number:5|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Parent objects:Nuclei
     Child objects:Final_cells
     Calculate child-parent distances?:None
@@ -344,7 +290,7 @@ RelateObjects:[module_num:20|svn_version:'Unknown'|variable_revision_number:5|sh
     Name the output object:Cells
     Parent name:None
 
-RescaleIntensity:[module_num:21|svn_version:'Unknown'|variable_revision_number:3|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+RescaleIntensity:[module_num:18|svn_version:'Unknown'|variable_revision_number:3|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select the input image:Syto
     Name the output image:RNA_escaled
     Rescaling method:Stretch each image to use the full intensity range
@@ -358,7 +304,7 @@ RescaleIntensity:[module_num:21|svn_version:'Unknown'|variable_revision_number:3
     Divisor value:0.6
     Divisor measurement:None
 
-OverlayOutlines:[module_num:22|svn_version:'Unknown'|variable_revision_number:4|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+OverlayOutlines:[module_num:19|svn_version:'Unknown'|variable_revision_number:4|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Display outlines on a blank image?:No
     Select image on which to display outlines:RNA_escaled
     Name the output image:Cell_segmentation
@@ -370,14 +316,14 @@ OverlayOutlines:[module_num:22|svn_version:'Unknown'|variable_revision_number:4|
     Select outline color:red
     Select objects to display:Cells
 
-MeasureImageIntensity:[module_num:23|svn_version:'Unknown'|variable_revision_number:4|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+MeasureImageIntensity:[module_num:20|svn_version:'Unknown'|variable_revision_number:4|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select images to measure:Hoechst, Syto
     Measure the intensity only from areas enclosed by objects?:No
     Select input object sets:
     Calculate custom percentiles:Yes
     Specify percentiles to measure:10,90
 
-SaveImages:[module_num:24|svn_version:'Unknown'|variable_revision_number:16|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+SaveImages:[module_num:21|svn_version:'Unknown'|variable_revision_number:16|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select the type of image to save:Image
     Select the image to save:Cell_segmentation
     Select method for constructing file names:From image filename
@@ -385,7 +331,7 @@ SaveImages:[module_num:24|svn_version:'Unknown'|variable_revision_number:16|show
     Enter single file name:OrigBlue
     Number of digits:4
     Append a suffix to the image file name?:Yes
-    Text to append to the image name: _P\g<Plate>
+    Text to append to the image name:_P\g<Plate>
     Saved file format:tiff
     Output file location:Elsewhere...|SAVING_OUTPUT_PATH/
     Image bit depth:8-bit integer
@@ -393,63 +339,20 @@ SaveImages:[module_num:24|svn_version:'Unknown'|variable_revision_number:16|show
     When to save:Every cycle
     Record the file and path information to the saved image?:No
     Create subfolders in the output folder?:No
-    Output file location: None|
+    Base image folder:
     How to save the series:T (Time)
     Save with lossless compression?:Yes
 
-ConvertObjectsToImage:[module_num:25|svn_version:'Unknown'|variable_revision_number:1|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
-    Select the input objects:Cells
-    Name the output image:cell_final_maks
-    Select the color format:Binary (black & white)
-    Select the colormap:Default
+MeasureObjectIntensity:[module_num:22|svn_version:'Unknown'|variable_revision_number:4|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+    Select images to measure:ER, Golgi, Hoechst, Mito, Syto
+    Select objects to measure:Cells, Nuclei
 
-ConvertObjectsToImage:[module_num:26|svn_version:'Unknown'|variable_revision_number:1|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
-    Select the input objects:Nuclei
-    Name the output image:nuclei_final_masks
-    Select the color format:Binary (black & white)
-    Select the colormap:Default
+MeasureObjectSizeShape:[module_num:23|svn_version:'Unknown'|variable_revision_number:3|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+    Select object sets to measure:Cells, Nuclei
+    Calculate the Zernike features?:No
+    Calculate the advanced features?:No
 
-SaveImages:[module_num:27|svn_version:'Unknown'|variable_revision_number:16|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
-    Select the type of image to save:Mask
-    Select the image to save:cell_final_maks
-    Select method for constructing file names:From image filename
-    Select image name for file prefix:Syto
-    Enter single file name:OrigBlue
-    Number of digits:4
-    Append a suffix to the image file name?:Yes
-    Text to append to the image name:_cells_masks
-    Saved file format:tiff
-    Output file location:Elsewhere...|SAVING_OUTPUT_PATH_OBJECTS/
-    Image bit depth:8-bit integer
-    Overwrite existing files without warning?:Yes
-    When to save:Every cycle
-    Record the file and path information to the saved image?:No
-    Create subfolders in the output folder?:No
-    Base image folder:Elsewhere...|
-    How to save the series:T (Time)
-    Save with lossless compression?:Yes
-
-SaveImages:[module_num:28|svn_version:'Unknown'|variable_revision_number:16|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
-    Select the type of image to save:Mask
-    Select the image to save:nuclei_final_masks
-    Select method for constructing file names:From image filename
-    Select image name for file prefix:Hoechst
-    Enter single file name:OrigBlue
-    Number of digits:4
-    Append a suffix to the image file name?:Yes
-    Text to append to the image name:_nuclei_masks
-    Saved file format:tiff
-    Output file location:Elsewhere...|SAVING_OUTPUT_PATH_OBJECTS/
-    Image bit depth:8-bit integer
-    Overwrite existing files without warning?:Yes
-    When to save:Every cycle
-    Record the file and path information to the saved image?:No
-    Create subfolders in the output folder?:No
-    Base image folder:Elsewhere...|
-    How to save the series:T (Time)
-    Save with lossless compression?:Yes
-
-ExportToSpreadsheet:[module_num:29|svn_version:'Unknown'|variable_revision_number:13|show_window:False|notes:['We explicitly set which measurement types to export so that we do NOT export measurements of the objects touching the well edges as we ONLY want them for masking and not to use for measurements.', '', 'We have turned off the exporting of measurements starting with the word Location for Cells and Cytoplasm and the duplicate Number_Object_Number from Cells, because a) those measurements are not useful on their own (only relative to one another, which is not an analysis we currently ever perform) and b) we were previously exporting >2000 measurements for those compartments, which would complicate using SQLite if not manually compiled to allow >2000 columns.']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+ExportToSpreadsheet:[module_num:24|svn_version:'Unknown'|variable_revision_number:13|show_window:False|notes:['We explicitly set which measurement types to export so that we do NOT export measurements of the objects touching the well edges as we ONLY want them for masking and not to use for measurements.', '', 'We have turned off the exporting of measurements starting with the word Location for Cells and Cytoplasm and the duplicate Number_Object_Number from Cells, because a) those measurements are not useful on their own (only relative to one another, which is not an analysis we currently ever perform) and b) we were previously exporting >2000 measurements for those compartments, which would complicate using SQLite if not manually compiled to allow >2000 columns.']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select the column delimiter:Tab
     Add image metadata columns to your object data file?:Yes
     Add image file and folder names to your object data file?:No
@@ -457,13 +360,13 @@ ExportToSpreadsheet:[module_num:29|svn_version:'Unknown'|variable_revision_numbe
     Calculate the per-image mean values for object measurements?:No
     Calculate the per-image median values for object measurements?:No
     Calculate the per-image standard deviation values for object measurements?:No
-    Output file location:Elsewhere...|SAVING_OUTPUT_PATH/
+    Output file location:Elsewhere...|SAVING_MEASUREMENTS_OUTPUT_PATH/
     Create a GenePattern GCT file?:No
     Select source of sample row name:Metadata
     Select the image to use as the identifier:None
     Select the metadata to use as the identifier:None
     Export all measurement types?:No
-    Press button to select measurements:Image|ImageQuality_ThresholdOtsu_DNA_2W,Image|ImageQuality_ThresholdOtsu_ER_c_3BW,Image|ImageQuality_ThresholdOtsu_Syto_3BW,Image|ImageQuality_ThresholdOtsu_Mito_c_3BW,Image|ImageQuality_ThresholdOtsu_Golgi_c_3BW,Image|ImageQuality_MeanIntensity_DNA,Image|ImageQuality_MeanIntensity_Mito_c,Image|ImageQuality_MeanIntensity_Syto,Image|ImageQuality_MeanIntensity_Golgi_c,Image|ImageQuality_MeanIntensity_ER_c,Image|ImageQuality_MeanIntensity_Brightfield_c,Image|ImageQuality_MADIntensity_ER_c,Image|ImageQuality_MADIntensity_Syto,Image|ImageQuality_MADIntensity_Golgi_c,Image|ImageQuality_MADIntensity_DNA,Image|ImageQuality_MADIntensity_Brightfield_c,Image|ImageQuality_MADIntensity_Mito_c,Image|ImageQuality_FocusScore_Mito_c,Image|ImageQuality_FocusScore_ER_c,Image|ImageQuality_FocusScore_Golgi_c,Image|ImageQuality_FocusScore_Syto,Image|ImageQuality_FocusScore_DNA,Image|ImageQuality_FocusScore_Brightfield_c,Image|ImageQuality_PowerLogLogSlope_Syto,Image|ImageQuality_PowerLogLogSlope_Mito_c,Image|ImageQuality_PowerLogLogSlope_DNA,Image|ImageQuality_PowerLogLogSlope_Golgi_c,Image|ImageQuality_PowerLogLogSlope_Brightfield_c,Image|ImageQuality_PowerLogLogSlope_ER_c,Image|ImageQuality_TotalArea_Golgi_c,Image|ImageQuality_TotalArea_Mito_c,Image|ImageQuality_TotalArea_Syto,Image|ImageQuality_TotalArea_Brightfield_c,Image|ImageQuality_TotalArea_DNA,Image|ImageQuality_TotalArea_ER_c,Image|ImageQuality_TotalIntensity_ER_c,Image|ImageQuality_TotalIntensity_Brightfield_c,Image|ImageQuality_TotalIntensity_Golgi_c,Image|ImageQuality_TotalIntensity_DNA,Image|ImageQuality_TotalIntensity_Mito_c,Image|ImageQuality_TotalIntensity_Syto,Image|ImageQuality_Correlation_Mito_c_10,Image|ImageQuality_Correlation_DNA_10,Image|ImageQuality_Correlation_Golgi_c_10,Image|ImageQuality_Correlation_Syto_10,Image|ImageQuality_Correlation_ER_c_10,Image|ImageQuality_Scaling_Mito_c,Image|ImageQuality_Scaling_Syto,Image|ImageQuality_Scaling_DNA,Image|ImageQuality_Scaling_Golgi_c,Image|ImageQuality_Scaling_ER_c,Image|ImageQuality_MinIntensity_DNA,Image|ImageQuality_MinIntensity_Syto,Image|ImageQuality_MinIntensity_Mito_c,Image|ImageQuality_MinIntensity_ER_c,Image|ImageQuality_MinIntensity_Golgi_c,Image|ImageQuality_MinIntensity_Brightfield_c,Image|ImageQuality_LocalFocusScore_Mito_c_10,Image|ImageQuality_LocalFocusScore_Syto_10,Image|ImageQuality_LocalFocusScore_Brightfield_c_10,Image|ImageQuality_LocalFocusScore_Golgi_c_10,Image|ImageQuality_LocalFocusScore_ER_c_10,Image|ImageQuality_LocalFocusScore_DNA_10,Image|ImageQuality_StdIntensity_Syto,Image|ImageQuality_StdIntensity_Brightfield_c,Image|ImageQuality_StdIntensity_DNA,Image|ImageQuality_StdIntensity_ER_c,Image|ImageQuality_StdIntensity_Mito_c,Image|ImageQuality_StdIntensity_Golgi_c,Image|ImageQuality_MedianIntensity_ER_c,Image|ImageQuality_MedianIntensity_Brightfield_c,Image|ImageQuality_MedianIntensity_Golgi_c,Image|ImageQuality_MedianIntensity_DNA,Image|ImageQuality_MedianIntensity_Mito_c,Image|ImageQuality_MedianIntensity_Syto,Image|ImageQuality_MaxIntensity_DNA,Image|ImageQuality_MaxIntensity_Syto,Image|ImageQuality_MaxIntensity_Golgi_c,Image|ImageQuality_MaxIntensity_Brightfield_c,Image|ImageQuality_MaxIntensity_ER_c,Image|ImageQuality_MaxIntensity_Mito_c,Image|Intensity_PercentMaximal_Hoechst,Image|Intensity_LowerQuartileIntensity_Hoechst,Image|Intensity_UpperQuartileIntensity_Hoechst,Image|Count_Illum_artifacts,Image|Count_Nuclei,Image|Count_Cells,Image|Count_Raw_nuclei,Image|Metadata_Well,Image|Metadata_Plate,Image|Metadata_Site
+    Press button to select measurements:Cells|AreaShape_Area,Cells|Intensity_IntegratedIntensity_Syto,Cells|Intensity_IntegratedIntensity_Golgi,Cells|Intensity_IntegratedIntensity_Mito,Cells|Intensity_IntegratedIntensity_ER,Cells|Intensity_StdIntensity_Golgi,Cells|Intensity_StdIntensity_Syto,Cells|Intensity_StdIntensity_Mito,Cells|Intensity_StdIntensity_ER,Cells|Intensity_MedianIntensity_Golgi,Cells|Intensity_MedianIntensity_ER,Cells|Intensity_MedianIntensity_Syto,Cells|Intensity_MedianIntensity_Mito,Cells|Intensity_MeanIntensity_Mito,Cells|Intensity_MeanIntensity_ER,Cells|Intensity_MeanIntensity_Golgi,Cells|Intensity_MeanIntensity_Syto,Cells|Intensity_MassDisplacement_Golgi,Cells|Intensity_MassDisplacement_ER,Cells|Intensity_MassDisplacement_Syto,Cells|Intensity_MassDisplacement_Mito,Cells|Intensity_MADIntensity_ER,Cells|Intensity_MADIntensity_Syto,Cells|Intensity_MADIntensity_Mito,Cells|Intensity_MADIntensity_Golgi,Nuclei|Intensity_MeanIntensity_Hoechst,Nuclei|Intensity_MedianIntensity_Hoechst,Nuclei|Intensity_IntegratedIntensity_Hoechst,Nuclei|Intensity_StdIntensity_Hoechst,Nuclei|Intensity_MADIntensity_Hoechst,Nuclei|Intensity_MassDisplacement_Hoechst,Nuclei|AreaShape_Area,Image|ImageQuality_PowerLogLogSlope_Golgi,Image|ImageQuality_PowerLogLogSlope_Syto,Image|ImageQuality_PowerLogLogSlope_Hoechst,Image|ImageQuality_PowerLogLogSlope_Mito,Image|ImageQuality_PowerLogLogSlope_ER,Image|ImageQuality_MedianIntensity_ER,Image|ImageQuality_MedianIntensity_Golgi,Image|ImageQuality_MedianIntensity_Mito,Image|ImageQuality_MedianIntensity_Syto,Image|ImageQuality_MedianIntensity_Hoechst,Image|ImageQuality_TotalArea_Hoechst,Image|ImageQuality_TotalArea_ER,Image|ImageQuality_TotalArea_Golgi,Image|ImageQuality_TotalArea_Syto,Image|ImageQuality_TotalArea_Mito,Image|ImageQuality_TotalIntensity_ER,Image|ImageQuality_TotalIntensity_Hoechst,Image|ImageQuality_TotalIntensity_Syto,Image|ImageQuality_TotalIntensity_Mito,Image|ImageQuality_TotalIntensity_Golgi,Image|ImageQuality_MaxIntensity_ER,Image|ImageQuality_MaxIntensity_Mito,Image|ImageQuality_MaxIntensity_Hoechst,Image|ImageQuality_MaxIntensity_Golgi,Image|ImageQuality_MaxIntensity_Syto,Image|ImageQuality_FocusScore_Mito,Image|ImageQuality_FocusScore_Golgi,Image|ImageQuality_FocusScore_Syto,Image|ImageQuality_FocusScore_ER,Image|ImageQuality_FocusScore_Hoechst,Image|Intensity_TotalArea_Hoechst,Image|Intensity_TotalArea_Syto,Image|Intensity_MedianIntensity_Hoechst,Image|Intensity_MedianIntensity_Syto,Image|Intensity_MeanIntensity_Syto,Image|Intensity_MeanIntensity_Hoechst,Image|Intensity_UpperQuartileIntensity_Hoechst,Image|Intensity_UpperQuartileIntensity_Syto,Image|Intensity_MADIntensity_Hoechst,Image|Intensity_MADIntensity_Syto,Image|Intensity_MaxIntensity_Syto,Image|Intensity_MaxIntensity_Hoechst,Image|Intensity_MinIntensity_Hoechst,Image|Intensity_MinIntensity_Syto,Image|Intensity_StdIntensity_Syto,Image|Intensity_StdIntensity_Hoechst,Image|Intensity_TotalIntensity_Syto,Image|Intensity_TotalIntensity_Hoechst,Image|Intensity_LowerQuartileIntensity_Syto,Image|Intensity_LowerQuartileIntensity_Hoechst,Image|Intensity_Percentile_10_Syto,Image|Intensity_Percentile_10_Hoechst,Image|Intensity_Percentile_90_Hoechst,Image|Intensity_Percentile_90_Syto,Image|Intensity_PercentMaximal_Syto,Image|Intensity_PercentMaximal_Hoechst,Image|Count_Nuclei,Image|Count_Cells,Image|Count_Raw_nuclei,Image|Metadata_Plate,Image|Metadata_Well,Image|Metadata_Site
     Representation of Nan/Inf:NaN
     Add a prefix to file names?:No
     Filename prefix:MyExpt_
@@ -476,8 +379,16 @@ ExportToSpreadsheet:[module_num:29|svn_version:'Unknown'|variable_revision_numbe
     Combine these object measurements with those of the previous object?:No
     File name:DATA.csv
     Use the object name for the file name?:Yes
+    Data to export:Cells
+    Combine these object measurements with those of the previous object?:No
+    File name:DATA.csv
+    Use the object name for the file name?:Yes
+    Data to export:Nuclei
+    Combine these object measurements with those of the previous object?:No
+    File name:DATA.csv
+    Use the object name for the file name?:Yes
 
-CreateBatchFiles:[module_num:30|svn_version:'Unknown'|variable_revision_number:8|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+CreateBatchFiles:[module_num:25|svn_version:'Unknown'|variable_revision_number:8|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Store batch files in default output folder?:Yes
     Output folder path:Elsewhere...|SAVING_BATCH_PATH/
     Are the cluster computers running Windows?:No
