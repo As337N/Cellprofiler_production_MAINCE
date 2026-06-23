@@ -29,7 +29,7 @@ if run_section 3; then
   #echo "[INFO] Batchfiles generated for QC"
 
   #ejecutar_pipeline "$PATH_BATCH_PIPELINES/Batch_data_QC.h5" 0 "$PATH_QC_IMAGES" "$PATH_CSV/$NAME_QC.csv" $BATCH_SIZE
-  python $SCRIPT_PY_COLLAGE -i $PATH_QC_IMAGES -o $PATH_QC_COLLAGES --platemap /workspace_images/platemap_${COHORT}.csv 
+  python $SCRIPT_PY_COLLAGE -i $PATH_QC_IMAGES -o $PATH_QC_COLLAGES --platemap /workspace_images/platemap_${COHORT}.csv --cohort $COHORT 
 fi
 
 #### --- 4) Calculate CellProfiler features --- ####
