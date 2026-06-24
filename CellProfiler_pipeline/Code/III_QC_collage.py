@@ -91,7 +91,7 @@ def _text_h(draw, text: str, font) -> int:
 # See ThresholdEngine docstring for per-metric rationale.
 THRESHOLDS: dict[str, tuple] = {
     "PowerLogLogSlope": (-2.5, -1.0),
-    "MaxIntensity":     (None,  0.95),
+    "MedianIntensity":     (None,  0.95),
     "FocusScore":       (0.005, None),
 }
 THRESHOLDS_LOCAL_FOCUS: dict[str, tuple] = {
@@ -115,11 +115,11 @@ CHANNEL_COLORS = {
     "ER": (180, 90, 255), "Mito": (255, 80, 80), "Brightfield": (160, 160, 160),
 }
 
-ILLUM_METRICS  = ["PowerLogLogSlope", "MaxIntensity"]
+ILLUM_METRICS  = ["PowerLogLogSlope", "MedianIntensity"]
 FOCUS_METRICS  = ["FocusScore", "FocusScore"]
 BORDER_METRIC  = "PowerLogLogSlope"
 METRIC_LABELS  = {
-    "PowerLogLogSlope": "Slope", "MaxIntensity": "MaxInt",
+    "PowerLogLogSlope": "Slope", "MedianIntensity": "MaxInt",
     "FocusScore": "Focus",       "FocusScore": "LocalFoc",
 }
 
@@ -143,7 +143,7 @@ def _miq_col(metric: str, channel: str) -> str:
 
 METRIC_COLS: dict[str, list[str]] = {
     mk: [_miq_col(mk, ch) for ch in CHANNELS]
-    for mk in ("PowerLogLogSlope", "MaxIntensity", "FocusScore", "FocusScore")
+    for mk in ("PowerLogLogSlope", "MedianIntensity", "FocusScore", "FocusScore")
 }
 for mk in ("FocusScore", "FocusScore"):
     METRIC_COLS[mk] += [_miq_col(mk, ch) for ch in CHANNELS_EXTRA]
@@ -166,7 +166,7 @@ class ThresholdEngine:
     Absolute bounds (always enforced)
     ----------------------------------
     PowerLogLogSlope  (-2.5, -1.0)   Log-log power spectrum slope; primary blur metric.
-    MaxIntensity      (None, 0.95)   Saturation guard.
+    MedianIntensity      (None, 0.95)   Saturation guard.
     FocusScore        (0.005, None)  Loose — catches blank/fully out-of-focus only.
     FocusScore   per-channel    Main focus metric; thresholds vary by signal density.
 
@@ -1186,7 +1186,6 @@ def generate_html(cohort_name: str, plates_data: list[dict],
             "n_pass":       pd_["n_pass"],
             "n_illum":      pd_["n_illum_pass"],
             "n_focus":      pd_["n_focus_pass"],
-            "mfi":          pd_.get("mfi_data", {}),
             "wells": _round_floats({
                 well: {
                     "compound": pmap.get(well, ""),
@@ -1219,34 +1218,55 @@ def generate_html(cohort_name: str, plates_data: list[dict],
         hi = max(hi, fallback_hi) if fallback_hi is not None else hi
         return round(lo, 3), round(hi, 3)
 
-    # RdBu: red=bad(low) white=borderline blue=good(high) for Slope/Focus
-    # RdBu_r: red=bad(high) white=borderline blue=good(low) for MaxInt
+    SLOPE_CS = [
+        [0.0,  "#ff4444"],   # -2.5  rojo
+        [0.15, "#ff4444"],   # -2.35 rojo  (límite -2.7)
+        [0.15, "#ffbe00"],   # -2.35 amarillo
+        [0.35, "#ffbe00"],   # -2.15 amarillo (límite -2.5)
+        [0.35, "#4bd760"],   # -2.15 verde
+        [0.65, "#4bd760"],   # -1.85 verde  (límite -1.5)
+        [0.65, "#ffbe00"],   # -1.85 amarillo
+        [0.85, "#ffbe00"],   # -1.65 amarillo
+        [0.85, "#ff4444"],   # -1.65 rojo
+        [1.0,  "#ff4444"],   # -1.0  rojo
+    ]
+
     slope_specs = json.dumps([
         {"col": col,
-         "title": f"Slope — {CHANNEL_LABELS.get(ch, ch)}",
-         "cmin": _cohort_range(col, -2.5, -1.0)[0],
-         "cmax": _cohort_range(col, -2.5, -1.0)[1],
-         "cs": "RdBu"}
+        "title": f"Slope — {CHANNEL_LABELS.get(ch, ch)}",
+        "cmin": -3.0,
+        "cmax": -1.0,
+        "cs": SLOPE_CS}
         for ch in CHANNELS
         for col in [f"ImageQuality_PowerLogLogSlope_{ch}"]
     ])
-    focus_specs = json.dumps([
+    pct_max_specs = json.dumps([
         {"col": col,
-         "title": f"LocalFocus — {CHANNEL_LABELS.get(ch, ch)}",
-         "cmin": _cohort_range(col, 0, None)[0],
-         "cmax": _cohort_range(col, 0, None)[1],
-         "cs": "RdBu"}
+        "title": f"PctMaximal — {CHANNEL_LABELS.get(ch, ch)}",
+        "cmin": _cohort_range(col, 0, None)[0],
+        "cmax": _cohort_range(col, 0, None)[1],
+        "cs": "RdBu"}
         for ch in CHANNELS
-        for col in [f"ImageQuality_FocusScore_{ch}"] 
+        for col in [f"ImageQuality_PercentMaximal_{ch}"]
     ])
-    maxint_specs = json.dumps([
+
+    pct_min_specs = json.dumps([
+        {"col": col,
+        "title": f"PctMinimal — {CHANNEL_LABELS.get(ch, ch)}",
+        "cmin": _cohort_range(col, 0, None)[0],
+        "cmax": _cohort_range(col, 0, None)[1],
+        "cs": "RdBu"}
+        for ch in CHANNELS
+        for col in [f"ImageQuality_PercentMinimal_{ch}"]
+    ])
+    mEDIANint_specs = json.dumps([
         {"col": col,
          "title": f"MaxInt — {CHANNEL_LABELS.get(ch, ch)}",
          "cmin": _cohort_range(col, 0, 1)[0],
          "cmax": _cohort_range(col, 0, 1)[1],
          "cs": "RdBu_r"}
         for ch in CHANNELS
-        for col in [f"ImageQuality_MaxIntensity_{ch}"]
+        for col in [f"ImageQuality_MedianIntensity_{ch}"]
     ])
 
     # Count columns: cohort-wide p2/p98 so all plates share the same colour scale
@@ -1300,7 +1320,7 @@ def generate_html(cohort_name: str, plates_data: list[dict],
   h1 {{ font-size: 1.5rem; color: #a8c8ff; padding: 24px 32px 4px; }}
   h2 {{ font-size: 1.05rem; color: #8ab0e0; margin-bottom: 6px; letter-spacing: 0.03em; }}
   .subtitle {{ color: var(--muted); padding: 0 32px 20px; font-size: 0.82rem; }}
-  .container {{ max-width: 1600px; margin: 0 auto; padding: 0 32px 56px; }}
+  .container {{ max-width: 98vw; margin: 0 auto; padding: 0 24px 56px; }}
   .section {{ margin-bottom: 44px; }}
  
   /* ── Feature audit label ── */
@@ -1358,7 +1378,7 @@ def generate_html(cohort_name: str, plates_data: list[dict],
   .plate-name-display {{ font-size: 1rem; color: #a8c8ff; font-weight: bold; min-width: 110px; text-align: center; }}
  
   /* Well detail panel */
-  .browser-body {{ display: grid; grid-template-columns: 260px 1fr; gap: 14px; margin-bottom: 14px; }}
+  .browser-body {{ display: grid; grid-template-columns: 280px 1fr; gap: 14px; margin-bottom: 14px; }}
   .well-info-panel {{ background: var(--panel); border: 1px solid var(--border);
                       border-radius: 8px; padding: 14px; overflow-y: auto; max-height: 480px; }}
   .well-info-panel h3 {{ font-size: 0.95rem; color: #a8c8ff; margin-bottom: 8px; }}
@@ -1442,10 +1462,12 @@ def generate_html(cohort_name: str, plates_data: list[dict],
   .mfi-ch-dot {{ width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0; }}
   .mfi-channel-header h3 {{ font-size: 0.85rem; color: #a8c8ff; margin: 0; font-weight: 700; letter-spacing: 0.03em; }}
   /* Two-column: left=boxplots, right=platemap */
-  .mfi-body {{ display: grid; grid-template-columns: 360px 1fr; }}
+  .mfi-body {{ display: grid; grid-template-columns: 26% 48% 26%; }}
   .mfi-boxplot-col {{ display: flex; flex-direction: column;
-                      border-right: 1px solid var(--border); background: #090b14; }}
-  .mfi-plot-box {{ width: 100%; height: 250px; }}
+                    border-right: 1px solid var(--border); background: #090b14; }}
+  .mfi-boxplot-col-right {{ display: flex; flex-direction: column;
+                           border-left: 1px solid var(--border); background: #090b14; }}
+  .mfi-plot-box {{ width: 100%; height: 206px; }}
   .mfi-plot-divider {{ height: 1px; background: var(--border); }}
   .mfi-platemap-col {{ padding: 14px 18px; display: flex; flex-direction: column;
                        align-items: flex-start; justify-content: center;
@@ -1454,12 +1476,12 @@ def generate_html(cohort_name: str, plates_data: list[dict],
                           margin-bottom: 10px; letter-spacing: 0.03em; }}
   /* Platemap grid: 1 label col + 12 well cols × 1 label row + 8 well rows */
   .mfi-platemap-grid {{ display: grid;
-                        grid-template-columns: 20px repeat(12, 34px);
-                        grid-template-rows: 20px repeat(8, 34px);
-                        gap: 3px; }}
+                      grid-template-columns: 22px repeat(12, 42px);
+                      grid-template-rows: 22px repeat(8, 42px);
+                      gap: 4px; }}
   .mfi-grid-label {{ display: flex; align-items: center; justify-content: center;
                      color: #4a5a78; font-size: 10px; font-weight: 600; user-select: none; }}
-  .mfi-well-cell {{ width: 34px; height: 34px; border-radius: 4px;
+  .mfi-well-cell {{ width: 42px; height: 42px; border-radius: 4px;
                     display: flex; align-items: center; justify-content: center;
                     font-size: 8px; color: rgba(255,255,255,0.5);
                     cursor: pointer; border: 1.5px solid transparent;
@@ -1490,7 +1512,7 @@ def generate_html(cohort_name: str, plates_data: list[dict],
   <table class="summary-table">
     <thead>
       <tr><th>Plate</th><th>Wells</th>
-          <th>Illumination</th><th>Focus</th><th>Flagged wells</th><th>Δ MFI Hoechst (obj−img)</th><th>Δ MFI Syto (obj−img)</th>
+          <th>Illumination</th><th>Focus</th><th>Flagged wells</th><th>Signal / Noise (SNR in MFI)</th><th>Positional Effects (η² in MFI)</th>
     </thead>
     <tbody id="summary-tbody"></tbody>
   </table>
@@ -1530,7 +1552,7 @@ def generate_html(cohort_name: str, plates_data: list[dict],
     <div class="audit-row">
       <span class="audit-label">Illumination</span>
       <span class="thresh">ImageQuality_PowerLogLogSlope_*</span>
-      <span class="thresh">ImageQuality_MaxIntensity_*</span>
+      <span class="thresh">ImageQuality_MedianIntensity_*</span>
       <span class="audit-source">← Image.txt</span>
     </div>
     <div class="audit-row">
@@ -1602,7 +1624,53 @@ def generate_html(cohort_name: str, plates_data: list[dict],
     </div>
     <hr class="audit-sep">
     <div class="audit-row">
-      Per-image median of all objects → one value per site per well · boxplots show distribution across sites
+        Per-image median of all objects → one value per site per well &nbsp;·&nbsp;
+        Boxplots show the distribution of those per-site values across rows and columns.
+        </div>
+        <div class="audit-row" style="margin-top:4px;">
+        <b style="color:#a8c8f0;">Δ = MFI<sub>obj</sub> − MFI<sub>img</sub></b>:
+        difference between the median MFI of segmented objects and the whole-image median
+        (ImageQuality_MedianIntensity, Image.txt).
+        </div>
+        <div class="audit-row" style="margin-top:4px;">
+        <b style="color:#a8c8f0;">SNR proxy = Δ / MFI<sub>img</sub></b>:
+        Signal to Noise Ration (SNR), it is the fold-change of object intensity over background — how much brighter the segmented
+        objects are relative to the image background.
+        <span style="color:#4bd760;">■ ≥ 0.5×</span> acceptable &nbsp;·&nbsp;
+        <span style="color:#ffbe00;">■ 0.2–0.5×</span> weak signal, check segmentation &nbsp;·&nbsp;
+        <span style="color:#ff4444;">■ &lt; 0.2×</span> signal indistinguishable from background.
+        Note: thresholds are empirical — compare against DMSO controls within the same experiment
+        for a more robust interpretation.
+    </div>
+    <hr class="audit-sep">
+    <div class="audit-row" style="margin-top:4px;">
+      <b style="color:#a8c8f0;">η² (eta-squared)</b> — one-way ANOVA measuring what fraction
+      of total MFI variance is explained by plate position (row or column).
+      A high η² indicates a <b style="display:inline;">positional effect</b>: the location 
+      of a well on the plate predicts its fluorescence intensity,
+      which should not happen in a well-controlled experiment.
+    </div>
+    <div class="audit-row" style="margin-top:4px;">
+        <b style="color:#c8d8f0;">Hoechst</b> is used as the <b>technical baseline</b>:
+        its η² reflects unavoidable instrumental noise (pipetting, incubator gradients, illumination).
+        All other channels are evaluated <i>relative</i> to this baseline
+        (ratio &lt; 2× = green · 2–4× = yellow · ≥ 4× = red).
+        An additional <b>absolute ceiling of η² ≥ 0.20</b> applies regardless of baseline.
+    </div>
+    <div class="audit-row" style="margin-top:4px;">
+        For Hoechst itself, absolute thresholds from <b style="color:#a8c8f0;">Cohen (1988)</b>
+        are applied (η² &lt; 0.01 negligible · 0.01–0.06 small · 0.06–0.14 medium · ≥ 0.14 large).
+        <span style="color:var(--muted);font-size:0.78rem;">
+            Reference: Cohen, J. (1988). <i>Statistical Power Analysis for the Behavioral Sciences</i>
+            (2nd ed., Ch. 8). Lawrence Erlbaum Associates.
+        </span>
+    </div>
+    <hr class="audit-sep">
+    <div class="audit-row" style="color:var(--muted);font-size:0.78rem;">
+      <span style="color:#4bd760;">■</span> green: no positional effect detected &nbsp;·&nbsp;
+      <span style="color:#ffbe00;">■</span> yellow: mild effect, monitor across plates &nbsp;·&nbsp;
+      <span style="color:#ff4444;">■</span> red: significant positional effect — review pipetting order,
+      incubator gradients, or illumination uniformity
     </div>
   </div>
   <div id="mfi-content"></div>
@@ -1634,12 +1702,14 @@ const MFI_IMG      = {mfi_img_json};
 const PLATES = Object.keys(DATA);
  
 const SLOPE_SPECS  = {slope_specs};
-const FOCUS_SPECS  = {focus_specs};
-const MAXINT_SPECS = {maxint_specs};
+const PCT_MAX_SPECS = {pct_max_specs};
+const PCT_MIN_SPECS = {pct_min_specs};
+const MEDIANINT_SPECS = {mEDIANint_specs};
 const METRIC_GROUPS = [
   {{ label: 'Slope',        specs: SLOPE_SPECS  }},
-  {{ label: 'LocalFocus',   specs: FOCUS_SPECS  }},
-  {{ label: 'MaxIntensity', specs: MAXINT_SPECS }},
+  {{ label: 'PercentMaximal',   specs: PCT_MAX_SPECS  }},
+  {{ label: 'PercentMinimal',   specs: PCT_MIN_SPECS  }},
+  {{ label: 'MedianIntensity', specs: MEDIANINT_SPECS }},
 ];
  
 // ROWS: A at top (index 0) -> H at bottom (index 7)
@@ -1685,23 +1755,111 @@ function arrMedian(arr) {{
   PLATES.forEach(p => {{
     const d = DATA[p];
     // Compute median MFI Δ for Hoechst/DNA and Syto across wells
-    const mfiDelta = (ch) => {{
+    const snrSummary = () => {{
+    const channels = MFI_CHANNELS;
+    if (!channels.length) return '<td style="color:var(--muted)">—</td>';
+
+    const warn = [], bad = [];
+    channels.forEach(ch => {{
         const plateMfiData = (MFI_DATA[p]||{{}})[ch]||{{}};
         const objVals = Object.values(plateMfiData).flat();
         const objMed  = objVals.length ? arrMedian(objVals) : null;
         const imgVals = Object.values((MFI_IMG[p]||{{}})).map(w=>w[ch]).filter(v=>v!=null);
         const imgMed  = imgVals.length ? arrMedian(imgVals) : null;
-        if (objMed==null || imgMed==null) return '—';
-        const delta = objMed - imgMed;
-        return `${{delta>=0?'+':''}}${{delta.toFixed(5)}}`;
-        }};
+        if (objMed==null || imgMed==null || imgMed===0) return;
+        const snr = (objMed - imgMed) / imgMed;
+        if      (snr < 0.2) bad.push(ch);
+        else if (snr < 0.5) warn.push(ch);
+    }});
+
+    if (bad.length) {{
+        return `<td style="text-align:center;">
+        <span style="color:#ff4444;font-weight:700;">Bad</span><br>
+        <span style="color:#ff4444;font-size:0.75rem;">${{bad.join(', ')}}</span>
+        </td>`;
+    }} else if (warn.length) {{
+        return `<td style="text-align:center;">
+        <span style="color:#ffbe00;font-weight:700;">Warning</span><br>
+        <span style="color:#ffbe00;font-size:0.75rem;">${{warn.join(', ')}}</span>
+        </td>`;
+    }} else {{
+        return `<td style="text-align:center;">
+        <span style="color:#4bd760;font-weight:700;">Good</span>
+        </td>`;
+    }}
+    }};
+
+    const positionalSummary = () => {{
+    if (!MFI_CHANNELS.length) return '<td style="color:var(--muted)">—</td>';
+
+    // Calcular baseline Hoechst para esta placa
+    let baseRow = null, baseCol = null;
+    if ((MFI_DATA[p]||{{}})['Hoechst']) {{
+        const hData = MFI_DATA[p]['Hoechst'];
+        const hRowG = ROW_LABELS.map(r => COLS.flatMap(c => hData[r+c]||[]));
+        const hColG = COLS.map(c => ROW_LABELS.flatMap(r => hData[r+c]||[]));
+        baseRow = mfiAnova(hRowG);
+        baseCol = mfiAnova(hColG);
+        if (baseRow!=null && baseCol!=null) {{
+        const maxH = Math.max(baseRow,baseCol);
+        if (Math.abs(baseRow-baseCol)/maxH < 0.20) {{
+            const mean = (baseRow+baseCol)/2;
+            baseRow = mean; baseCol = mean;
+        }}
+        }}
+    }}
+
+    const warnCh=[], badCh=[];
+    MFI_CHANNELS.forEach(ch => {{
+      const chData = (MFI_DATA[p]||{{}})[ch]||{{}};
+      const rowG = ROW_LABELS.map(r => COLS.flatMap(c => chData[r+c]||[]));
+      const colG = COLS.map(c => ROW_LABELS.flatMap(r => chData[r+c]||[]));
+      const e2r = mfiAnova(rowG), e2c = mfiAnova(colG);
+      const worst = Math.max(e2r??0, e2c??0);
+      let level = 'good';
+      if (ch==='Hoechst') {{
+        if      (worst >= 0.14) level='bad';
+        else if (worst >= 0.06) level='warn';
+      }} else {{
+        if (worst >= 0.20) {{
+          level = 'bad';
+        }} else if (baseRow!=null) {{
+          const ratio = worst / Math.max(baseRow, baseCol, 0.001);
+          if      (ratio >= 4 || worst >= 0.14) level='bad';
+          else if (ratio >= 2 || worst >= 0.06) level='warn';
+        }} else {{
+          if      (worst >= 0.14) level='bad';
+          else if (worst >= 0.06) level='warn';
+        }}
+      }}
+      if      (level==='bad')  badCh.push(ch);
+      else if (level==='warn') warnCh.push(ch);
+    }});
+
+    if (badCh.length) {{
+        return `<td style="text-align:center;">
+        <span style="color:#ff4444;font-weight:700;">Bad</span><br>
+        <span style="color:#ff4444;font-size:0.75rem;">${{badCh.join(', ')}}</span>
+        </td>`;
+    }} else if (warnCh.length) {{
+        return `<td style="text-align:center;">
+        <span style="color:#ffbe00;font-weight:700;">Warning</span><br>
+        <span style="color:#ffbe00;font-size:0.75rem;">${{warnCh.join(', ')}}</span>
+        </td>`;
+    }} else {{
+        return `<td style="text-align:center;">
+        <span style="color:#4bd760;font-weight:700;">Good</span>
+        </td>`;
+    }}
+    }};
+
     tbody.insertAdjacentHTML('beforeend', `<tr>
       <td><strong>${{p}}</strong></td><td>${{d.n_wells}}</td>
       <td>${{badge(Math.round(d.n_illum/d.n_wells*100))}} ${{d.n_illum}}/${{d.n_wells}}</td>
       <td>${{badge(Math.round(d.n_focus/d.n_wells*100))}} ${{d.n_focus}}/${{d.n_wells}}</td>
       <td>${{d.n_wells - d.n_pass}}</td>
-      <td style="font-family:monospace;">${{mfiDelta('DNA')||mfiDelta('Hoechst')}}</td>
-      <td style="font-family:monospace;">${{mfiDelta('Syto')||mfiDelta('RNA')}}</td>
+      ${{snrSummary()}}
+      ${{positionalSummary()}}
     </tr>`);
   }});
 }})();
@@ -1785,7 +1943,7 @@ function selectWell(plateName, well) {{
 }}
  
 // ── Well info panel ───────────────────────────────────────────────────────────
-const ALL_METRIC_SPECS = [...SLOPE_SPECS, ...FOCUS_SPECS, ...MAXINT_SPECS];
+const ALL_METRIC_SPECS = [...SLOPE_SPECS, ...PCT_MAX_SPECS, ...PCT_MIN_SPECS, ...MEDIANINT_SPECS];
  
 function renderWellInfo(plateName, well) {{
   const pd     = DATA[plateName];
@@ -1882,6 +2040,7 @@ function makeHeatmap(plateData, spec) {{
     x:COLS, y:ROWS_PLOTLY, colorscale: spec.cs,
     zmin: spec.cmin, zmax: spec.cmax,
     colorbar:{{ thickness:10, len:0.85, tickfont:{{size:9}} }},
+    xgap:2, ygap:2,
   }};
 }}
  
@@ -1891,9 +2050,10 @@ function heatmapLayout(title, extraY) {{
   return {{
     paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'#0a0c18',
     font:{{color:'#c8d8f0', size:10}},
-    margin:{{t:32,b:42,l:42,r:16}}, height:300,
+    margin:{{t:32,b:42,l:42,r:16}}, height:340, width:520,
     title:{{text:title, font:{{size:11,color:'#8ab0e0'}}, x:0.5}},
-    xaxis:{{ tickfont:{{size:9}}, showgrid:!filtered, gridcolor, zeroline:false }},
+    xaxis:{{ tickfont:{{size:9}}, showgrid:!filtered, gridcolor, zeroline:false,
+             tickvals:COLS, ticktext:COLS.map(c=>parseInt(c)) }},
     yaxis:{{ tickfont:{{size:9}}, showgrid:!filtered, gridcolor, zeroline:false,
              title: extraY ? {{text:'Row', font:{{size:9}}}} : undefined }},
   }};
@@ -2143,14 +2303,6 @@ function mfiRenderBoxplot(divId, plateName, channel, groupBy) {{
     if (imgMed!=null) shapes.push({{type:'line',xref:'paper',yref:'y',x0:0,x1:1,
     y0:imgMed,y1:imgMed,line:{{color:'#FF9900',width:1.5,dash:'dash'}}}});
 
-    const annotations = [];
-    if (globalMed!=null) annotations.push({{xref:'paper',x:0.99,xanchor:'right',yref:'y',
-    y:globalMed,yanchor:'bottom',text:`obj: ${{globalMed.toFixed(4)}}`,
-    showarrow:false,font:{{color:'#FF8888',size:8}}}});
-    if (imgMed!=null) annotations.push({{xref:'paper',x:0.99,xanchor:'right',yref:'y',
-    y:imgMed,yanchor:'top',text:`img: ${{imgMed.toFixed(4)}}`,
-    showarrow:false,font:{{color:'#FF9900',size:8}}}});
-
     Plotly.react(divId,
     [...boxTraces, {{type:'scatter',mode:'markers',x:ptX,y:ptY,
         marker:{{color:'#000',size:3,opacity:0.45}},showlegend:false,hoverinfo:'none'}}],
@@ -2163,7 +2315,7 @@ function mfiRenderBoxplot(divId, plateName, channel, groupBy) {{
         yaxis:{{title:{{text:'MFI',font:{{color:'#5a6a88',size:9}},standoff:4}},
                 color:'#5a6a88',tickfont:{{size:9,color:'#7a8aaa'}},
                 gridcolor:'#161c2c',zeroline:false,range:[yMin,yMax]}},
-        shapes, annotations,
+        shapes,
     }}, {{responsive:true,displayModeBar:false}});
     }}
     
@@ -2228,6 +2380,50 @@ function mfiRenderPlatemap(channel, plateName) {{
   }});
 }}
  
+function mfiAnova(groups) {{
+  const allVals = groups.flat();
+  if (allVals.length < 2) return null;
+  const grandMean = allVals.reduce((a,b)=>a+b,0) / allVals.length;
+  const ssBetween = groups.reduce((s,g) => {{
+    if (!g.length) return s;
+    const gMean = g.reduce((a,b)=>a+b,0)/g.length;
+    return s + g.length*(gMean-grandMean)**2;
+  }}, 0);
+  const ssTotal = allVals.reduce((s,v) => s+(v-grandMean)**2, 0);
+  if (ssTotal === 0) return null;
+  return ssBetween / ssTotal;
+}}
+
+function eta2Badge(eta2, label, baseline) {{
+  if (eta2 == null) return '';
+  let color, interpretation;
+  if (baseline == null) {{
+    // Hoechst — criterio Cohen absoluto
+    if      (eta2 < 0.01) {{ color='#4bd760'; interpretation='negligible'; }}
+    else if (eta2 < 0.06) {{ color='#ffbe00'; interpretation='small';      }}
+    else if (eta2 < 0.14) {{ color='#ffbe00'; interpretation='medium';     }}
+    else                  {{ color='#ff4444'; interpretation='large';      }}
+  }} else {{
+        const ratio = eta2 / baseline;
+        if (eta2 >= 0.20) {{
+        color='#ff4444'; interpretation=`${{ratio.toFixed(1)}}× baseline (absolute ceiling)`;
+        }} else if (ratio < 2 || eta2 < 0.06) {{
+        // Verde si ratio bajo O si eta2 es pequeño en términos absolutos (Cohen small)
+        color='#4bd760'; interpretation=`${{ratio.toFixed(1)}}× baseline`;
+        }} else if (ratio < 4 || eta2 < 0.14) {{
+        // Amarillo si ratio medio O si eta2 es medium en Cohen
+        color='#ffbe00'; interpretation=`${{ratio.toFixed(1)}}× baseline`;
+        }} else {{
+        color='#ff4444'; interpretation=`${{ratio.toFixed(1)}}× baseline`;
+        }}
+  }}
+  return `<span title="η²=${{eta2.toFixed(4)}} — ${{interpretation}}"
+    style="font-size:0.72rem;margin-left:6px;padding:1px 7px;border-radius:10px;
+           background:${{color}}22;color:${{color}};border:1px solid ${{color}}55;cursor:help;">
+    η²<sub>${{label}}</sub>: ${{eta2.toFixed(3)}}
+  </span>`;
+}}
+
 function renderMFI() {{
   const plateName = currentPlate;
   if (!plateName) return;
@@ -2238,7 +2434,26 @@ function renderMFI() {{
     container.innerHTML='<p style="color:var(--muted);padding:16px;">No MFI data found.</p>';
     return;
   }}
- 
+ // Baseline de Hoechst para criterio relativo
+ let hoechstEta2Row = null, hoechstEta2Col = null;
+ if ((MFI_DATA[plateName]||{{}})['Hoechst']) {{
+ const hData = MFI_DATA[plateName]['Hoechst'];
+ const hRowGroups = ROW_LABELS.map(r => COLS.flatMap(c => hData[r+c]||[]));
+ const hColGroups = COLS.map(c => ROW_LABELS.flatMap(r => hData[r+c]||[]));
+ hoechstEta2Row = mfiAnova(hRowGroups);
+ hoechstEta2Col = mfiAnova(hColGroups);
+ // Verificar si row y col son similares (diferencia relativa < 20%)
+ if (hoechstEta2Row!=null && hoechstEta2Col!=null) {{
+     const maxH = Math.max(hoechstEta2Row, hoechstEta2Col);
+     const diff = Math.abs(hoechstEta2Row - hoechstEta2Col) / maxH;
+     if (diff < 0.20) {{
+     const mean = (hoechstEta2Row + hoechstEta2Col) / 2;
+     hoechstEta2Row = mean;
+     hoechstEta2Col = mean;
+     }}
+ }}
+ }}
+
   MFI_CHANNELS.forEach(ch => {{
     const color    = MFI_COLORS[ch]||'#8ab0d0';
     const wellData = (MFI_DATA[plateName]||{{}})[ch]||{{}};
@@ -2247,6 +2462,19 @@ function renderMFI() {{
     const plateMed = allVals.length ? mfiQuantile([...allVals].sort((a,b)=>a-b),0.5) : null;
  
     const sec=document.createElement('div'); sec.className='mfi-channel-section';
+    const rowGroups = ROW_LABELS.map(r =>
+        COLS.flatMap(c => wellData[r+c] || []));
+    const colGroups = COLS.map(c =>
+        ROW_LABELS.flatMap(r => wellData[r+c] || []));
+    const eta2Row = mfiAnova(rowGroups);
+    const eta2Col = mfiAnova(colGroups);
+
+    const isHoechst  = ch === 'Hoechst';
+    const baseRow    = isHoechst ? null : hoechstEta2Row;
+    const baseCol    = isHoechst ? null : hoechstEta2Col;
+    const badgeRow   = eta2Badge(eta2Row, 'row', baseRow);
+    const badgeCol   = eta2Badge(eta2Col, 'col', baseCol);
+
     sec.innerHTML=`
       <div class="mfi-channel-header">
         <span class="mfi-ch-dot" style="background:${{color}}"></span>
@@ -2256,23 +2484,41 @@ function renderMFI() {{
             const imgVals = Object.entries((MFI_IMG[plateName]||{{}}))
             .map(([w,chs]) => chs[ch]).filter(v=>v!=null);
             const imgMed = imgVals.length ? mfiQuantile([...imgVals].sort((a,b)=>a-b), 0.5) : null;
-            const delta = (plateMed!=null && imgMed!=null) ? plateMed - imgMed : null;
-            return imgMed!=null
-            ? `· img median: ${{imgMed.toFixed(5)}} · <b>Δ: ${{delta>=0?'+':''}}${{delta.toFixed(5)}}</b>`
-            : '';
+            const delta  = (plateMed!=null && imgMed!=null) ? plateMed - imgMed : null;
+            const snr    = (delta!=null && imgMed>0) ? delta / imgMed : null;
+            if (imgMed==null) return '';
+
+            let snrColor, snrLabel;
+            if      (snr==null)  {{ snrColor='var(--muted)'; snrLabel='N/A'; }}
+            else if (snr >= 1.0) {{ snrColor='#4bd760';      snrLabel=`${{snr.toFixed(2)}}×`; }}
+            else if (snr >= 0.5) {{ snrColor='#4bd760';      snrLabel=`${{snr.toFixed(2)}}×`; }}
+            else if (snr >= 0.2) {{ snrColor='#ffbe00';      snrLabel=`${{snr.toFixed(2)}}×`; }}
+            else                 {{ snrColor='#ff4444';      snrLabel=`${{snr.toFixed(2)}}×`; }}
+
+            return `· img: ${{imgMed.toFixed(5)}} · <b>Δ: ${{delta>=0?'+':''}}${{delta.toFixed(5)}}</b>`
+            + ` · <span title="SNR proxy = Δ / MFI_img — fold-change of objects over background"
+                    style="color:${{snrColor}};cursor:help;">SNR: ${{snrLabel}}</span>`;
         }})()}}
-      </span></h3>
+        </span></h3>
+      ${{badgeRow}}${{badgeCol}}
+      ${{isHoechst ? '<span style="font-size:0.7rem;color:var(--muted);margin-left:8px;">(Cohen 1988 — baseline reference)</span>' : ''}}
+      </div>
+      <div style="font-size:0.72rem;color:var(--muted);padding:4px 14px 6px;background:#0d0f1e;border-bottom:1px solid var(--border);">
+        <span style="color:#FF4040;">— — —</span> obj median &nbsp;
+        <span style="color:#FF9900;">- - -</span> img median &nbsp;·&nbsp;
+        Δ = MFI<sub>obj</sub> − MFI<sub>img</sub>
       </div>
       <div class="mfi-body">
-        <div class="mfi-boxplot-col">
+      <div class="mfi-boxplot-col">
           <div class="mfi-plot-box" id="mfi-box-row-${{ch}}"></div>
-          <div class="mfi-plot-divider"></div>
-          <div class="mfi-plot-box" id="mfi-box-col-${{ch}}"></div>
-        </div>
-        <div class="mfi-platemap-col">
+      </div>
+      <div class="mfi-platemap-col">
           <div class="mfi-platemap-title">Platemap — median MFI</div>
           <div class="mfi-platemap-grid" id="mfi-grid-${{ch}}"></div>
         </div>
+      <div class="mfi-boxplot-col-right">
+        <div class="mfi-plot-box" id="mfi-box-col-${{ch}}"></div>
+      </div>
       </div>`;
     container.appendChild(sec);
     setTimeout(()=>mfiRenderBoxplot(`mfi-box-row-${{ch}}`,plateName,ch,'row'),0);
