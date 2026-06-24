@@ -88,22 +88,22 @@ MeasureImageQuality:[module_num:5|svn_version:'Unknown'|variable_revision_number
     Include the image rescaling value?:Yes
     Calculate blur metrics?:Yes
     Spatial scale for blur measurements:10
-    Calculate saturation metrics?:No
+    Calculate saturation metrics?:Yes
     Calculate intensity metrics?:Yes
-    Calculate thresholds?:Yes
+    Calculate thresholds?:No
     Use all thresholding methods?:No
     Select a thresholding method:Otsu
     Typical fraction of the image covered by objects:0.1
     Two-class or three-class thresholding?:Two classes
     Minimize the weighted variance or the entropy?:Weighted variance
     Assign pixels in the middle intensity class to the foreground or the background?:Background
-    Select the images to measure:ER, Golgi, Mito, Syto
+    Select the images to measure:Brightfield, ER, Golgi, Mito, Syto
     Include the image rescaling value?:Yes
     Calculate blur metrics?:Yes
     Spatial scale for blur measurements:20
-    Calculate saturation metrics?:No
+    Calculate saturation metrics?:Yes
     Calculate intensity metrics?:Yes
-    Calculate thresholds?:Yes
+    Calculate thresholds?:No
     Use all thresholding methods?:No
     Select a thresholding method:Otsu
     Typical fraction of the image covered by objects:0.1
@@ -330,8 +330,8 @@ SaveImages:[module_num:21|svn_version:'Unknown'|variable_revision_number:16|show
     Select image name for file prefix:Syto
     Enter single file name:OrigBlue
     Number of digits:4
-    Append a suffix to the image file name?:Yes
-    Text to append to the image name:_P\g<Plate>
+    Append a suffix to the image file name?:No
+    Text to append to the image name:
     Saved file format:tiff
     Output file location:Elsewhere...|SAVING_OUTPUT_PATH/
     Image bit depth:8-bit integer
@@ -366,7 +366,7 @@ ExportToSpreadsheet:[module_num:24|svn_version:'Unknown'|variable_revision_numbe
     Select the image to use as the identifier:None
     Select the metadata to use as the identifier:None
     Export all measurement types?:No
-    Press button to select measurements:Cells|AreaShape_Area,Cells|Intensity_IntegratedIntensity_Syto,Cells|Intensity_IntegratedIntensity_Golgi,Cells|Intensity_IntegratedIntensity_Mito,Cells|Intensity_IntegratedIntensity_ER,Cells|Intensity_StdIntensity_Golgi,Cells|Intensity_StdIntensity_Syto,Cells|Intensity_StdIntensity_Mito,Cells|Intensity_StdIntensity_ER,Cells|Intensity_MedianIntensity_Golgi,Cells|Intensity_MedianIntensity_ER,Cells|Intensity_MedianIntensity_Syto,Cells|Intensity_MedianIntensity_Mito,Cells|Intensity_MeanIntensity_Mito,Cells|Intensity_MeanIntensity_ER,Cells|Intensity_MeanIntensity_Golgi,Cells|Intensity_MeanIntensity_Syto,Cells|Intensity_MassDisplacement_Golgi,Cells|Intensity_MassDisplacement_ER,Cells|Intensity_MassDisplacement_Syto,Cells|Intensity_MassDisplacement_Mito,Cells|Intensity_MADIntensity_ER,Cells|Intensity_MADIntensity_Syto,Cells|Intensity_MADIntensity_Mito,Cells|Intensity_MADIntensity_Golgi,Nuclei|Intensity_MeanIntensity_Hoechst,Nuclei|Intensity_MedianIntensity_Hoechst,Nuclei|Intensity_IntegratedIntensity_Hoechst,Nuclei|Intensity_StdIntensity_Hoechst,Nuclei|Intensity_MADIntensity_Hoechst,Nuclei|Intensity_MassDisplacement_Hoechst,Nuclei|AreaShape_Area,Image|ImageQuality_PowerLogLogSlope_Golgi,Image|ImageQuality_PowerLogLogSlope_Syto,Image|ImageQuality_PowerLogLogSlope_Hoechst,Image|ImageQuality_PowerLogLogSlope_Mito,Image|ImageQuality_PowerLogLogSlope_ER,Image|ImageQuality_MedianIntensity_ER,Image|ImageQuality_MedianIntensity_Golgi,Image|ImageQuality_MedianIntensity_Mito,Image|ImageQuality_MedianIntensity_Syto,Image|ImageQuality_MedianIntensity_Hoechst,Image|ImageQuality_TotalArea_Hoechst,Image|ImageQuality_TotalArea_ER,Image|ImageQuality_TotalArea_Golgi,Image|ImageQuality_TotalArea_Syto,Image|ImageQuality_TotalArea_Mito,Image|ImageQuality_TotalIntensity_ER,Image|ImageQuality_TotalIntensity_Hoechst,Image|ImageQuality_TotalIntensity_Syto,Image|ImageQuality_TotalIntensity_Mito,Image|ImageQuality_TotalIntensity_Golgi,Image|ImageQuality_MaxIntensity_ER,Image|ImageQuality_MaxIntensity_Mito,Image|ImageQuality_MaxIntensity_Hoechst,Image|ImageQuality_MaxIntensity_Golgi,Image|ImageQuality_MaxIntensity_Syto,Image|ImageQuality_FocusScore_Mito,Image|ImageQuality_FocusScore_Golgi,Image|ImageQuality_FocusScore_Syto,Image|ImageQuality_FocusScore_ER,Image|ImageQuality_FocusScore_Hoechst,Image|Intensity_TotalArea_Hoechst,Image|Intensity_TotalArea_Syto,Image|Intensity_MedianIntensity_Hoechst,Image|Intensity_MedianIntensity_Syto,Image|Intensity_MeanIntensity_Syto,Image|Intensity_MeanIntensity_Hoechst,Image|Intensity_UpperQuartileIntensity_Hoechst,Image|Intensity_UpperQuartileIntensity_Syto,Image|Intensity_MADIntensity_Hoechst,Image|Intensity_MADIntensity_Syto,Image|Intensity_MaxIntensity_Syto,Image|Intensity_MaxIntensity_Hoechst,Image|Intensity_MinIntensity_Hoechst,Image|Intensity_MinIntensity_Syto,Image|Intensity_StdIntensity_Syto,Image|Intensity_StdIntensity_Hoechst,Image|Intensity_TotalIntensity_Syto,Image|Intensity_TotalIntensity_Hoechst,Image|Intensity_LowerQuartileIntensity_Syto,Image|Intensity_LowerQuartileIntensity_Hoechst,Image|Intensity_Percentile_10_Syto,Image|Intensity_Percentile_10_Hoechst,Image|Intensity_Percentile_90_Hoechst,Image|Intensity_Percentile_90_Syto,Image|Intensity_PercentMaximal_Syto,Image|Intensity_PercentMaximal_Hoechst,Image|Count_Nuclei,Image|Count_Cells,Image|Count_Raw_nuclei,Image|Metadata_Plate,Image|Metadata_Well,Image|Metadata_Site
+    Press button to select measurements:Image|ImageQuality_PowerLogLogSlope_Hoechst,Image|ImageQuality_PowerLogLogSlope_Brightfield,Image|ImageQuality_PowerLogLogSlope_Mito,Image|ImageQuality_PowerLogLogSlope_Golgi,Image|ImageQuality_PowerLogLogSlope_Syto,Image|ImageQuality_PowerLogLogSlope_ER,Image|ImageQuality_MaxIntensity_Brightfield,Image|ImageQuality_MaxIntensity_Golgi,Image|ImageQuality_MaxIntensity_ER,Image|ImageQuality_MaxIntensity_Mito,Image|ImageQuality_MaxIntensity_Syto,Image|ImageQuality_MaxIntensity_Hoechst,Image|ImageQuality_TotalIntensity_Brightfield,Image|ImageQuality_TotalIntensity_Golgi,Image|ImageQuality_TotalIntensity_Syto,Image|ImageQuality_TotalIntensity_Hoechst,Image|ImageQuality_TotalIntensity_ER,Image|ImageQuality_TotalIntensity_Mito,Image|ImageQuality_MedianIntensity_Brightfield,Image|ImageQuality_MedianIntensity_Syto,Image|ImageQuality_MedianIntensity_Mito,Image|ImageQuality_MedianIntensity_Hoechst,Image|ImageQuality_MedianIntensity_ER,Image|ImageQuality_MedianIntensity_Golgi,Image|ImageQuality_TotalArea_Hoechst,Image|ImageQuality_TotalArea_Syto,Image|ImageQuality_TotalArea_Brightfield,Image|ImageQuality_TotalArea_Golgi,Image|ImageQuality_TotalArea_ER,Image|ImageQuality_TotalArea_Mito,Image|ImageQuality_FocusScore_Hoechst,Image|ImageQuality_FocusScore_Brightfield,Image|ImageQuality_FocusScore_ER,Image|ImageQuality_FocusScore_Golgi,Image|ImageQuality_FocusScore_Syto,Image|ImageQuality_FocusScore_Mito,Image|Intensity_MADIntensity_Syto,Image|Intensity_MADIntensity_Hoechst,Image|Intensity_MinIntensity_Hoechst,Image|Intensity_MinIntensity_Syto,Image|Intensity_Percentile_10_Hoechst,Image|Intensity_Percentile_10_Syto,Image|Intensity_Percentile_90_Syto,Image|Intensity_Percentile_90_Hoechst,Image|Intensity_TotalIntensity_Hoechst,Image|Intensity_TotalIntensity_Syto,Image|Intensity_StdIntensity_Hoechst,Image|Intensity_StdIntensity_Syto,Image|Intensity_LowerQuartileIntensity_Hoechst,Image|Intensity_LowerQuartileIntensity_Syto,Image|Intensity_TotalArea_Hoechst,Image|Intensity_TotalArea_Syto,Image|Intensity_MaxIntensity_Syto,Image|Intensity_MaxIntensity_Hoechst,Image|Intensity_MeanIntensity_Hoechst,Image|Intensity_MeanIntensity_Syto,Image|Intensity_UpperQuartileIntensity_Syto,Image|Intensity_UpperQuartileIntensity_Hoechst,Image|Intensity_PercentMaximal_Syto,Image|Intensity_PercentMaximal_Hoechst,Image|Intensity_MedianIntensity_Syto,Image|Intensity_MedianIntensity_Hoechst,Image|Count_Cells,Image|Count_Nuclei,Image|Count_Raw_nuclei,Image|Metadata_Site,Image|Metadata_Well,Image|Metadata_Plate,Cells|AreaShape_MedianRadius,Cells|AreaShape_Area,Cells|Intensity_MADIntensity_ER,Cells|Intensity_MADIntensity_Golgi,Cells|Intensity_MADIntensity_Syto,Cells|Intensity_MADIntensity_Mito,Cells|Intensity_IntegratedIntensity_Mito,Cells|Intensity_IntegratedIntensity_ER,Cells|Intensity_IntegratedIntensity_Syto,Cells|Intensity_IntegratedIntensity_Golgi,Cells|Intensity_MedianIntensity_Syto,Cells|Intensity_MedianIntensity_ER,Cells|Intensity_MedianIntensity_Mito,Cells|Intensity_MedianIntensity_Golgi,Cells|Intensity_StdIntensity_Golgi,Cells|Intensity_StdIntensity_Syto,Cells|Intensity_StdIntensity_ER,Cells|Intensity_StdIntensity_Mito,Cells|Intensity_MassDisplacement_Syto,Cells|Intensity_MassDisplacement_Golgi,Cells|Intensity_MassDisplacement_ER,Cells|Intensity_MassDisplacement_Mito,Cells|Intensity_MeanIntensity_Golgi,Cells|Intensity_MeanIntensity_Syto,Cells|Intensity_MeanIntensity_Mito,Cells|Intensity_MeanIntensity_ER,Nuclei|Intensity_MedianIntensity_Hoechst,Nuclei|Intensity_IntegratedIntensity_Hoechst,Nuclei|Intensity_MeanIntensity_Hoechst,Nuclei|Intensity_StdIntensity_Hoechst,Nuclei|Intensity_MADIntensity_Hoechst,Nuclei|Intensity_MassDisplacement_Hoechst,Nuclei|AreaShape_Area,Nuclei|AreaShape_MedianRadius
     Representation of Nan/Inf:NaN
     Add a prefix to file names?:No
     Filename prefix:MyExpt_
