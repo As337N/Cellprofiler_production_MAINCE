@@ -1240,12 +1240,30 @@ def generate_html(cohort_name: str, plates_data: list[dict],
         for ch in CHANNELS
         for col in [f"ImageQuality_PowerLogLogSlope_{ch}"]
     ])
+
+    PCT_MAX_CS = [
+        [0.0,  "#4bd760"],
+        [0.05, "#4bd760"],  # 0.1% — verde hasta aquí
+        [0.05, "#ffbe00"],
+        [0.25, "#ffbe00"],  # 1%   — amarillo hasta aquí
+        [0.25, "#ff4444"],
+        [1.0,  "#ff4444"],  # > 1% — rojo
+    ]
+    PCT_MIN_CS = [
+        [0.0,  "#4bd760"],
+        [0.2,  "#4bd760"],  # 1%   — verde hasta aquí
+        [0.2,  "#ffbe00"],
+        [0.5,  "#ffbe00"],  # 5%   — amarillo hasta aquí
+        [0.5,  "#ff4444"],
+        [1.0,  "#ff4444"],
+    ]
+
     pct_max_specs = json.dumps([
         {"col": col,
         "title": f"PctMaximal — {CHANNEL_LABELS.get(ch, ch)}",
-        "cmin": _cohort_range(col, 0, None)[0],
-        "cmax": _cohort_range(col, 0, None)[1],
-        "cs": "RdBu"}
+        "cmin": 0,
+        "cmax": 2.0,
+        "cs": PCT_MAX_CS}
         for ch in CHANNELS
         for col in [f"ImageQuality_PercentMaximal_{ch}"]
     ])
@@ -1253,18 +1271,57 @@ def generate_html(cohort_name: str, plates_data: list[dict],
     pct_min_specs = json.dumps([
         {"col": col,
         "title": f"PctMinimal — {CHANNEL_LABELS.get(ch, ch)}",
-        "cmin": _cohort_range(col, 0, None)[0],
-        "cmax": _cohort_range(col, 0, None)[1],
-        "cs": "RdBu"}
+        "cmin": 0,
+        "cmax": 10.0,
+        "cs": PCT_MIN_CS}
         for ch in CHANNELS
         for col in [f"ImageQuality_PercentMinimal_{ch}"]
     ])
+
+    def _median_cs(col):
+        """Traffic-light colorscale centered on cohort median ± MAD."""
+        vals = []
+        for pd_ in plates_data:
+            for well_m in pd_["plate_qc"].values():
+                v = well_m.get(col)
+                if v is not None and not np.isnan(v):
+                    vals.append(v)
+        if len(vals) < 4:
+            return "RdBu_r", None, None
+        arr   = np.array(vals)
+        med   = float(np.median(arr))
+        mad   = float(np.median(np.abs(arr - med)))
+        lo2   = med - 2*mad
+        lo3   = med - 3*mad
+        hi2   = med + 2*mad
+        hi3   = med + 3*mad
+        cmin  = max(float(arr.min()), lo3 * 0.95)
+        cmax  = min(float(arr.max()), hi3 * 1.05)
+        rng   = cmax - cmin
+        if rng == 0:
+            return "RdBu_r", cmin, cmax
+        def pos(v):
+            return round(max(0.0, min(1.0, (v - cmin) / rng)), 4)
+        cs = [
+            [0.0,        "#ff4444"],
+            [pos(lo3),   "#ff4444"],
+            [pos(lo3),   "#ffbe00"],
+            [pos(lo2),   "#ffbe00"],
+            [pos(lo2),   "#4bd760"],
+            [pos(hi2),   "#4bd760"],
+            [pos(hi2),   "#ffbe00"],
+            [pos(hi3),   "#ffbe00"],
+            [pos(hi3),   "#ff4444"],
+            [1.0,        "#ff4444"],
+        ]
+        return cs, round(cmin, 5), round(cmax, 5)
+
     mEDIANint_specs = json.dumps([
         {"col": col,
-         "title": f"MaxInt — {CHANNEL_LABELS.get(ch, ch)}",
-         "cmin": _cohort_range(col, 0, 1)[0],
-         "cmax": _cohort_range(col, 0, 1)[1],
-         "cs": "RdBu_r"}
+        "title": f"MedianInt — {CHANNEL_LABELS.get(ch, ch)}",
+        "cmin": _median_cs(col)[1],
+        "cmax": _median_cs(col)[2],
+        "cs":   _median_cs(col)[0]}
         for ch in CHANNELS
         for col in [f"ImageQuality_MedianIntensity_{ch}"]
     ])
@@ -1512,7 +1569,7 @@ def generate_html(cohort_name: str, plates_data: list[dict],
   <table class="summary-table">
     <thead>
       <tr><th>Plate</th><th>Wells</th>
-          <th>Illumination</th><th>Focus</th><th>Flagged wells</th><th>Signal / Noise (SNR in MFI)</th><th>Positional Effects (η² in MFI)</th>
+          <th>Illumination</th><th>Focus</th><th>Flagged wells</th><th>Signal / Noise (SNR in MFI)</th><th>Positional Effects (ANOVA in MFI)</th>
     </thead>
     <tbody id="summary-tbody"></tbody>
   </table>
@@ -1550,33 +1607,69 @@ def generate_html(cohort_name: str, plates_data: list[dict],
   <h2>QC Metrics</h2>
   <div class="feature-audit">
     <div class="audit-row">
-      <span class="audit-label">Illumination</span>
-      <span class="thresh">ImageQuality_PowerLogLogSlope_*</span>
-      <span class="thresh">ImageQuality_MedianIntensity_*</span>
+      <span class="audit-label">Source</span>
+      All metrics from <span class="thresh">ImageQuality_*</span>
       <span class="audit-source">← Image.txt</span>
+      &nbsp;— one row per site per well, aggregated to plate level.
     </div>
+    <hr class="audit-sep">
     <div class="audit-row">
-      <span class="audit-label">Focus</span>
-      <span class="thresh">ImageQuality_FocusScore_*</span>
-      <span class="audit-source">← Image.txt</span>
+      <b style="color:#a8c8f0;">PowerLogLogSlope</b>: log-log slope of the pixel intensity
+      power spectrum. A value near <b>−2</b> indicates a well-focused, artifact-free image
+      consistent with natural scene statistics.
+      <span style="color:#4bd760;">■ green</span> [−2.5, −1.5] &nbsp;·&nbsp;
+      <span style="color:#ffbe00;">■ yellow</span> [−2.7, −2.5] or [−1.5, −1.3] &nbsp;·&nbsp;
+      <span style="color:#ff4444;">■ red</span> outside [−2.7, −1.3].<br>
+      <span style="color:var(--muted);font-size:0.78rem;">
+        Reference: Bray, M.A. et al. (2016). Cell Painting, a high-content image-based assay
+        for morphological profiling using multiplexed fluorescent dyes.
+        <i>Nature Protocols</i>, 11(9), 1757–1774.
+      </span>
+    </div>
+    <hr class="audit-sep">
+    <div class="audit-row">
+      <b style="color:#a8c8f0;">PercentMaximal</b>: fraction of pixels at maximum intensity
+      (saturated). High values indicate overexposure.
+      <span style="color:#4bd760;">■ green</span> &lt; 0.1% &nbsp;·&nbsp;
+      <span style="color:#ffbe00;">■ yellow</span> 0.1–1% &nbsp;·&nbsp;
+      <span style="color:#ff4444;">■ red</span> &gt; 1%.
+    </div>
+    <div class="audit-row" style="margin-top:4px;">
+      <b style="color:#a8c8f0;">PercentMinimal</b>: fraction of pixels at zero intensity
+      (underexposed or clipped). High values indicate insufficient signal.
+      <span style="color:#4bd760;">■ green</span> &lt; 1% &nbsp;·&nbsp;
+      <span style="color:#ffbe00;">■ yellow</span> 1–5% &nbsp;·&nbsp;
+      <span style="color:#ff4444;">■ red</span> &gt; 5%.
+    </div>
+    <hr class="audit-sep">
+    <div class="audit-row">
+      <b style="color:#a8c8f0;">MedianIntensity</b>: median pixel intensity across the image.
+      Used to detect global brightness differences across wells or plates.
+      Colorscale is cohort-normalized (low = red, high = green) — compare within cohort.
+    </div>
+    <hr class="audit-sep">
+    <div class="audit-row" style="color:var(--muted);font-size:0.78rem;">
+      Note: <b style="color:#c8d8f0;">Brightfield</b> channel uses transmitted light and has
+      different intensity characteristics than fluorescence channels — thresholds and colorscales
+      may not apply directly. Use as qualitative reference only.
     </div>
     <hr class="audit-sep">
     <div class="audit-row">
       <span class="audit-label">Thresholds</span>
-      Slope <span class="thresh-val">[−2.5, −1.0]</span>
-      &nbsp;·&nbsp; MaxInt <span class="thresh-val">≤ 0.95</span>
-      &nbsp;·&nbsp; Focus <span class="thresh-val">≥ 0.005</span>
-      &nbsp;·&nbsp; LocalFocus per-channel
+      Slope <span class="thresh-val">[−2.7, −1.3]</span>
+      &nbsp;·&nbsp; PctMax <span class="thresh-val">&lt; 1%</span>
+      &nbsp;·&nbsp; PctMin <span class="thresh-val">&lt; 5%</span>
       &nbsp;·&nbsp; Adaptive: median ± 3σ MAD per plate
     </div>
   </div>
   <div class="compound-toolbar" id="compound-toolbar" style="margin-bottom:10px;">
-    <label>Filter by compound:</label>
-    <button class="cmpd-btn ctrl" id="btn-show-all">All</button>
-    <button class="cmpd-btn ctrl" id="btn-hide-all">None</button>
+      <label>Filter by compound:</label>
+      <button class="cmpd-btn ctrl" id="btn-show-all">All</button>
+      <button class="cmpd-btn ctrl" id="btn-hide-all">None</button>
+    </div>
+    <div class="tabs" id="metrics-tabs"></div>
+    <div id="metrics-contents"></div>
   </div>
-  <div class="tabs" id="metrics-tabs"></div>
-  <div id="metrics-contents"></div>
 </div>
  
 <!-- 4. CELL COUNTS -->
@@ -1700,6 +1793,7 @@ const MFI_CHANNELS = {mfi_channels_json};
 const MFI_COLORS   = {mfi_colors_json};
 const MFI_IMG      = {mfi_img_json};
 const PLATES = Object.keys(DATA);
+const mfiEtaStatus = {{}};
  
 const SLOPE_SPECS  = {slope_specs};
 const PCT_MAX_SPECS = {pct_max_specs};
@@ -1810,47 +1904,26 @@ function arrMedian(arr) {{
     }}
 
     const warnCh=[], badCh=[];
+    const plateStatus = mfiEtaStatus[p] || {{}};
     MFI_CHANNELS.forEach(ch => {{
-      const chData = (MFI_DATA[p]||{{}})[ch]||{{}};
-      const rowG = ROW_LABELS.map(r => COLS.flatMap(c => chData[r+c]||[]));
-      const colG = COLS.map(c => ROW_LABELS.flatMap(r => chData[r+c]||[]));
-      const e2r = mfiAnova(rowG), e2c = mfiAnova(colG);
-      const worst = Math.max(e2r??0, e2c??0);
-      let level = 'good';
-      if (ch==='Hoechst') {{
-        if      (worst >= 0.14) level='bad';
-        else if (worst >= 0.06) level='warn';
-      }} else {{
-        if (worst >= 0.20) {{
-          level = 'bad';
-        }} else if (baseRow!=null) {{
-          const ratio = worst / Math.max(baseRow, baseCol, 0.001);
-          if      (ratio >= 4 || worst >= 0.14) level='bad';
-          else if (ratio >= 2 || worst >= 0.06) level='warn';
-        }} else {{
-          if      (worst >= 0.14) level='bad';
-          else if (worst >= 0.06) level='warn';
-        }}
-      }}
-      if      (level==='bad')  badCh.push(ch);
-      else if (level==='warn') warnCh.push(ch);
+    const level = plateStatus[ch] || 'good';
+    if      (level==='bad')  badCh.push(ch);
+    else if (level==='warn') warnCh.push(ch);
     }});
 
-    if (badCh.length) {{
-        return `<td style="text-align:center;">
-        <span style="color:#ff4444;font-weight:700;">Bad</span><br>
-        <span style="color:#ff4444;font-size:0.75rem;">${{badCh.join(', ')}}</span>
-        </td>`;
-    }} else if (warnCh.length) {{
-        return `<td style="text-align:center;">
-        <span style="color:#ffbe00;font-weight:700;">Warning</span><br>
-        <span style="color:#ffbe00;font-size:0.75rem;">${{warnCh.join(', ')}}</span>
-        </td>`;
-    }} else {{
-        return `<td style="text-align:center;">
+    if (!badCh.length && !warnCh.length) {{
+      return `<td style="text-align:center;">
         <span style="color:#4bd760;font-weight:700;">Good</span>
-        </td>`;
+      </td>`;
     }}
+    let content = '';
+    if (badCh.length) content += `
+      <span style="color:#ff4444;font-weight:700;">Bad</span><br>
+      <span style="color:#ff4444;font-size:0.75rem;">${{badCh.join(', ')}}</span>`;
+    if (warnCh.length) content += `${{badCh.length?'<br>':''}}
+      <span style="color:#ffbe00;font-weight:700;">Warning</span><br>
+      <span style="color:#ffbe00;font-size:0.75rem;">${{warnCh.join(', ')}}</span>`;
+    return `<td style="text-align:center;">${{content}}</td>`;
     }};
 
     tbody.insertAdjacentHTML('beforeend', `<tr>
@@ -2035,11 +2108,11 @@ function makeHeatmap(plateData, spec) {{
       ? `<b>${{w}}</b><br>${{cmpd}}<br>${{spec.title}}: ${{v != null ? v.toFixed(3) : 'N/A'}}`
       : `<b>${{w}}</b><br>${{cmpd}}<br>(hidden)`;
   }}));
-  return {{
+return {{
     type:'heatmap', z, text, hoverinfo:'text',
     x:COLS, y:ROWS_PLOTLY, colorscale: spec.cs,
     zmin: spec.cmin, zmax: spec.cmax,
-    colorbar:{{ thickness:10, len:0.85, tickfont:{{size:9}} }},
+    showscale: false,
     xgap:2, ygap:2,
   }};
 }}
@@ -2050,7 +2123,7 @@ function heatmapLayout(title, extraY) {{
   return {{
     paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'#0a0c18',
     font:{{color:'#c8d8f0', size:10}},
-    margin:{{t:32,b:42,l:42,r:16}}, height:340, width:520,
+    margin:{{t:32,b:42,l:42,r:8}}, height:340, width:520,
     title:{{text:title, font:{{size:11,color:'#8ab0e0'}}, x:0.5}},
     xaxis:{{ tickfont:{{size:9}}, showgrid:!filtered, gridcolor, zeroline:false,
              tickvals:COLS, ticktext:COLS.map(c=>parseInt(c)) }},
@@ -2429,30 +2502,30 @@ function renderMFI() {{
   if (!plateName) return;
   const container = document.getElementById('mfi-content');
   container.innerHTML = '';
- 
+
   if (!MFI_CHANNELS.length) {{
     container.innerHTML='<p style="color:var(--muted);padding:16px;">No MFI data found.</p>';
     return;
   }}
- // Baseline de Hoechst para criterio relativo
- let hoechstEta2Row = null, hoechstEta2Col = null;
- if ((MFI_DATA[plateName]||{{}})['Hoechst']) {{
- const hData = MFI_DATA[plateName]['Hoechst'];
- const hRowGroups = ROW_LABELS.map(r => COLS.flatMap(c => hData[r+c]||[]));
- const hColGroups = COLS.map(c => ROW_LABELS.flatMap(r => hData[r+c]||[]));
- hoechstEta2Row = mfiAnova(hRowGroups);
- hoechstEta2Col = mfiAnova(hColGroups);
- // Verificar si row y col son similares (diferencia relativa < 20%)
- if (hoechstEta2Row!=null && hoechstEta2Col!=null) {{
-     const maxH = Math.max(hoechstEta2Row, hoechstEta2Col);
-     const diff = Math.abs(hoechstEta2Row - hoechstEta2Col) / maxH;
-     if (diff < 0.20) {{
-     const mean = (hoechstEta2Row + hoechstEta2Col) / 2;
-     hoechstEta2Row = mean;
-     hoechstEta2Col = mean;
-     }}
- }}
- }}
+
+  // Baseline de Hoechst para criterio relativo
+  let hoechstEta2Row = null, hoechstEta2Col = null;
+  if ((MFI_DATA[plateName]||{{}})['Hoechst']) {{
+    const hData = MFI_DATA[plateName]['Hoechst'];
+    const hRowGroups = ROW_LABELS.map(r => COLS.flatMap(c => hData[r+c]||[]));
+    const hColGroups = COLS.map(c => ROW_LABELS.flatMap(r => hData[r+c]||[]));
+    hoechstEta2Row = mfiAnova(hRowGroups);
+    hoechstEta2Col = mfiAnova(hColGroups);
+    if (hoechstEta2Row!=null && hoechstEta2Col!=null) {{
+      const maxH = Math.max(hoechstEta2Row, hoechstEta2Col);
+      const diff = Math.abs(hoechstEta2Row - hoechstEta2Col) / maxH;
+      if (diff < 0.20) {{
+        const mean = (hoechstEta2Row + hoechstEta2Col) / 2;
+        hoechstEta2Row = mean;
+        hoechstEta2Col = mean;
+      }}
+    }}
+  }}
 
   MFI_CHANNELS.forEach(ch => {{
     const color    = MFI_COLORS[ch]||'#8ab0d0';
@@ -2460,48 +2533,63 @@ function renderMFI() {{
     if (!Object.keys(wellData).length) return;
     const allVals  = Object.values(wellData).flat();
     const plateMed = allVals.length ? mfiQuantile([...allVals].sort((a,b)=>a-b),0.5) : null;
- 
+
+    const rowGroups = ROW_LABELS.map(r => COLS.flatMap(c => wellData[r+c]||[]));
+    const colGroups = COLS.map(c => ROW_LABELS.flatMap(r => wellData[r+c]||[]));
+    const eta2Row   = mfiAnova(rowGroups);
+    const eta2Col   = mfiAnova(colGroups);
+    const isHoechst = ch === 'Hoechst';
+    const baseRow   = isHoechst ? null : hoechstEta2Row;
+    const baseCol   = isHoechst ? null : hoechstEta2Col;
+    const badgeRow  = eta2Badge(eta2Row, 'row', baseRow);
+    const badgeCol  = eta2Badge(eta2Col, 'col', baseCol);
+
+    // Actualizar status (por si cambió la placa)
+    if (!mfiEtaStatus[plateName]) mfiEtaStatus[plateName] = {{}};
+    const worstEta = Math.max(eta2Row??0, eta2Col??0);
+    let etaLevel = 'good';
+    if (isHoechst) {{
+      if      (worstEta>=0.14) etaLevel='bad';
+      else if (worstEta>=0.06) etaLevel='warn';
+    }} else {{
+      if (worstEta>=0.20) {{
+        etaLevel='bad';
+      }} else if (baseRow!=null) {{
+        const ratio = worstEta/Math.max(baseRow,baseCol,0.001);
+        if      (ratio>=4 || worstEta>=0.14) etaLevel='bad';
+        else if (ratio>=2 || worstEta>=0.06) etaLevel='warn';
+      }} else {{
+        if      (worstEta>=0.14) etaLevel='bad';
+        else if (worstEta>=0.06) etaLevel='warn';
+      }}
+    }}
+    mfiEtaStatus[plateName][ch] = etaLevel;
+
     const sec=document.createElement('div'); sec.className='mfi-channel-section';
-    const rowGroups = ROW_LABELS.map(r =>
-        COLS.flatMap(c => wellData[r+c] || []));
-    const colGroups = COLS.map(c =>
-        ROW_LABELS.flatMap(r => wellData[r+c] || []));
-    const eta2Row = mfiAnova(rowGroups);
-    const eta2Col = mfiAnova(colGroups);
-
-    const isHoechst  = ch === 'Hoechst';
-    const baseRow    = isHoechst ? null : hoechstEta2Row;
-    const baseCol    = isHoechst ? null : hoechstEta2Col;
-    const badgeRow   = eta2Badge(eta2Row, 'row', baseRow);
-    const badgeCol   = eta2Badge(eta2Col, 'col', baseCol);
-
     sec.innerHTML=`
       <div class="mfi-channel-header">
         <span class="mfi-ch-dot" style="background:${{color}}"></span>
         <h3>${{ch}} <span style="color:var(--muted);font-size:0.78rem;font-weight:normal;">
         — obj median: ${{plateMed!=null?plateMed.toFixed(5):'—'}}
         ${{(() => {{
-            const imgVals = Object.entries((MFI_IMG[plateName]||{{}}))
+          const imgVals = Object.entries((MFI_IMG[plateName]||{{}}))
             .map(([w,chs]) => chs[ch]).filter(v=>v!=null);
-            const imgMed = imgVals.length ? mfiQuantile([...imgVals].sort((a,b)=>a-b), 0.5) : null;
-            const delta  = (plateMed!=null && imgMed!=null) ? plateMed - imgMed : null;
-            const snr    = (delta!=null && imgMed>0) ? delta / imgMed : null;
-            if (imgMed==null) return '';
-
-            let snrColor, snrLabel;
-            if      (snr==null)  {{ snrColor='var(--muted)'; snrLabel='N/A'; }}
-            else if (snr >= 1.0) {{ snrColor='#4bd760';      snrLabel=`${{snr.toFixed(2)}}×`; }}
-            else if (snr >= 0.5) {{ snrColor='#4bd760';      snrLabel=`${{snr.toFixed(2)}}×`; }}
-            else if (snr >= 0.2) {{ snrColor='#ffbe00';      snrLabel=`${{snr.toFixed(2)}}×`; }}
-            else                 {{ snrColor='#ff4444';      snrLabel=`${{snr.toFixed(2)}}×`; }}
-
-            return `· img: ${{imgMed.toFixed(5)}} · <b>Δ: ${{delta>=0?'+':''}}${{delta.toFixed(5)}}</b>`
+          const imgMed = imgVals.length ? mfiQuantile([...imgVals].sort((a,b)=>a-b), 0.5) : null;
+          const delta  = (plateMed!=null && imgMed!=null) ? plateMed - imgMed : null;
+          const snr    = (delta!=null && imgMed>0) ? delta / imgMed : null;
+          if (imgMed==null) return '';
+          let snrColor, snrLabel;
+          if      (snr==null)  {{ snrColor='var(--muted)'; snrLabel='N/A'; }}
+          else if (snr >= 0.5) {{ snrColor='#4bd760';      snrLabel=`${{snr.toFixed(2)}}×`; }}
+          else if (snr >= 0.2) {{ snrColor='#ffbe00';      snrLabel=`${{snr.toFixed(2)}}×`; }}
+          else                 {{ snrColor='#ff4444';      snrLabel=`${{snr.toFixed(2)}}×`; }}
+          return `· img: ${{imgMed.toFixed(5)}} · <b>Δ: ${{delta>=0?'+':''}}${{delta.toFixed(5)}}</b>`
             + ` · <span title="SNR proxy = Δ / MFI_img — fold-change of objects over background"
-                    style="color:${{snrColor}};cursor:help;">SNR: ${{snrLabel}}</span>`;
+                style="color:${{snrColor}};cursor:help;">SNR: ${{snrLabel}}</span>`;
         }})()}}
         </span></h3>
-      ${{badgeRow}}${{badgeCol}}
-      ${{isHoechst ? '<span style="font-size:0.7rem;color:var(--muted);margin-left:8px;">(Cohen 1988 — baseline reference)</span>' : ''}}
+        ${{badgeRow}}${{badgeCol}}
+        ${{isHoechst ? '<span style="font-size:0.7rem;color:var(--muted);margin-left:8px;">(Cohen 1988 — baseline reference)</span>' : ''}}
       </div>
       <div style="font-size:0.72rem;color:var(--muted);padding:4px 14px 6px;background:#0d0f1e;border-bottom:1px solid var(--border);">
         <span style="color:#FF4040;">— — —</span> obj median &nbsp;
@@ -2509,16 +2597,16 @@ function renderMFI() {{
         Δ = MFI<sub>obj</sub> − MFI<sub>img</sub>
       </div>
       <div class="mfi-body">
-      <div class="mfi-boxplot-col">
+        <div class="mfi-boxplot-col">
           <div class="mfi-plot-box" id="mfi-box-row-${{ch}}"></div>
-      </div>
-      <div class="mfi-platemap-col">
+        </div>
+        <div class="mfi-platemap-col">
           <div class="mfi-platemap-title">Platemap — median MFI</div>
           <div class="mfi-platemap-grid" id="mfi-grid-${{ch}}"></div>
         </div>
-      <div class="mfi-boxplot-col-right">
-        <div class="mfi-plot-box" id="mfi-box-col-${{ch}}"></div>
-      </div>
+        <div class="mfi-boxplot-col-right">
+          <div class="mfi-plot-box" id="mfi-box-col-${{ch}}"></div>
+        </div>
       </div>`;
     container.appendChild(sec);
     setTimeout(()=>mfiRenderBoxplot(`mfi-box-row-${{ch}}`,plateName,ch,'row'),0);
@@ -2526,7 +2614,53 @@ function renderMFI() {{
     setTimeout(()=>mfiRenderPlatemap(ch,plateName),0);
   }});
 }}
- 
+
+// Pre-calcular etas para todas las placas al cargar
+(function() {{
+  PLATES.forEach(plateName => {{
+    let baseRow=null, baseCol=null;
+    if ((MFI_DATA[plateName]||{{}})['Hoechst']) {{
+      const hData = MFI_DATA[plateName]['Hoechst'];
+      const hRowG = ROW_LABELS.map(r => COLS.flatMap(c => hData[r+c]||[]));
+      const hColG = COLS.map(c => ROW_LABELS.flatMap(r => hData[r+c]||[]));
+      baseRow = mfiAnova(hRowG);
+      baseCol = mfiAnova(hColG);
+      if (baseRow!=null && baseCol!=null) {{
+        const maxH = Math.max(baseRow,baseCol);
+        if (Math.abs(baseRow-baseCol)/maxH < 0.20) {{
+          const mean=(baseRow+baseCol)/2;
+          baseRow=mean; baseCol=mean;
+        }}
+      }}
+    }}
+    mfiEtaStatus[plateName] = {{}};
+    MFI_CHANNELS.forEach(ch => {{
+      const chData = (MFI_DATA[plateName]||{{}})[ch]||{{}};
+      const rowG = ROW_LABELS.map(r => COLS.flatMap(c => chData[r+c]||[]));
+      const colG = COLS.map(c => ROW_LABELS.flatMap(r => chData[r+c]||[]));
+      const e2r = mfiAnova(rowG), e2c = mfiAnova(colG);
+      const worst = Math.max(e2r??0, e2c??0);
+      let level='good';
+      if (ch==='Hoechst') {{
+        if      (worst>=0.14) level='bad';
+        else if (worst>=0.06) level='warn';
+      }} else {{
+        if (worst>=0.20) {{
+          level='bad';
+        }} else if (baseRow!=null) {{
+          const ratio = worst/Math.max(baseRow,baseCol,0.001);
+          if      (ratio>=4 || worst>=0.14) level='bad';
+          else if (ratio>=2 || worst>=0.06) level='warn';
+        }} else {{
+          if      (worst>=0.14) level='bad';
+          else if (worst>=0.06) level='warn';
+        }}
+      }}
+      mfiEtaStatus[plateName][ch] = level;
+    }});
+  }});
+}})();
+
 // ── 6. Flagged wells ──────────────────────────────────────────────────────────
 (function buildCompoundToolbar() {{
   const toolbar  = document.getElementById('compound-toolbar');
