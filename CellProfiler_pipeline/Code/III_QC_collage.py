@@ -1602,8 +1602,13 @@ def generate_html(cohort_name: str, plates_data: list[dict],
                    border-radius: 6px; padding: 4px; }}
  
   /* Cell counts */
-  .counts-grid {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; min-width: 1200px; }}
-  .count-card {{ background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  .counts-grid {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;}}
+  .counts-hist-row {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 12px; }}
+  .count-hist-card {{ background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 4px; }}
+  .count-hist-header {{ display: flex; align-items: center; gap: 16px; padding: 8px 12px 4px 12px; font-size: 0.82rem; }}
+  .count-hist-title {{ color: #a8c8ff; font-weight: 700; font-size: 0.9rem; margin-right: auto; }}
+  .count-hist-stat {{ display: flex; align-items: center; gap: 5px; }}
+  .count-hist-line {{ display: inline-block; width: 22px; height: 2px; border-radius: 1px; }}.count-card {{ background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
                  padding: 8px; height: 356px; overflow: hidden; }}
   /* Compound filter */
   .compound-toolbar {{ display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }}
@@ -1843,6 +1848,7 @@ def generate_html(cohort_name: str, plates_data: list[dict],
     </span>
   </div>
   <div class="counts-grid" id="counts-grid"></div>
+  <div class="counts-hist-row" id="counts-hist-row"></div>
 </div>
  
 <!-- 5. MFI (Median Fluorescence Intensity) -->
@@ -1923,7 +1929,6 @@ const MFI_CHANNELS = {mfi_channels_json};
 const MFI_COLORS   = {mfi_colors_json};
 const MFI_IMG      = {mfi_img_json};
 const PLATES = Object.keys(DATA);
-const mfiEtaStatus = {{}};
  
 const SLOPE_SPECS  = {slope_specs};
 const PCT_MAX_SPECS = {pct_max_specs};
@@ -1974,7 +1979,7 @@ function arrMedian(arr) {{
   const m = Math.floor(a.length/2);
   return a.length%2 ? a[m] : (a[m-1]+a[m])/2;
 }}
- 
+
 // ── 1. Summary ────────────────────────────────────────────────────────────────
 (function() {{
   const tbody = document.getElementById('summary-tbody');
@@ -1982,77 +1987,99 @@ function arrMedian(arr) {{
     const d = DATA[p];
     // Compute median MFI Δ for Hoechst/DNA and Syto across wells
     const snrSummary = () => {{
-        const channels = MFI_CHANNELS;
-        if (!channels.length) return '<td style="color:var(--muted)">—</td>';
+      if (!MFI_CHANNELS.length) return '<td style="color:var(--muted)">—</td>';
 
-        const warn = [], bad = [];
-        channels.forEach(ch => {{
-            const plateMfiData = (MFI_DATA[p]||{{}})[ch]||{{}};
-            const objVals = Object.values(plateMfiData).flat();
-            const objMed  = objVals.length ? arrMedian(objVals) : null;
-            const imgVals = Object.values((MFI_IMG[p]||{{}})).map(w=>w[ch]).filter(v=>v!=null);
-            const imgMed  = imgVals.length ? arrMedian(imgVals) : null;
-            if (objMed==null || imgMed==null || imgMed===0) return;
-            const snr = (objMed - imgMed) / imgMed;
-            if      (snr < 0.2) bad.push(ch);
-            else if (snr < 0.5) warn.push(ch);
-        }});
+      const warnCh = [], badCh = [];
+      MFI_CHANNELS.forEach(ch => {{
+        const plateMfiData = (MFI_DATA[p]||{{}})[ch]||{{}};
+        const objVals = Object.values(plateMfiData).flat();
+        const objMed  = objVals.length ? arrMedian(objVals) : null;
+        const imgVals = Object.values((MFI_IMG[p]||{{}}))
+                          .map(w => w[ch]).filter(v => v != null);
+        const imgMed  = imgVals.length ? arrMedian(imgVals) : null;
+        if (objMed == null || imgMed == null || imgMed === 0) return;
+        const snr = (objMed - imgMed) / imgMed;
+        if      (snr < 0.2) badCh.push(ch);
+        else if (snr < 0.5) warnCh.push(ch);
+      }});
 
-        if (!bad.length && !warn.length) {{
-            return `<td style="text-align:center;">
-            <span style="color:#4bd760;font-weight:700;">Good</span>
-            </td>`;
-        }}
-        let content = '';
-        if (bad.length)  content += `<span style="color:#ff4444;font-weight:700;">Bad</span><br>
-            <span style="color:#ff4444;font-size:0.75rem;">${{bad.join(', ')}}</span>`;
-        if (warn.length) content += `${{bad.length?'<br>':''}}
-            <span style="color:#ffbe00;font-weight:700;">Warning</span><br>
-            <span style="color:#ffbe00;font-size:0.75rem;">${{warn.join(', ')}}</span>`;
-        return `<td style="text-align:center;">${{content}}</td>`;
+      if (!badCh.length && !warnCh.length) {{
+        return `<td style="text-align:center;">
+          <span style="color:#4bd760;font-weight:700;">Good</span>
+        </td>`;
+      }}
+      let content = '';
+      if (badCh.length)  content += `<span style="color:#ff4444;font-weight:700;">Bad</span><br>
+        <span style="color:#ff4444;font-size:0.75rem;">${{badCh.join(', ')}}</span>`;
+      if (warnCh.length) content += `${{badCh.length?'<br>':''}}
+        <span style="color:#ffbe00;font-weight:700;">Warning</span><br>
+        <span style="color:#ffbe00;font-size:0.75rem;">${{warnCh.join(', ')}}</span>`;
+      return `<td style="text-align:center;">${{content}}</td>`;
     }};
 
     const positionalSummary = () => {{
-    if (!MFI_CHANNELS.length) return '<td style="color:var(--muted)">—</td>';
+      if (!MFI_CHANNELS.length) return '<td style="color:var(--muted)">—</td>';
 
-    // Calcular baseline Hoechst para esta placa
-    let baseRow = null, baseCol = null;
-    if ((MFI_DATA[p]||{{}})['Hoechst']) {{
+      // Calcular baseline Hoechst (igual que renderMFI)
+      let baseRow = null, baseCol = null;
+      if ((MFI_DATA[p]||{{}})['Hoechst']) {{
         const hData = MFI_DATA[p]['Hoechst'];
         const hRowG = ROW_LABELS.map(r => COLS.flatMap(c => hData[r+c]||[]));
         const hColG = COLS.map(c => ROW_LABELS.flatMap(r => hData[r+c]||[]));
         baseRow = mfiAnova(hRowG);
         baseCol = mfiAnova(hColG);
         if (baseRow!=null && baseCol!=null) {{
-        const maxH = Math.max(baseRow,baseCol);
-        if (Math.abs(baseRow-baseCol)/maxH < 0.20) {{
+          const maxH = Math.max(baseRow, baseCol);
+          if (Math.abs(baseRow-baseCol)/maxH < 0.20) {{
             const mean = (baseRow+baseCol)/2;
             baseRow = mean; baseCol = mean;
+          }}
         }}
+      }}
+
+      const warnCh = [], badCh = [];
+      MFI_CHANNELS.forEach(ch => {{
+        const wellData = (MFI_DATA[p]||{{}})[ch]||{{}};
+        const rowGroups = ROW_LABELS.map(r => COLS.flatMap(c => wellData[r+c]||[]));
+        const colGroups = COLS.map(c => ROW_LABELS.flatMap(r => wellData[r+c]||[]));
+        const e2r   = mfiAnova(rowGroups);
+        const e2c   = mfiAnova(colGroups);
+        const worst = Math.max(e2r??0, e2c??0);
+        const isHoechst = ch === 'Hoechst';
+
+        let level = 'good';
+        if (isHoechst) {{
+          if      (worst >= 0.14) level = 'bad';
+          else if (worst >= 0.06) level = 'warn';
+        }} else {{
+          if (worst >= 0.20) {{
+            level = 'bad';
+          }} else if (baseRow != null) {{
+            const ratio = worst / Math.max(baseRow, baseCol, 0.001);
+            if      (worst >= 0.14 || ratio >= 4) level = 'bad';
+            else if (worst >= 0.06 && ratio >= 2) level = 'warn';
+          }} else {{
+            if      (worst >= 0.14) level = 'bad';
+            else if (worst >= 0.06) level = 'warn';
+          }}
         }}
-    }}
 
-    const warnCh=[], badCh=[];
-    const plateStatus = mfiEtaStatus[p] || {{}};
-    MFI_CHANNELS.forEach(ch => {{
-    const level = plateStatus[ch] || 'good';
-    if      (level==='bad')  badCh.push(ch);
-    else if (level==='warn') warnCh.push(ch);
-    }});
+        if      (level === 'bad')  badCh.push(ch);
+        else if (level === 'warn') warnCh.push(ch);
+      }});
 
-    if (!badCh.length && !warnCh.length) {{
-      return `<td style="text-align:center;">
-        <span style="color:#4bd760;font-weight:700;">Good</span>
-      </td>`;
-    }}
-    let content = '';
-    if (badCh.length) content += `
-      <span style="color:#ff4444;font-weight:700;">Bad</span><br>
-      <span style="color:#ff4444;font-size:0.75rem;">${{badCh.join(', ')}}</span>`;
-    if (warnCh.length) content += `${{badCh.length?'<br>':''}}
-      <span style="color:#ffbe00;font-weight:700;">Warning</span><br>
-      <span style="color:#ffbe00;font-size:0.75rem;">${{warnCh.join(', ')}}</span>`;
-    return `<td style="text-align:center;">${{content}}</td>`;
+      if (!badCh.length && !warnCh.length) {{
+        return `<td style="text-align:center;">
+          <span style="color:#4bd760;font-weight:700;">Good</span>
+        </td>`;
+      }}
+      let content = '';
+      if (badCh.length)  content += `<span style="color:#ff4444;font-weight:700;">Bad</span><br>
+        <span style="color:#ff4444;font-size:0.75rem;">${{badCh.join(', ')}}</span>`;
+      if (warnCh.length) content += `${{badCh.length?'<br>':''}}
+        <span style="color:#ffbe00;font-weight:700;">Warning</span><br>
+        <span style="color:#ffbe00;font-size:0.75rem;">${{warnCh.join(', ')}}</span>`;
+      return `<td style="text-align:center;">${{content}}</td>`;
     }};
 
     tbody.insertAdjacentHTML('beforeend', `<tr>
@@ -2324,8 +2351,7 @@ function heatmapLayout(title, extraY) {{
   const filtered = isFiltered();
   const gridcolor = filtered ? 'rgba(0,0,0,0)' : 'rgba(80,90,120,0.4)';
   return {{
-    paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'#0a0c18',
-    font:{{color:'#c8d8f0', size:10}},
+    paper_bgcolor:'#090b14', plot_bgcolor:'#090b14',
     margin:{{t:32,b:42,l:42,r:8}}, height:340, width:520,
     title:{{text:title, font:{{size:11,color:'#8ab0e0'}}, x:0.5}},
     xaxis:{{ tickfont:{{size:9}}, showgrid:!filtered, gridcolor, zeroline:false,
@@ -2416,8 +2442,8 @@ function renderCounts(plateName) {{
       // Shapes: un rectángulo rojo por pozo bajo el umbral
       // Plotly con ejes categóricos: usar los valores string directamente como x0/y0
       const shapes = [];
-      ROWS_PLOTLY.forEach((r, ri) => {{
-        COLS.forEach((c, ci) => {{
+      ROWS_PLOTLY.forEach((r) => {{
+        COLS.forEach((c) => {{
           const w    = r + c;
           const well = pd.wells[w];
           if (!well || !compoundVisible(well.compound||'')) return;
@@ -2425,8 +2451,8 @@ function renderCounts(plateName) {{
           if (v != null && v < threshold) {{
             shapes.push({{
               type: 'rect', xref: 'x', yref: 'y',
-              x0: ci - 0.48,  y0: ri - 0.48,
-              x1: ci + 0.48,  y1: ri + 0.48,
+              x0: c,  y0: r,
+              x1: c,  y1: r,
               line: {{ color: '#ff4444', width: 3 }},
               fillcolor: 'rgba(0,0,0,0)',
               layer: 'above',
@@ -2437,14 +2463,15 @@ function renderCounts(plateName) {{
 
       Plotly.react(cid,
         [{{type:'heatmap',z,text,hoverinfo:'text',x:COLS,y:ROWS_PLOTLY,colorscale:'Viridis',
-           zmin:cRange[0],zmax:cRange[1], xgap:4,ygap:4,colorbar:{{thickness:14,len:0.85,tickfont:{{size:10}}}}}}],
+           zmin:cRange[0],zmax:cRange[1],xgap:4,ygap:4,
+           colorbar:{{thickness:14,len:0.85,tickfont:{{size:10}},x:1.02,xanchor:'left'}}}}],
         {{paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#0a0c18',
-          font:{{color:'#c8d8f0',size:11}},margin:{{t:40,b:50,l:50,r:20}},
-          height:340, autosize:false,
+          font:{{color:'#c8d8f0',size:11}},margin:{{t:40,b:50,l:50,r:70}},
+          height:340, 
           title:{{text:`Cells (umbral: ${{threshold}})`,font:{{size:13,color:'#a8c8ff'}},x:0.5}},
           xaxis:{{title:'Column',tickfont:{{size:10}},tickvals:COLS,ticktext:COLS.map(c=>parseInt(c)),
-                  showgrid:!filtered,gridcolor,zeroline:false,fixedrange:true}},
-          yaxis:{{title:'Row',tickfont:{{size:10}},showgrid:!filtered,gridcolor,zeroline:false,fixedrange:true}},
+                  showgrid:!filtered,gridcolor,zeroline:false,fixedrange:true,automargin:false}},
+          yaxis:{{title:'Row',tickfont:{{size:10}},showgrid:!filtered,gridcolor,zeroline:false,fixedrange:true,automargin:false}},
           hoverlabel:{{bgcolor:'#141c34',bordercolor:'#304080',font:{{size:12,color:'#d0e0ff',family:'monospace'}}}},
           shapes,
         }},{{responsive:false,displayModeBar:false}});
@@ -2506,7 +2533,7 @@ function renderCounts(plateName) {{
          colorbar:{{thickness:14,len:0.85,tickfont:{{size:10}},
                     tickvals:[0.93, 0.95, 0.97, 1.0],
                     ticktext:['<0.95','0.95','0.97','1.00']}}}}],
-      {{paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#0a0c18',
+       {{paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#0a0c18',
         font:{{color:'#c8d8f0',size:11}},margin:{{t:40,b:50,l:50,r:20}},height:340,
         title:{{text:'Cells / Nuclei ratio',font:{{size:13,color:'#a8c8ff'}},x:0.5}},
         xaxis:{{title:'Column',tickfont:{{size:10}},tickvals:COLS,ticktext:COLS.map(c=>parseInt(c)),
@@ -2551,7 +2578,7 @@ function renderCounts(plateName) {{
          colorscale:artifactCS, zmin:0, zmax:500, xgap:4,ygap:4,
          colorbar:{{thickness:14,len:0.85,tickfont:{{size:10}},
                     tickvals:[0,100,250,500],ticktext:['0','100','250','≥500']}}}}],
-      {{paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#0a0c18',
+       {{paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#0a0c18',
         font:{{color:'#c8d8f0',size:11}},margin:{{t:40,b:50,l:50,r:20}},height:340,
         title:{{text:'Illum. Artifacts',font:{{size:13,color:'#a8c8ff'}},x:0.5}},
         xaxis:{{title:'Column',tickfont:{{size:10}},tickvals:COLS,ticktext:COLS.map(c=>parseInt(c)),
@@ -2560,6 +2587,102 @@ function renderCounts(plateName) {{
         hoverlabel:{{bgcolor:'#141c34',bordercolor:'#304080',font:{{size:12,color:'#d0e0ff',family:'monospace'}}}},
       }},{{responsive:true,displayModeBar:false}});
   }})();
+  // ── Histograms row ────────────────────────────────────────────────────────
+  const histRow = document.getElementById('counts-hist-row');
+  histRow.innerHTML = '';
+
+  // Datos compartidos: recolectar todos los valores no-null por métrica
+  const allCells    = [];
+  const allRatios   = [];
+  const allArtifacts = [];
+  ROW_LABELS.forEach(r => COLS.forEach(c => {{
+    const w = r + c, well = pd.wells[w];
+    if (!well || !compoundVisible(well.compound || '')) return;
+    const cells    = well['Count_Cells'];
+    const nuclei   = well['Count_Nuclei'];
+    const arts     = well['Count_Illum_artifacts'];
+    if (cells    != null) allCells.push(Math.round(cells));
+    if (cells != null && nuclei != null && nuclei > 0)
+      allRatios.push(cells / nuclei);
+    if (arts != null) allArtifacts.push(Math.round(arts));
+  }}));
+
+  // Helper: crear una card de histograma y agregarlo al histRow
+  function addHistCard(cidHist, values, title, color, xLabel, threshold=null) {{
+    const card = document.createElement('div');
+    card.className = 'count-hist-card';
+    histRow.appendChild(card);
+    if (!values.length) return;
+
+    // Mediana
+    const sorted = [...values].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    const median = sorted.length % 2
+      ? sorted[mid]
+      : (sorted[mid - 1] + sorted[mid]) / 2;
+
+    const medLabel = median < 10 ? median.toFixed(2) : Math.round(median);
+    const thrLabel = threshold != null
+      ? (threshold < 10 ? threshold.toFixed(2) : threshold)
+      : null;
+
+    card.innerHTML = `
+      <div class="count-hist-header">
+        <span class="count-hist-title">${{title}}</span>
+        <span class="count-hist-stat">
+          <span class="count-hist-line" style="background:#ff4444;border-top:2px dashed #ff4444;height:0;"></span>
+          <span style="color:#ff4444;">Median: ${{medLabel}}</span>
+        </span>
+        ${{thrLabel != null ? `
+        <span class="count-hist-stat">
+          <span class="count-hist-line" style="border-top:2px dotted #ffbe00;height:0;"></span>
+          <span style="color:#ffbe00;">Bad: ${{thrLabel}}</span>
+        </span>` : ''}}
+      </div>
+      <div id="${{cidHist}}"></div>`;
+
+Plotly.react(cidHist,
+      [
+        {{
+          type: 'histogram', x: values,
+          nbinsx: 30,
+          marker: {{ color: color, opacity: 0.85, line: {{ color: 'rgba(0,0,0,0.3)', width: 0.5 }} }},
+          name: xLabel,
+          hovertemplate: `${{xLabel}}: %{{x}}<br>Wells: %{{y}}<extra></extra>`,
+        }},
+        {{
+          type: 'scatter', mode: 'lines',
+          x: [median, median], y: [0, values.length],
+          line: {{ color: '#ff4444', width: 2, dash: 'dash' }},
+          hoverinfo: 'skip', showlegend: false,
+        }},
+        {{
+          type: 'scatter', mode: 'lines',
+          x: [threshold, threshold], y: [0, values.length],
+          line: {{ color: '#ffbe00', width: 2, dash: 'dot' }},
+          hoverinfo: 'skip', showlegend: false,
+          visible: threshold != null ? true : false,
+        }}
+      ],
+      {{
+        paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: '#0a0c18',
+        font: {{ color: '#c8d8f0', size: 11 }},
+        margin: {{ t: 40, b: 50, l: 50, r: 20 }},
+        height: 320,
+        title: {{ text: '', }},
+        xaxis: {{ title: xLabel, tickfont: {{ size: 10 }}, zeroline: false, gridcolor: 'rgba(80,90,120,0.4)' }},
+        yaxis: {{ title: 'Wells', tickfont: {{ size: 10 }}, zeroline: false, gridcolor: 'rgba(80,90,120,0.4)', rangemode: 'nonnegative' }},
+        showlegend: false,
+        bargap: 0.05,
+        hoverlabel: {{ bgcolor: '#141c34', bordercolor: '#304080', font: {{ size: 12, color: '#d0e0ff', family: 'monospace' }} }},
+      }},
+      {{ responsive: true, displayModeBar: false }}
+    );
+  }}
+  const cellThreshold = parseInt(document.getElementById('cells-threshold-slider')?.value || 700);
+  addHistCard('hist-cells',     allCells,     'Cells — distribution',        '#4b8fd7', 'Count_Cells',   cellThreshold);
+  addHistCard('hist-ratio',     allRatios,    'Cells/Nuclei — distribution', '#4bd760', 'Ratio',         0.95);
+  addHistCard('hist-artifacts', allArtifacts, 'Artifacts — distribution',    '#ff6666', 'Count_Artifacts', null);
 }}
  
 // ── 5. MFI section ────────────────────────────────────────────────────────────
@@ -2798,27 +2921,6 @@ function renderMFI() {{
     const badgeRow  = eta2Badge(eta2Row, 'row', baseRow);
     const badgeCol  = eta2Badge(eta2Col, 'col', baseCol);
 
-    // Actualizar status (por si cambió la placa)
-    if (!mfiEtaStatus[plateName]) mfiEtaStatus[plateName] = {{}};
-    const worstEta = Math.max(eta2Row??0, eta2Col??0);
-    let etaLevel = 'good';
-    if (isHoechst) {{
-      if      (worstEta>=0.14) etaLevel='bad';
-      else if (worstEta>=0.06) etaLevel='warn';
-    }} else {{
-      if (worstEta>=0.20) {{
-        etaLevel='bad';
-      }} else if (baseRow!=null) {{
-        const ratio = worstEta/Math.max(baseRow,baseCol,0.001);
-        if      (ratio>=4 || worstEta>=0.14) etaLevel='bad';
-        else if (ratio>=2 || worstEta>=0.06) etaLevel='warn';
-      }} else {{
-        if      (worstEta>=0.14) etaLevel='bad';
-        else if (worstEta>=0.06) etaLevel='warn';
-      }}
-    }}
-    mfiEtaStatus[plateName][ch] = etaLevel;
-
     const sec=document.createElement('div'); sec.className='mfi-channel-section';
     sec.innerHTML=`
       <div class="mfi-channel-header">
@@ -2867,52 +2969,6 @@ function renderMFI() {{
     setTimeout(()=>mfiRenderPlatemap(ch,plateName),0);
   }});
 }}
-
-// Pre-calcular etas para todas las placas al cargar
-(function() {{
-  PLATES.forEach(plateName => {{
-    let baseRow=null, baseCol=null;
-    if ((MFI_DATA[plateName]||{{}})['Hoechst']) {{
-      const hData = MFI_DATA[plateName]['Hoechst'];
-      const hRowG = ROW_LABELS.map(r => COLS.flatMap(c => hData[r+c]||[]));
-      const hColG = COLS.map(c => ROW_LABELS.flatMap(r => hData[r+c]||[]));
-      baseRow = mfiAnova(hRowG);
-      baseCol = mfiAnova(hColG);
-      if (baseRow!=null && baseCol!=null) {{
-        const maxH = Math.max(baseRow,baseCol);
-        if (Math.abs(baseRow-baseCol)/maxH < 0.20) {{
-          const mean=(baseRow+baseCol)/2;
-          baseRow=mean; baseCol=mean;
-        }}
-      }}
-    }}
-    mfiEtaStatus[plateName] = {{}};
-    MFI_CHANNELS.forEach(ch => {{
-      const chData = (MFI_DATA[plateName]||{{}})[ch]||{{}};
-      const rowG = ROW_LABELS.map(r => COLS.flatMap(c => chData[r+c]||[]));
-      const colG = COLS.map(c => ROW_LABELS.flatMap(r => chData[r+c]||[]));
-      const e2r = mfiAnova(rowG), e2c = mfiAnova(colG);
-      const worst = Math.max(e2r??0, e2c??0);
-      let level='good';
-      if (ch==='Hoechst') {{
-        if      (worst>=0.14) level='bad';
-        else if (worst>=0.06) level='warn';
-      }} else {{
-        if (worst>=0.20) {{
-          level='bad';
-        }} else if (baseRow!=null) {{
-          const ratio = worst/Math.max(baseRow,baseCol,0.001);
-          if      (ratio>=4 || worst>=0.14) level='bad';
-          else if (ratio>=2 || worst>=0.06) level='warn';
-        }} else {{
-          if      (worst>=0.14) level='bad';
-          else if (worst>=0.06) level='warn';
-        }}
-      }}
-      mfiEtaStatus[plateName][ch] = level;
-    }});
-  }});
-}})();
 
 // ── 6. Flagged wells ──────────────────────────────────────────────────────────
 (function buildCompoundToolbar() {{
