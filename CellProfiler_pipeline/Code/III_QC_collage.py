@@ -270,6 +270,11 @@ def load_qc_tsv(tsv_path) -> dict:
     mean_cols = list(dict.fromkeys(
         c for cols in METRIC_COLS.values() for c in cols if c in df.columns
     ))
+    pct_cols  = list(dict.fromkeys(
+        c for c in df.columns
+        if c.startswith("Intensity_PercentMaximal_") or
+           c.startswith("Intensity_PercentMinimal_")
+    ))
     sum_cols  = list(dict.fromkeys(
         c for c in df.columns
         if c.startswith("Count_") or c == AREA_COL
@@ -278,14 +283,17 @@ def load_qc_tsv(tsv_path) -> dict:
     grp   = df.groupby(gkeys)
 
     agg_mean = grp[mean_cols].mean().reset_index() if mean_cols else None
+    agg_pct  = grp[pct_cols].mean().reset_index()  if pct_cols  else None
     agg_sum  = grp[sum_cols].sum().reset_index()   if sum_cols  else None
 
-    if agg_mean is not None and agg_sum is not None:
-        agg = agg_mean.merge(agg_sum, on=gkeys, how="left")
-    else:
-        agg = agg_mean or agg_sum
+    agg = agg_mean
+    if agg_pct is not None:
+        agg = agg.merge(agg_pct, on=gkeys, how="left") if agg is not None else agg_pct
+    if agg_sum is not None:
+        agg = agg.merge(agg_sum, on=gkeys, how="left") if agg is not None else agg_sum
 
-    all_cols = mean_cols + [c for c in sum_cols if c not in mean_cols]
+    all_cols = (mean_cols + pct_cols +
+                [c for c in sum_cols if c not in mean_cols and c not in pct_cols])
     result   = defaultdict(dict)
     for _, row in agg.iterrows():
         plate = str(row[plate_col]).strip() if plate_col else "Plate"
@@ -671,7 +679,7 @@ def _make_band(width: int, well_labels_in_row: list, plate_qc: dict,
                     if v is None or (isinstance(v, float) and np.isnan(v)):
                         continue
                     ch    = COL_TO_CHANNEL.get(col, col)
-                    short = CHANNEL_LABELS.get(ch, ch[:2])
+                    short = ch
                     vc    = engine.val_color(v, mk, ch)
                     txt   = f" {short}: {v:.3f}"
                     draw.text((col_x, y + 1), txt, fill=(0, 0, 0), font=fv)
@@ -805,7 +813,7 @@ def make_report_footer(width: int, plate_name: str, plate_qc: dict,
                 for col in METRIC_COLS[mk]:
                     ch       = COL_TO_CHANNEL.get(col, col)
                     vals     = stats[mk].get(ch, [])
-                    ch_short = CHANNEL_LABELS.get(ch, ch[:4])
+                    ch_short = ch
                     ch_color = CHANNEL_COLORS.get(ch, (150, 170, 200))
 
                     if mk == "FocusScore":
@@ -1116,6 +1124,81 @@ def _passes_absolute(value, metric_key: str, channel: str = "") -> bool | None:
     return True
 
 
+def _mad_scores(col: str, plates_data: list) -> tuple:
+    """Cohort-wide MAD score per well: (val - cohort_median) / cohort_MAD"""
+    vals = []
+    for pd_ in plates_data:
+        for well_m in pd_["plate_qc"].values():
+            v = well_m.get(col)
+            if v is not None and not np.isnan(v):
+                vals.append(v)
+    if len(vals) < 4:
+        return {}, None, None
+    arr     = np.array(vals)
+    coh_med = float(np.median(arr))
+    coh_mad = float(np.median(np.abs(arr - coh_med))) or 1.0
+    scores  = {}
+    for pd_ in plates_data:
+        pname = pd_["name"]
+        plate_vals = []
+        for well_m in pd_["plate_qc"].values():
+            v = well_m.get(col)
+            if v is not None and not np.isnan(v):
+                plate_vals.append(v)
+        pl_med = float(np.median(plate_vals)) if plate_vals else coh_med
+        pl_mad = float(np.median(np.abs(np.array(plate_vals) - pl_med))) or 1.0
+        scores[pname] = {}
+        for well, well_m in pd_["plate_qc"].items():
+            v = well_m.get(col)
+            if v is None or np.isnan(v):
+                continue
+            scores[pname][well] = {
+                "v":    round(float(v), 5),
+                "z_pl": round((float(v) - pl_med)  / pl_mad,  2),
+                "z_co": round((float(v) - coh_med) / coh_mad, 2),
+            }
+    return scores, round(coh_med, 5), round(coh_mad, 5)
+
+
+def _median_cs(col: str, plates_data: list) -> tuple:
+    """Traffic-light colorscale centered on cohort median ± 2/3 MAD."""
+    vals = []
+    for pd_ in plates_data:
+        for well_m in pd_["plate_qc"].values():
+            v = well_m.get(col)
+            if v is not None and not np.isnan(v):
+                vals.append(v)
+    if len(vals) < 4:
+        return "RdBu_r", None, None
+    arr  = np.array(vals)
+    med  = float(np.median(arr))
+    mad  = float(np.median(np.abs(arr - med)))
+    lo2  = med - 2*mad
+    lo3  = med - 3*mad
+    hi2  = med + 2*mad
+    hi3  = med + 3*mad
+    cmin = max(float(arr.min()), lo3 * 0.95)
+    cmax = min(float(arr.max()), hi3 * 1.05)
+    rng  = cmax - cmin
+    if rng == 0:
+        return "RdBu_r", cmin, cmax
+    def pos(v):
+        return round(max(0.0, min(1.0, (v - cmin) / rng)), 4)
+    cs = [
+        [0.0,      "#ff4444"],
+        [pos(lo3), "#ff4444"],
+        [pos(lo3), "#ffbe00"],
+        [pos(lo2), "#ffbe00"],
+        [pos(lo2), "#4bd760"],
+        [pos(hi2), "#4bd760"],
+        [pos(hi2), "#ffbe00"],
+        [pos(hi3), "#ffbe00"],
+        [pos(hi3), "#ff4444"],
+        [1.0,      "#ff4444"],
+    ]
+    return cs, round(cmin, 5), round(cmax, 5)
+
+
 def generate_html(cohort_name: str, plates_data: list[dict],
                   output_path: Path, web_scale: float = 0.2) -> None:
     """
@@ -1128,9 +1211,11 @@ def generate_html(cohort_name: str, plates_data: list[dict],
     plotly_js = _fetch_plotly_js()
 
     html_cols = (
-        [c for cols in METRIC_COLS.values() for c in cols] +
-        list(COUNT_COLS.values()) + [AREA_COL]
-    )
+            [c for cols in METRIC_COLS.values() for c in cols] +
+            list(COUNT_COLS.values()) + [AREA_COL] +
+            [f"Intensity_PercentMaximal_{ch}" for ch in CHANNELS] +
+            [f"Intensity_PercentMinimal_{ch}" for ch in CHANNELS]
+        )
 
     payload = {}
     for pd_ in plates_data:
@@ -1164,7 +1249,7 @@ def generate_html(cohort_name: str, plates_data: list[dict],
                     if adp_col:
                         adp_lo, adp_hi = adp_col
                         adp_fail = (v < adp_lo and lo is not None and v < lo) or                                    (v > adp_hi and hi is not None and v > hi)
-                    ch_lbl = CHANNEL_LABELS.get(ch, ch)
+                    ch_lbl = ch
                     met_lbl = METRIC_LABELS.get(mk, mk)
                     tag = f"{met_lbl}/{ch_lbl}"
                     if abs_fail:
@@ -1196,6 +1281,76 @@ def generate_html(cohort_name: str, plates_data: list[dict],
         }
 
     data_json = json.dumps(payload)
+
+    # MAD scores para tooltip
+    _qc_cols_for_scores = (
+        [f"ImageQuality_PowerLogLogSlope_{ch}" for ch in CHANNELS] +
+        [f"Intensity_PercentMaximal_{ch}"      for ch in CHANNELS] +
+        [f"Intensity_PercentMinimal_{ch}"      for ch in CHANNELS] +
+        [f"ImageQuality_MedianIntensity_{ch}"  for ch in CHANNELS]
+    )
+    calc_mad_scores  = {}
+    for col in _qc_cols_for_scores:
+        sc, cmed, cmad = _mad_scores(col, plates_data)
+        calc_mad_scores [col] = sc
+    mad_scores_json = json.dumps(calc_mad_scores)
+
+    # Red well counts per metric group per plate
+    def _red_wells(plates_data, cols, thresholds):
+        """Count wells with at least one red value across cols."""
+        result = {}
+        for pd_ in plates_data:
+            pname = pd_["name"]
+            count = 0
+            for well, m in pd_["plate_qc"].items():
+                for col in cols:
+                    v = m.get(col)
+                    if v is None:
+                        continue
+                    lo, hi = thresholds.get(col, (None, None))
+                    if (lo is not None and v < lo) or (hi is not None and v > hi):
+                        count += 1
+                        break  # one red col is enough to flag the well
+            result[pname] = count
+        return result
+
+    slope_red   = _red_wells(plates_data,
+        [f"ImageQuality_PowerLogLogSlope_{ch}" for ch in CHANNELS],
+        {col: (-2.7, -1.3) for ch in CHANNELS
+        for col in [f"ImageQuality_PowerLogLogSlope_{ch}"]})
+
+    pctmax_red  = _red_wells(plates_data,
+        [f"Intensity_PercentMaximal_{ch}" for ch in CHANNELS],
+        {col: (None, 1.0) for ch in CHANNELS
+        for col in [f"Intensity_PercentMaximal_{ch}"]})
+
+    pctmin_red  = _red_wells(plates_data,
+        [f"Intensity_PercentMinimal_{ch}" for ch in CHANNELS],
+        {col: (None, 5.0) for ch in CHANNELS
+        for col in [f"Intensity_PercentMinimal_{ch}"]})
+
+    # medint_red uses MAD-score below — skip _red_wells call
+
+    # Para MedianInt usamos MAD-score cohort > 3
+    medint_red = {}
+    for pd_ in plates_data:
+        pname = pd_["name"]
+        count = 0
+        for well in pd_["plate_qc"]:
+            for ch in CHANNELS:
+                col = f"ImageQuality_MedianIntensity_{ch}"
+                sc  = calc_mad_scores.get(col, {}).get(pname, {}).get(well)
+                if sc and abs(sc["z_co"]) > 3:
+                    count += 1
+                    break
+        medint_red[pname] = count
+
+    red_counts_json = json.dumps({
+        "slope":   slope_red,
+        "pctmax":  pctmax_red,
+        "pctmin":  pctmin_red,
+        "medint":  medint_red,
+    })
 
     # ── Compute cohort-wide scale for every metric column ─────────────────────
     # Uses p2/p98 percentiles so extreme outliers don't compress the scale.
@@ -1233,7 +1388,7 @@ def generate_html(cohort_name: str, plates_data: list[dict],
 
     slope_specs = json.dumps([
         {"col": col,
-        "title": f"Slope — {CHANNEL_LABELS.get(ch, ch)}",
+        "title": f"Slope — {ch}",
         "cmin": -3.0,
         "cmax": -1.0,
         "cs": SLOPE_CS}
@@ -1260,68 +1415,30 @@ def generate_html(cohort_name: str, plates_data: list[dict],
 
     pct_max_specs = json.dumps([
         {"col": col,
-        "title": f"PctMaximal — {CHANNEL_LABELS.get(ch, ch)}",
+        "title": f"PctMaximal — {ch}",
         "cmin": 0,
         "cmax": 2.0,
         "cs": PCT_MAX_CS}
         for ch in CHANNELS
-        for col in [f"ImageQuality_PercentMaximal_{ch}"]
+        for col in [f"Intensity_PercentMaximal_{ch}"]
     ])
 
     pct_min_specs = json.dumps([
         {"col": col,
-        "title": f"PctMinimal — {CHANNEL_LABELS.get(ch, ch)}",
+        "title": f"PctMinimal — {ch}",
         "cmin": 0,
         "cmax": 10.0,
         "cs": PCT_MIN_CS}
         for ch in CHANNELS
-        for col in [f"ImageQuality_PercentMinimal_{ch}"]
+        for col in [f"Intensity_PercentMinimal_{ch}"]
     ])
-
-    def _median_cs(col):
-        """Traffic-light colorscale centered on cohort median ± MAD."""
-        vals = []
-        for pd_ in plates_data:
-            for well_m in pd_["plate_qc"].values():
-                v = well_m.get(col)
-                if v is not None and not np.isnan(v):
-                    vals.append(v)
-        if len(vals) < 4:
-            return "RdBu_r", None, None
-        arr   = np.array(vals)
-        med   = float(np.median(arr))
-        mad   = float(np.median(np.abs(arr - med)))
-        lo2   = med - 2*mad
-        lo3   = med - 3*mad
-        hi2   = med + 2*mad
-        hi3   = med + 3*mad
-        cmin  = max(float(arr.min()), lo3 * 0.95)
-        cmax  = min(float(arr.max()), hi3 * 1.05)
-        rng   = cmax - cmin
-        if rng == 0:
-            return "RdBu_r", cmin, cmax
-        def pos(v):
-            return round(max(0.0, min(1.0, (v - cmin) / rng)), 4)
-        cs = [
-            [0.0,        "#ff4444"],
-            [pos(lo3),   "#ff4444"],
-            [pos(lo3),   "#ffbe00"],
-            [pos(lo2),   "#ffbe00"],
-            [pos(lo2),   "#4bd760"],
-            [pos(hi2),   "#4bd760"],
-            [pos(hi2),   "#ffbe00"],
-            [pos(hi3),   "#ffbe00"],
-            [pos(hi3),   "#ff4444"],
-            [1.0,        "#ff4444"],
-        ]
-        return cs, round(cmin, 5), round(cmax, 5)
 
     mEDIANint_specs = json.dumps([
         {"col": col,
-        "title": f"MedianInt — {CHANNEL_LABELS.get(ch, ch)}",
-        "cmin": _median_cs(col)[1],
-        "cmax": _median_cs(col)[2],
-        "cs":   _median_cs(col)[0]}
+        "title": f"MedianInt — {ch}",
+        "cmin": _median_cs(col, plates_data)[1],
+        "cmax": _median_cs(col, plates_data)[2],
+        "cs":   _median_cs(col, plates_data)[0]}
         for ch in CHANNELS
         for col in [f"ImageQuality_MedianIntensity_{ch}"]
     ])
@@ -1467,8 +1584,8 @@ def generate_html(cohort_name: str, plates_data: list[dict],
   .overview-wrap svg {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; }}
   .well-cell {{ fill: transparent; }}
   .well-cell:hover {{ fill: rgba(255,255,255,0.12); }}
-  .well-cell.selected {{ fill: rgba(58,123,213,0.35); stroke: #3a7bd5; stroke-width: 2; }}
- 
+  .well-cell.selected {{ fill: rgba(58,123,213,0.45) !important; stroke: #ffffff !important;
+                         stroke-width: 3 !important; }}
   /* Tabs */
   .tabs {{ display: flex; gap: 2px; flex-wrap: wrap; margin-bottom: 0; border-bottom: 2px solid var(--border); }}
   .tab {{ padding: 7px 16px; cursor: pointer; color: var(--muted); font-size: 0.8rem;
@@ -1485,9 +1602,9 @@ def generate_html(cohort_name: str, plates_data: list[dict],
                    border-radius: 6px; padding: 4px; }}
  
   /* Cell counts */
-  .counts-grid {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }}
-  .count-card {{ background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px; }}
- 
+  .counts-grid {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; min-width: 1200px; }}
+  .count-card {{ background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+                 padding: 8px; height: 356px; overflow: hidden; }}
   /* Compound filter */
   .compound-toolbar {{ display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }}
   .compound-toolbar label {{ color: var(--muted); font-size: 0.8rem; white-space: nowrap; }}
@@ -1499,17 +1616,6 @@ def generate_html(cohort_name: str, plates_data: list[dict],
   .cmpd-btn.ctrl {{ background: #20192a; border-color: #3a2550; color: #c090e0; }}
   .cmpd-btn.ctrl:hover {{ background: #2e2040; }}
  
-  /* Flagged wells */
-  .flag-controls {{ display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }}
-  #flag-filter {{ background: #1a2040; color: var(--text); border: 1px solid var(--border);
-                  border-radius: 4px; padding: 6px 10px; width: 320px; font-size: 0.85rem; }}
-  #flag-filter::placeholder {{ color: var(--muted); }}
-  .flag-table {{ width: 100%; border-collapse: collapse; }}
-  .flag-table th, .flag-table td {{ padding: 7px 10px; border: 1px solid var(--border); text-align: left; font-size: 0.8rem; }}
-  .flag-table th {{ background: #1a2040; color: #8ab0e0; text-transform: uppercase; font-size: 0.72rem; }}
-  .flag-table tr.hidden {{ display: none; }}
-  .flag-table tr:hover {{ background: #161c35; }}
- 
   /* MFI section */
   .mfi-channel-section {{ margin-bottom: 18px; border: 1px solid var(--border);
                           border-radius: 8px; overflow: hidden; }}
@@ -1519,12 +1625,14 @@ def generate_html(cohort_name: str, plates_data: list[dict],
   .mfi-ch-dot {{ width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0; }}
   .mfi-channel-header h3 {{ font-size: 0.85rem; color: #a8c8ff; margin: 0; font-weight: 700; letter-spacing: 0.03em; }}
   /* Two-column: left=boxplots, right=platemap */
-  .mfi-body {{ display: grid; grid-template-columns: 26% 48% 26%; }}
+  .mfi-body {{ display: grid; grid-template-columns: 30% 70%; align-items: start;
+               min-width: 860px; }}
   .mfi-boxplot-col {{ display: flex; flex-direction: column;
-                    border-right: 1px solid var(--border); background: #090b14; }}
+                    border-right: 1px solid var(--border); background: #090b14;
+                    min-height: 413px; }}
   .mfi-boxplot-col-right {{ display: flex; flex-direction: column;
                            border-left: 1px solid var(--border); background: #090b14; }}
-  .mfi-plot-box {{ width: 100%; height: 206px; }}
+  .mfi-plot-box {{ width: 100%; height: 200px; }}
   .mfi-plot-divider {{ height: 1px; background: var(--border); }}
   .mfi-platemap-col {{ padding: 14px 18px; display: flex; flex-direction: column;
                        align-items: flex-start; justify-content: center;
@@ -1558,8 +1666,7 @@ def generate_html(cohort_name: str, plates_data: list[dict],
 <body>
 <h1>{cohort_name} — Cell Painting QC Report</h1>
 <p class="subtitle">Generated {datetime.now().strftime("%Y-%m-%d %H:%M")}
-  &nbsp;·&nbsp; {len(plates_data)} plate(s)
-  &nbsp;·&nbsp; Thresholds: absolute + adaptive MAD (3&sigma;)
+
 </p>
 <div class="container">
  
@@ -1569,7 +1676,7 @@ def generate_html(cohort_name: str, plates_data: list[dict],
   <table class="summary-table">
     <thead>
       <tr><th>Plate</th><th>Wells</th>
-          <th>Illumination</th><th>Focus</th><th>Flagged wells</th><th>Signal / Noise (SNR in MFI)</th><th>Positional Effects (ANOVA in MFI)</th>
+          <th>PowerLogLogSlope</th><th>Percent Max</th><th>Percent Min</th><th>Median Intensity</th><th>Signal / Noise (SNR in MFI)</th><th>Positional Effects (ANOVA in MFI)</th>
     </thead>
     <tbody id="summary-tbody"></tbody>
   </table>
@@ -1643,9 +1750,22 @@ def generate_html(cohort_name: str, plates_data: list[dict],
     </div>
     <hr class="audit-sep">
     <div class="audit-row">
-      <b style="color:#a8c8f0;">MedianIntensity</b>: median pixel intensity across the image.
-      Used to detect global brightness differences across wells or plates.
-      Colorscale is cohort-normalized (low = red, high = green) — compare within cohort.
+        <b style="color:#a8c8f0;">MedianIntensity</b>: median pixel intensity across the image.
+        Used to detect global brightness differences across wells or plates.
+        Colorscale is cohort-normalized (low = red, high = green) — compare within cohort.<br>
+        <span style="font-size:0.8rem;margin-top:4px;display:inline-block;">
+            <b style="color:#c8d8f0;">MAD-score</b> shown in tooltip: deviation from plate/cohort median,
+            expressed in units of MAD (Median Absolute Deviation).
+            &nbsp;·&nbsp;
+            <b style="color:#c8d8f0;">Plate MAD-score</b>: (well − plate_median) / plate_MAD
+            &nbsp;·&nbsp;
+            <b style="color:#c8d8f0;">Cohort MAD-score</b>: (well − cohort_median) / cohort_MAD.<br>
+            <span style="color:#4bd760;">■</span> |score| ≤ 1× typical &nbsp;·&nbsp;
+            <span style="color:#ffbe00;">■</span> 1–3× moderate deviation &nbsp;·&nbsp;
+            <span style="color:#ff4444;">■</span> &gt; 3× strong outlier.
+            &nbsp;·&nbsp;
+            <span style="color:var(--muted);">Reference: Bray et al. (2016), mad-based robust scaling.</span>
+        </span>
     </div>
     <hr class="audit-sep">
     <div class="audit-row" style="color:var(--muted);font-size:0.78rem;">
@@ -1675,18 +1795,29 @@ def generate_html(cohort_name: str, plates_data: list[dict],
 <!-- 4. CELL COUNTS -->
 <div class="section">
   <h2>Cell Counts</h2>
-  <div class="feature-audit">
+<div class="feature-audit">
+    <div class="audit-row" style="margin-bottom:6px;">
+      Cell counts are aggregated per well from <span class="thresh">Image.txt</span> (one row per imaging site).
+      Low cell counts may indicate cytotoxicity, poor seeding, or segmentation failure.
+      The <b style="color:#a8c8f0;">Cells / Nuclei ratio</b> detects segmentation errors:
+      a ratio below 1 means some nuclei were not matched to a cell body, often due to
+      over-confluency, clumping, or incorrect segmentation parameters.
+      <b style="color:#a8c8f0;">Illumination artifacts</b> are objects detected by CellProfiler
+      that do not correspond to real cells — high counts suggest dust, debris, or optical issues.
+    </div>
+    <hr class="audit-sep">
     <div class="audit-row">
       <span class="audit-label">Cells</span>
       <span class="thresh">Count_Cells</span>
       <span class="audit-source">← Image.txt</span>
+      &nbsp;— use the slider below to flag wells below a minimum count threshold.
     </div>
     <div class="audit-row">
       <span class="audit-label">Ratio</span>
       <span class="thresh">Count_Cells / Count_Nuclei</span>
       &nbsp;
       <span style="color:#4bd760;font-size:0.78rem;">■ 1.00</span>
-      <span style="color:#ffbe00;font-size:0.78rem;">■ 0.99-0.95</span>
+      <span style="color:#ffbe00;font-size:0.78rem;">■ 0.99–0.95</span>
       <span style="color:#ff4444;font-size:0.78rem;">■ &lt;0.95</span>
     </div>
     <div class="audit-row">
@@ -1697,6 +1828,19 @@ def generate_html(cohort_name: str, plates_data: list[dict],
       <span style="color:#ffffff;font-size:0.78rem;">■ 0</span>
       <span style="color:#cc1111;font-size:0.78rem;">■ ≥500</span>
     </div>
+  </div>
+<div style="display:flex;align-items:center;gap:14px;margin-bottom:10px;
+              background:var(--panel);border:1px solid var(--border);
+              border-radius:8px;padding:10px 16px;">
+    <label style="color:var(--muted);font-size:0.8rem;white-space:nowrap;">
+      Minimum cell threshold:
+    </label>
+    <input type="range" id="cells-threshold-slider" min="500" max="1000" step="50" value="700"
+           style="flex:1;accent-color:var(--accent);cursor:pointer;">
+    <span id="cells-threshold-val"
+          style="font-size:0.9rem;color:#a8c8ff;font-weight:bold;min-width:38px;text-align:right;">
+      700
+    </span>
   </div>
   <div class="counts-grid" id="counts-grid"></div>
 </div>
@@ -1770,20 +1914,6 @@ def generate_html(cohort_name: str, plates_data: list[dict],
   <div id="mfi-tooltip"></div>
 </div>
  
-<!-- 6. FLAGGED WELLS -->
-<div class="section">
-  <h2>Flagged Wells</h2>
-  <div class="flag-controls">
-    <input id="flag-filter" type="text" placeholder="Filter by plate, well, compound, or metric…">
-  </div>
-  <table class="flag-table">
-    <thead>
-      <tr><th>Plate</th><th>Well</th><th>Compound</th><th>Absolute fails</th><th>Adaptive outliers</th></tr>
-    </thead>
-    <tbody id="flag-tbody"></tbody>
-  </table>
-</div>
- 
 </div><!-- /container -->
 <script>
 const DATA   = {data_json};
@@ -1799,6 +1929,8 @@ const SLOPE_SPECS  = {slope_specs};
 const PCT_MAX_SPECS = {pct_max_specs};
 const PCT_MIN_SPECS = {pct_min_specs};
 const MEDIANINT_SPECS = {mEDIANint_specs};
+const MAD_SCORES = {mad_scores_json};
+const RED_COUNTS = {red_counts_json};
 const METRIC_GROUPS = [
   {{ label: 'Slope',        specs: SLOPE_SPECS  }},
   {{ label: 'PercentMaximal',   specs: PCT_MAX_SPECS  }},
@@ -1850,37 +1982,34 @@ function arrMedian(arr) {{
     const d = DATA[p];
     // Compute median MFI Δ for Hoechst/DNA and Syto across wells
     const snrSummary = () => {{
-    const channels = MFI_CHANNELS;
-    if (!channels.length) return '<td style="color:var(--muted)">—</td>';
+        const channels = MFI_CHANNELS;
+        if (!channels.length) return '<td style="color:var(--muted)">—</td>';
 
-    const warn = [], bad = [];
-    channels.forEach(ch => {{
-        const plateMfiData = (MFI_DATA[p]||{{}})[ch]||{{}};
-        const objVals = Object.values(plateMfiData).flat();
-        const objMed  = objVals.length ? arrMedian(objVals) : null;
-        const imgVals = Object.values((MFI_IMG[p]||{{}})).map(w=>w[ch]).filter(v=>v!=null);
-        const imgMed  = imgVals.length ? arrMedian(imgVals) : null;
-        if (objMed==null || imgMed==null || imgMed===0) return;
-        const snr = (objMed - imgMed) / imgMed;
-        if      (snr < 0.2) bad.push(ch);
-        else if (snr < 0.5) warn.push(ch);
-    }});
+        const warn = [], bad = [];
+        channels.forEach(ch => {{
+            const plateMfiData = (MFI_DATA[p]||{{}})[ch]||{{}};
+            const objVals = Object.values(plateMfiData).flat();
+            const objMed  = objVals.length ? arrMedian(objVals) : null;
+            const imgVals = Object.values((MFI_IMG[p]||{{}})).map(w=>w[ch]).filter(v=>v!=null);
+            const imgMed  = imgVals.length ? arrMedian(imgVals) : null;
+            if (objMed==null || imgMed==null || imgMed===0) return;
+            const snr = (objMed - imgMed) / imgMed;
+            if      (snr < 0.2) bad.push(ch);
+            else if (snr < 0.5) warn.push(ch);
+        }});
 
-    if (bad.length) {{
-        return `<td style="text-align:center;">
-        <span style="color:#ff4444;font-weight:700;">Bad</span><br>
-        <span style="color:#ff4444;font-size:0.75rem;">${{bad.join(', ')}}</span>
-        </td>`;
-    }} else if (warn.length) {{
-        return `<td style="text-align:center;">
-        <span style="color:#ffbe00;font-weight:700;">Warning</span><br>
-        <span style="color:#ffbe00;font-size:0.75rem;">${{warn.join(', ')}}</span>
-        </td>`;
-    }} else {{
-        return `<td style="text-align:center;">
-        <span style="color:#4bd760;font-weight:700;">Good</span>
-        </td>`;
-    }}
+        if (!bad.length && !warn.length) {{
+            return `<td style="text-align:center;">
+            <span style="color:#4bd760;font-weight:700;">Good</span>
+            </td>`;
+        }}
+        let content = '';
+        if (bad.length)  content += `<span style="color:#ff4444;font-weight:700;">Bad</span><br>
+            <span style="color:#ff4444;font-size:0.75rem;">${{bad.join(', ')}}</span>`;
+        if (warn.length) content += `${{bad.length?'<br>':''}}
+            <span style="color:#ffbe00;font-weight:700;">Warning</span><br>
+            <span style="color:#ffbe00;font-size:0.75rem;">${{warn.join(', ')}}</span>`;
+        return `<td style="text-align:center;">${{content}}</td>`;
     }};
 
     const positionalSummary = () => {{
@@ -1928,9 +2057,26 @@ function arrMedian(arr) {{
 
     tbody.insertAdjacentHTML('beforeend', `<tr>
       <td><strong>${{p}}</strong></td><td>${{d.n_wells}}</td>
-      <td>${{badge(Math.round(d.n_illum/d.n_wells*100))}} ${{d.n_illum}}/${{d.n_wells}}</td>
-      <td>${{badge(Math.round(d.n_focus/d.n_wells*100))}} ${{d.n_focus}}/${{d.n_wells}}</td>
-      <td>${{d.n_wells - d.n_pass}}</td>
+      <td style="text-align:center;font-family:monospace;">
+        ${{(RED_COUNTS.slope[p]||0) > 0
+            ? `<span style="color:#ff4444;font-weight:700;">${{RED_COUNTS.slope[p]}}</span>`
+            : `<span style="color:#4bd760;">0</span>`}}
+      </td>
+      <td style="text-align:center;font-family:monospace;">
+        ${{(RED_COUNTS.pctmax[p]||0) > 0
+            ? `<span style="color:#ff4444;font-weight:700;">${{RED_COUNTS.pctmax[p]}}</span>`
+            : `<span style="color:#4bd760;">0</span>`}}
+      </td>
+      <td style="text-align:center;font-family:monospace;">
+        ${{(RED_COUNTS.pctmin[p]||0) > 0
+            ? `<span style="color:#ff4444;font-weight:700;">${{RED_COUNTS.pctmin[p]}}</span>`
+            : `<span style="color:#4bd760;">0</span>`}}
+      </td>
+      <td style="text-align:center;font-family:monospace;">
+        ${{(RED_COUNTS.medint[p]||0) > 0
+            ? `<span style="color:#ff4444;font-weight:700;">${{RED_COUNTS.medint[p]}}</span>`
+            : `<span style="color:#4bd760;">0</span>`}}
+      </td>
       ${{snrSummary()}}
       ${{positionalSummary()}}
     </tr>`);
@@ -1973,29 +2119,64 @@ function renderPlate(idx) {{
   renderMFI();
 }}
  
-// ── Fix #2: corrected SVG overlay (A=top, H=bottom) ──────────────────────────
+// Evalúa el color semántico de un valor según su colorscale (igual que renderWellInfo)
+function specColor(v, spec) {{
+  if (v == null) return null;
+  const t = Math.max(0, Math.min(1, (v - spec.cmin) / (spec.cmax - spec.cmin)));
+  const cs = spec.cs;
+  for (let i = 0; i < cs.length - 1; i++) {{
+    if (t >= cs[i][0] && t <= cs[i+1][0]) {{
+      if (cs[i][1] === cs[i+1][1]) return cs[i][1];
+      if (cs[i][0] === cs[i+1][0]) return cs[i+1][1];
+      return cs[i][1];
+    }}
+  }}
+  return cs[cs.length-1][1];
+}}
+
+// Prioridad de colores: rojo > amarillo > verde > null
+const COLOR_PRIORITY = ['#ff4444','#ffbe00','#4bd760'];
+function worstColor(colors) {{
+  for (const c of COLOR_PRIORITY) {{
+    if (colors.includes(c)) return c;
+  }}
+  return null;
+}}
+
 function buildOverlaySVG(plateName) {{
   const pd  = DATA[plateName];
   const cw  = pd.overview_cw;
   const ch  = pd.overview_ch;
   const svg = document.getElementById('overview-svg');
- 
+
   const imgW = cw * PLATE_COLS;
   const imgH = ch * PLATE_ROWS;
   svg.setAttribute('viewBox', `0 0 ${{imgW}} ${{imgH}}`);
   svg.innerHTML = '';
- 
-  // ROW_LABELS[0]='A' -> ri=0 -> y0=0 (top). Correct: A01 maps to top-left.
+
   ROW_LABELS.forEach((r, ri) => {{
     COLS.forEach((c, ci) => {{
       const well = r + c;
+      const m    = pd.wells[well] || {{}};
       const x0   = ci * cw, y0 = ri * ch;
+
+      // Calcular el peor color entre todas las métricas del pozo
+      const colors = ALL_METRIC_SPECS
+        .map(spec => specColor(m[spec.col], spec))
+        .filter(Boolean);
+      const border = worstColor(colors);
+
       const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
       rect.setAttribute('class', 'well-cell');
       rect.setAttribute('id', `sv-${{well}}`);
-      rect.setAttribute('x', x0); rect.setAttribute('y', y0);
-      rect.setAttribute('width', cw); rect.setAttribute('height', ch);
+      rect.setAttribute('x', x0 + 1); rect.setAttribute('y', y0 + 1);
+      rect.setAttribute('width', cw - 2); rect.setAttribute('height', ch - 2);
       rect.setAttribute('data-well', well);
+      if (border) {{
+        rect.setAttribute('stroke', border);
+        rect.setAttribute('stroke-width', '3');
+        rect.setAttribute('fill', border + '18');  // 18 = ~10% opacity
+      }}
       rect.onclick = () => selectWell(plateName, well);
       svg.appendChild(rect);
     }});
@@ -2019,16 +2200,32 @@ function selectWell(plateName, well) {{
 const ALL_METRIC_SPECS = [...SLOPE_SPECS, ...PCT_MAX_SPECS, ...PCT_MIN_SPECS, ...MEDIANINT_SPECS];
  
 function renderWellInfo(plateName, well) {{
-  const pd     = DATA[plateName];
-  const m      = pd.wells[well] || {{}};
-  const flags  = pd.well_flags[well] || {{}};
-  const absSet = new Set(flags.abs || []);
-  const adpSet = new Set(flags.adp || []);
-  const cmpd   = m.compound || '—';
- 
+  const pd   = DATA[plateName];
+  const m    = pd.wells[well] || {{}};
+  const cmpd = m.compound || '—';
+
+  // Evalúa el color de un valor según la colorscale del spec (igual que el heatmap)
+  // Interpola la colorscale para obtener el color semántico: verde/amarillo/rojo
+  function specColor(v, spec) {{
+    if (v == null) return '';
+    const t = Math.max(0, Math.min(1, (v - spec.cmin) / (spec.cmax - spec.cmin)));
+    const cs = spec.cs;
+    // Buscar el segmento de la colorscale donde cae t
+    for (let i = 0; i < cs.length - 1; i++) {{
+      if (t >= cs[i][0] && t <= cs[i+1][0]) {{
+        // Si el par de colores es igual, devolver ese color directamente
+        if (cs[i][1] === cs[i+1][1]) return cs[i][1];
+        // Si el par forma un escalón (mismo t), es la transición de un segmento al siguiente
+        if (cs[i][0] === cs[i+1][0]) return cs[i+1][1];
+        return cs[i][1];
+      }}
+    }}
+    return cs[cs.length-1][1];
+  }}
+
   let html = `<h3>${{well}}</h3>
     <div class="well-compound">${{cmpd}}</div>`;
- 
+
   html += `<div class="section-label">Cell counts</div>`;
   [['Cells','Count_Cells'],['Nuclei','Count_Nuclei'],
    ['Raw nuclei','Count_Raw_nuclei'],['Artifacts','Count_Illum_artifacts']].forEach(([lbl,col]) => {{
@@ -2038,21 +2235,17 @@ function renderWellInfo(plateName, well) {{
       <span class="metric-val">${{v != null ? Math.round(v) : '—'}}</span>
     </div>`;
   }});
- 
+
   ALL_METRIC_SPECS.forEach(spec => {{
-    const v      = m[spec.col];
+    const v = m[spec.col];
     if (v == null) return;
-    const metKey = spec.title.split('—')[0].trim();
-    const chKey  = spec.title.split('—')[1]?.trim() || '';
-    const tag    = `${{metKey}}/${{chKey}}`;
-    const isFail = absSet.has(tag) || adpSet.has(tag);
-    const cls    = isFail ? 'fail-abs' : 'pass';
+    const color = specColor(v, spec);
     html += `<div class="metric-row">
       <span class="metric-label">${{spec.title}}</span>
-      <span class="metric-val ${{cls}}">${{fmt3(v)}}</span>
+      <span class="metric-val" style="color:${{color}}">${{fmt3(v)}}</span>
     </div>`;
   }});
- 
+
   document.getElementById('well-info').innerHTML = html;
 }}
  
@@ -2099,21 +2292,31 @@ function isFiltered() {{
  
 function makeHeatmap(plateData, spec) {{
   const z    = wellMatrix(plateData, spec.col);
+  const plateName = Object.keys(DATA).find(p => DATA[p] === plateData) || '';
   const text = ROWS_PLOTLY.map(r => COLS.map(c => {{
     const w    = r + c;
     const v    = plateData.wells[w]?.[spec.col];
     const cmpd = plateData.wells[w]?.compound || '';
     const vis  = compoundVisible(cmpd);
-    return vis
-      ? `<b>${{w}}</b><br>${{cmpd}}<br>${{spec.title}}: ${{v != null ? v.toFixed(3) : 'N/A'}}`
-      : `<b>${{w}}</b><br>${{cmpd}}<br>(hidden)`;
+    if (!vis) return `<b>${{w}}</b><br>${{cmpd}}<br>(hidden)`;
+    const isMedianInt = spec.col.startsWith('ImageQuality_MedianIntensity_');
+    const sc   = isMedianInt ? (MAD_SCORES[spec.col]||{{}})[plateName]?.[w] : null;
+    const zpl  = sc ? (sc.z_pl>=0?'+':'') + sc.z_pl + '× MAD (plate)'  : null;
+    const zco  = sc ? (sc.z_co>=0?'+':'') + sc.z_co + '× MAD (cohort)' : null;
+    const extraLine = (zpl && zco)
+      ? `Plate MAD-score: ${{zpl}}<br>Cohort MAD-score: ${{zco}}`
+      : '';
+    const cmpdColor = cmpd === 'DMSO' ? '#90c870' : cmpd ? '#a8c8ff' : 'var(--muted)';
+    return `<b style="font-size:12px">${{w}}</b> <span style="color:${{cmpdColor}}">${{cmpd||'—'}}</span><br>`+
+           `${{spec.title}}: <b>${{v!=null?v.toFixed(4):'N/A'}}</b><br>`+
+           `${{extraLine}}`;
   }}));
-return {{
+  return {{
     type:'heatmap', z, text, hoverinfo:'text',
     x:COLS, y:ROWS_PLOTLY, colorscale: spec.cs,
     zmin: spec.cmin, zmax: spec.cmax,
     showscale: false,
-    xgap:2, ygap:2,
+    xgap:4, ygap:4,
   }};
 }}
  
@@ -2129,6 +2332,10 @@ function heatmapLayout(title, extraY) {{
              tickvals:COLS, ticktext:COLS.map(c=>parseInt(c)) }},
     yaxis:{{ tickfont:{{size:9}}, showgrid:!filtered, gridcolor, zeroline:false,
              title: extraY ? {{text:'Row', font:{{size:9}}}} : undefined }},
+    hoverlabel:{{
+      bgcolor:'#141c34', bordercolor:'#304080',
+      font:{{size:12, color:'#d0e0ff', family:'monospace'}},
+    }},
   }};
 }}
  
@@ -2180,35 +2387,80 @@ function renderCounts(plateName) {{
   grid.innerHTML = '';
   const pd = DATA[plateName];
  
-  // Card 1: Cells count heatmap
+// Card 1: Cells count heatmap con borde rojo para pozos bajo el umbral
   (function() {{
     const cid  = `cnt-cells`;
     const card = document.createElement('div');
     card.className = 'count-card';
     card.innerHTML = `<div id="${{cid}}"></div>`;
     grid.appendChild(card);
-    const z    = ROWS_PLOTLY.map(r => COLS.map(c => {{
-      const w = r+c, well = pd.wells[w];
-      if (!well || !compoundVisible(well.compound||'')) return null;
-      return well['Count_Cells'] ?? null;
-    }}));
-    const text = ROWS_PLOTLY.map(r => COLS.map(c => {{
-      const w = r+c, v = pd.wells[w]?.['Count_Cells'];
-      return `<b>${{w}}</b><br>${{pd.wells[w]?.compound||''}}<br>Cells: ${{v!=null?Math.round(v):'N/A'}}`;
-    }}));
-    const filtered = isFiltered();
-    const gridcolor = filtered ? 'rgba(0,0,0,0)' : 'rgba(80,90,120,0.4)';
-    const cRange = COUNT_RANGES['Count_Cells'] || [null,null];
-    Plotly.react(cid,
-      [{{type:'heatmap',z,text,hoverinfo:'text',x:COLS,y:ROWS_PLOTLY,colorscale:'Viridis',
-         zmin:cRange[0],zmax:cRange[1],colorbar:{{thickness:14,len:0.85,tickfont:{{size:10}}}}}}],
-      {{paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#0a0c18',
-        font:{{color:'#c8d8f0',size:11}},margin:{{t:40,b:50,l:50,r:20}},height:340,
-        title:{{text:'Cells',font:{{size:13,color:'#a8c8ff'}},x:0.5}},
-        xaxis:{{title:'Column',tickfont:{{size:10}},tickvals:COLS,ticktext:COLS.map(c=>parseInt(c)),
-                showgrid:!filtered,gridcolor,zeroline:false}},
-        yaxis:{{title:'Row',tickfont:{{size:10}},showgrid:!filtered,gridcolor,zeroline:false}},
-      }},{{responsive:true,displayModeBar:false}});
+
+    function drawCellsHeatmap() {{
+      const threshold = parseInt(document.getElementById('cells-threshold-slider')?.value || 700);
+      const filtered  = isFiltered();
+      const gridcolor = filtered ? 'rgba(0,0,0,0)' : 'rgba(80,90,120,0.4)';
+      const cRange    = COUNT_RANGES['Count_Cells'] || [null,null];
+
+      const z    = ROWS_PLOTLY.map(r => COLS.map(c => {{
+        const w = r+c, well = pd.wells[w];
+        if (!well || !compoundVisible(well.compound||'')) return null;
+        return well['Count_Cells'] ?? null;
+      }}));
+      const text = ROWS_PLOTLY.map(r => COLS.map(c => {{
+        const w = r+c, v = pd.wells[w]?.['Count_Cells'];
+        const below = v != null && v < threshold;
+        return `<b>${{w}}</b><br>${{pd.wells[w]?.compound||''}}<br>Cells: ${{v!=null?Math.round(v):'N/A'}}` +
+               (below ? `<br><span style="color:#ff4444">⚠ below threshold (${{threshold}})</span>` : '');
+      }}));
+
+      // Shapes: un rectángulo rojo por pozo bajo el umbral
+      // Plotly con ejes categóricos: usar los valores string directamente como x0/y0
+      const shapes = [];
+      ROWS_PLOTLY.forEach((r, ri) => {{
+        COLS.forEach((c, ci) => {{
+          const w    = r + c;
+          const well = pd.wells[w];
+          if (!well || !compoundVisible(well.compound||'')) return;
+          const v = well['Count_Cells'];
+          if (v != null && v < threshold) {{
+            shapes.push({{
+              type: 'rect', xref: 'x', yref: 'y',
+              x0: ci - 0.48,  y0: ri - 0.48,
+              x1: ci + 0.48,  y1: ri + 0.48,
+              line: {{ color: '#ff4444', width: 3 }},
+              fillcolor: 'rgba(0,0,0,0)',
+              layer: 'above',
+            }});
+          }}
+        }});
+      }});
+
+      Plotly.react(cid,
+        [{{type:'heatmap',z,text,hoverinfo:'text',x:COLS,y:ROWS_PLOTLY,colorscale:'Viridis',
+           zmin:cRange[0],zmax:cRange[1], xgap:4,ygap:4,colorbar:{{thickness:14,len:0.85,tickfont:{{size:10}}}}}}],
+        {{paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#0a0c18',
+          font:{{color:'#c8d8f0',size:11}},margin:{{t:40,b:50,l:50,r:20}},
+          height:340, autosize:false,
+          title:{{text:`Cells (umbral: ${{threshold}})`,font:{{size:13,color:'#a8c8ff'}},x:0.5}},
+          xaxis:{{title:'Column',tickfont:{{size:10}},tickvals:COLS,ticktext:COLS.map(c=>parseInt(c)),
+                  showgrid:!filtered,gridcolor,zeroline:false,fixedrange:true}},
+          yaxis:{{title:'Row',tickfont:{{size:10}},showgrid:!filtered,gridcolor,zeroline:false,fixedrange:true}},
+          hoverlabel:{{bgcolor:'#141c34',bordercolor:'#304080',font:{{size:12,color:'#d0e0ff',family:'monospace'}}}},
+          shapes,
+        }},{{responsive:false,displayModeBar:false}});
+    }}
+
+    drawCellsHeatmap();
+
+    // Conectar el slider — solo cuando la Card ya existe en el DOM
+    const slider = document.getElementById('cells-threshold-slider');
+    const valLbl = document.getElementById('cells-threshold-val');
+    if (slider) {{
+      slider.oninput = () => {{
+        valLbl.textContent = slider.value;
+        drawCellsHeatmap();
+      }};
+    }}
   }})();
  
   // Card 2: Cells/Nuclei ratio with custom colour scale (1=green, 0.99-095=yellow, <0.95=red)
@@ -2250,7 +2502,7 @@ function renderCounts(plateName) {{
     const gridcolor = filtered ? 'rgba(0,0,0,0)' : 'rgba(80,90,120,0.4)';
     Plotly.react(cid,
       [{{type:'heatmap',z,text,hoverinfo:'text',x:COLS,y:ROWS_PLOTLY,
-         colorscale:ratioCS, zmin:0.93, zmax:1.0,
+         colorscale:ratioCS, zmin:0.93, zmax:1.0, xgap:4,ygap:4,
          colorbar:{{thickness:14,len:0.85,tickfont:{{size:10}},
                     tickvals:[0.93, 0.95, 0.97, 1.0],
                     ticktext:['<0.95','0.95','0.97','1.00']}}}}],
@@ -2260,6 +2512,7 @@ function renderCounts(plateName) {{
         xaxis:{{title:'Column',tickfont:{{size:10}},tickvals:COLS,ticktext:COLS.map(c=>parseInt(c)),
                 showgrid:!filtered,gridcolor,zeroline:false}},
         yaxis:{{title:'Row',tickfont:{{size:10}},showgrid:!filtered,gridcolor,zeroline:false}},
+        hoverlabel:{{bgcolor:'#141c34',bordercolor:'#304080',font:{{size:12,color:'#d0e0ff',family:'monospace'}}}},
       }},{{responsive:true,displayModeBar:false}});
   }})();
  
@@ -2295,7 +2548,7 @@ function renderCounts(plateName) {{
     const gridcolor2 = filtered2 ? 'rgba(0,0,0,0)' : 'rgba(80,90,120,0.4)';
     Plotly.react(cid,
       [{{type:'heatmap',z,text,hoverinfo:'text',x:COLS,y:ROWS_PLOTLY,
-         colorscale:artifactCS, zmin:0, zmax:500,
+         colorscale:artifactCS, zmin:0, zmax:500, xgap:4,ygap:4,
          colorbar:{{thickness:14,len:0.85,tickfont:{{size:10}},
                     tickvals:[0,100,250,500],ticktext:['0','100','250','≥500']}}}}],
       {{paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#0a0c18',
@@ -2304,6 +2557,7 @@ function renderCounts(plateName) {{
         xaxis:{{title:'Column',tickfont:{{size:10}},tickvals:COLS,ticktext:COLS.map(c=>parseInt(c)),
                 showgrid:!filtered2,gridcolor:gridcolor2,zeroline:false}},
         yaxis:{{title:'Row',tickfont:{{size:10}},showgrid:!filtered2,gridcolor:gridcolor2,zeroline:false}},
+        hoverlabel:{{bgcolor:'#141c34',bordercolor:'#304080',font:{{size:12,color:'#d0e0ff',family:'monospace'}}}},
       }},{{responsive:true,displayModeBar:false}});
   }})();
 }}
@@ -2599,13 +2853,12 @@ function renderMFI() {{
       <div class="mfi-body">
         <div class="mfi-boxplot-col">
           <div class="mfi-plot-box" id="mfi-box-row-${{ch}}"></div>
+          <div class="mfi-plot-divider"></div>
+          <div class="mfi-plot-box" id="mfi-box-col-${{ch}}"></div>
         </div>
         <div class="mfi-platemap-col">
           <div class="mfi-platemap-title">Platemap — median MFI</div>
           <div class="mfi-platemap-grid" id="mfi-grid-${{ch}}"></div>
-        </div>
-        <div class="mfi-boxplot-col-right">
-          <div class="mfi-plot-box" id="mfi-box-col-${{ch}}"></div>
         </div>
       </div>`;
     container.appendChild(sec);
@@ -2698,42 +2951,11 @@ function applyGlobalFilter() {{
   renderMetrics(currentPlate);
   renderCounts(currentPlate);
   renderMFI();
-  applyFlagFilter();
 }}
- 
-(function buildFlagTable() {{
-  const tbody = document.getElementById('flag-tbody');
-  PLATES.forEach(p => {{
-    const pd = DATA[p];
-    Object.entries(pd.well_flags || {{}}).forEach(([well, flags]) => {{
-      const m      = pd.wells[well] || {{}};
-      const cmpd   = m.compound || '';
-      const absTxt = (flags.abs||[]).join(', ') || '—';
-      const adpTxt = (flags.adp||[]).join(', ') || '—';
-      tbody.insertAdjacentHTML('beforeend',
-        `<tr data-plate="${{p}}" data-well="${{well}}"
-             data-compound="${{cmpd}}" data-metrics="${{[...(flags.abs||[]),...(flags.adp||[])].join(',')}}">
-          <td>${{p}}</td><td>${{well}}</td><td>${{cmpd||'—'}}</td>
-          <td style="color:var(--fail)">${{absTxt}}</td>
-          <td style="color:var(--warn)">${{adpTxt}}</td>
-        </tr>`);
-    }});
-  }});
-}})();
- 
-function applyFlagFilter() {{
-  const q = document.getElementById('flag-filter').value.toLowerCase();
-  document.querySelectorAll('#flag-tbody tr').forEach(tr => {{
-    const text   = [tr.dataset.plate,tr.dataset.well,tr.dataset.compound,tr.dataset.metrics].join(' ').toLowerCase();
-    const cmpdOk = compoundVisible(tr.dataset.compound);
-    tr.classList.toggle('hidden', !(!q||text.includes(q)) || !cmpdOk);
-  }});
-}}
-document.getElementById('flag-filter').oninput = applyFlagFilter;
+
  
 // ── Init ──────────────────────────────────────────────────────────────────────
 renderPlate(0);
-renderMFI();
 </script>
 </body>
 </html>"""
