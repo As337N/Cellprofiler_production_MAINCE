@@ -119,8 +119,7 @@ ILLUM_METRICS  = ["PowerLogLogSlope", "MedianIntensity"]
 FOCUS_METRICS  = ["FocusScore", "FocusScore"]
 BORDER_METRIC  = "PowerLogLogSlope"
 METRIC_LABELS  = {
-    "PowerLogLogSlope": "Slope", "MedianIntensity": "MaxInt",
-    "FocusScore": "Focus",       "FocusScore": "LocalFoc",
+    "PowerLogLogSlope": "Focus", "MedianIntensity": "MaxInt",
 }
 
 COL_PASS    = (75,  215,  95)
@@ -272,8 +271,8 @@ def load_qc_tsv(tsv_path) -> dict:
     ))
     pct_cols  = list(dict.fromkeys(
         c for c in df.columns
-        if c.startswith("Intensity_PercentMaximal_") or
-           c.startswith("Intensity_PercentMinimal_")
+        if c.startswith("ImageQuality_PercentMaximal_") or 
+           c.startswith("ImageQuality_PercentMinimal_")
     ))
     sum_cols  = list(dict.fromkeys(
         c for c in df.columns
@@ -338,18 +337,23 @@ def load_platemap(platemap_path) -> dict:
 
 # ── MFI channel definitions ───────────────────────────────────────────────────
 # Hoechst (Hoechst) → Nuclei.txt  |  Syto, ER, Golgi, Mito → Cells.txt
-# Column format: Intensity_MeanIntensity_<Channel>
+# Column format: Intensity_MedianIntensity_<Channel>
 
 MFI_COLS_CELLS = {
-    "Syto":  ("Intensity_MeanIntensity_Syto",  "#50DC78"),
-    "ER":    ("Intensity_MeanIntensity_ER",     "#B45AFF"),
-    "Golgi": ("Intensity_MeanIntensity_Golgi",  "#FFB43C"),
-    "Mito":  ("Intensity_MeanIntensity_Mito",   "#FF5050"),
+    "Syto":  ("Intensity_MedianIntensity_Syto",  "#50DC78"),
+    "ER":    ("Intensity_MedianIntensity_ER",     "#B45AFF"),
+    "Golgi": ("Intensity_MedianIntensity_Golgi",  "#FFB43C"),
+    "Mito":  ("Intensity_MedianIntensity_Mito",   "#FF5050"),
 }
 MFI_COLS_NUCLEI = {
-    "Hoechst": ("Intensity_MeanIntensity_Hoechst", "#64A0FF"),
+    "Hoechst": ("Intensity_MedianIntensity_Hoechst", "#64A0FF"),
 }
 MFI_CHANNEL_ORDER = ["Hoechst", "Syto", "ER", "Golgi", "Mito"]
+
+RADIUS_COLS = {
+    "Cells":  "AreaShape_MedianRadius",
+    "Nuclei": "AreaShape_MedianRadius",
+}
 
 MFI_IMG_COLS = {
     "Hoechst": "ImageQuality_MedianIntensity_Hoechst",
@@ -408,6 +412,7 @@ def load_mfi_data(cells_path: "Path | None",
     if nuclei_path is not None:
         df_nuclei = _load_object_tsv(nuclei_path, MFI_COLS_NUCLEI, "Nuclei")
         if df_nuclei is not None:
+            print(f"[mfi] Nuclei.txt columns: {[c for c in df_nuclei.columns if 'Hoechst' in c or 'Intensity' in c][:10]}")
             for ch, (col, color) in MFI_COLS_NUCLEI.items():
                 if col in df_nuclei.columns:
                     keep = (["Metadata_Plate", "Metadata_Well"]
@@ -481,6 +486,45 @@ def load_mfi_img(image_txt_path: "Path | None") -> "dict[str, dict[str, float]]"
                 vals = grp[col].dropna().values
                 if len(vals):
                     result[well][ch] = float(np.median(vals))
+    return result
+
+def load_radius_data(cells_path: "Path | None",
+                     nuclei_path: "Path | None",
+                     plate_name: str) -> "dict[str, dict[str, float]]":
+    """
+    Load AreaShape_MedianRadius from Cells.txt and Nuclei.txt.
+    Returns { 'Cells': { well: median_radius }, 'Nuclei': { well: median_radius } }
+    """
+    col = "AreaShape_MedianRadius"
+    result = {}
+
+    def _norm_plate(s):
+        return str(s).strip().lstrip("P").lstrip("0") or "0"
+
+    for label, path in [("Cells", cells_path), ("Nuclei", nuclei_path)]:
+        if path is None or not path.exists():
+            continue
+        skip = _detect_skip_rows(path)
+        df = pd.read_csv(path, sep="\t", low_memory=False, skiprows=skip)
+        if "Metadata_Well" not in df.columns or col not in df.columns:
+            print(f"[radius] {col} not found in {path.name} — skipping.")
+            continue
+        df["Metadata_Well"]  = df["Metadata_Well"].astype(str).str.strip().str.upper()
+        df["Metadata_Plate"] = (df["Metadata_Plate"].astype(str).str.strip()
+                                if "Metadata_Plate" in df.columns else "Plate")
+        mask = df["Metadata_Plate"].apply(_norm_plate) == _norm_plate(plate_name)
+        plate_df = df[mask].copy()
+        if plate_df.empty:
+            if df["Metadata_Plate"].nunique() == 1:
+                plate_df = df.copy()
+            else:
+                continue
+        well_medians = (plate_df.groupby("Metadata_Well")[col]
+                        .median()
+                        .dropna()
+                        .to_dict())
+        result[label] = {str(w).strip().upper(): float(v)
+                         for w, v in well_medians.items()}
     return result
 
 # ── Image helpers ──────────────────────────────────────────────────────────────
@@ -1213,8 +1257,8 @@ def generate_html(cohort_name: str, plates_data: list[dict],
     html_cols = (
             [c for cols in METRIC_COLS.values() for c in cols] +
             list(COUNT_COLS.values()) + [AREA_COL] +
-            [f"Intensity_PercentMaximal_{ch}" for ch in CHANNELS] +
-            [f"Intensity_PercentMinimal_{ch}" for ch in CHANNELS]
+            [f"ImageQuality_PercentMaximal_{ch}" for ch in CHANNELS] +
+            [f"ImageQuality_PercentMinimal_{ch}" for ch in CHANNELS]
         )
 
     payload = {}
@@ -1285,8 +1329,8 @@ def generate_html(cohort_name: str, plates_data: list[dict],
     # MAD scores para tooltip
     _qc_cols_for_scores = (
         [f"ImageQuality_PowerLogLogSlope_{ch}" for ch in CHANNELS] +
-        [f"Intensity_PercentMaximal_{ch}"      for ch in CHANNELS] +
-        [f"Intensity_PercentMinimal_{ch}"      for ch in CHANNELS] +
+        [f"ImageQuality_PercentMaximal_{ch}"      for ch in CHANNELS] +
+        [f"ImageQuality_PercentMinimal_{ch}"      for ch in CHANNELS] +
         [f"ImageQuality_MedianIntensity_{ch}"  for ch in CHANNELS]
     )
     calc_mad_scores  = {}
@@ -1320,14 +1364,14 @@ def generate_html(cohort_name: str, plates_data: list[dict],
         for col in [f"ImageQuality_PowerLogLogSlope_{ch}"]})
 
     pctmax_red  = _red_wells(plates_data,
-        [f"Intensity_PercentMaximal_{ch}" for ch in CHANNELS],
+        [f"ImageQuality_PercentMaximal_{ch}" for ch in CHANNELS],
         {col: (None, 1.0) for ch in CHANNELS
-        for col in [f"Intensity_PercentMaximal_{ch}"]})
+        for col in [f"ImageQuality_PercentMaximal_{ch}"]})
 
     pctmin_red  = _red_wells(plates_data,
-        [f"Intensity_PercentMinimal_{ch}" for ch in CHANNELS],
+        [f"ImageQuality_PercentMinimal_{ch}" for ch in CHANNELS],
         {col: (None, 5.0) for ch in CHANNELS
-        for col in [f"Intensity_PercentMinimal_{ch}"]})
+        for col in [f"ImageQuality_PercentMinimal_{ch}"]})
 
     # medint_red uses MAD-score below — skip _red_wells call
 
@@ -1420,7 +1464,7 @@ def generate_html(cohort_name: str, plates_data: list[dict],
         "cmax": 2.0,
         "cs": PCT_MAX_CS}
         for ch in CHANNELS
-        for col in [f"Intensity_PercentMaximal_{ch}"]
+        for col in [f"ImageQuality_PercentMaximal_{ch}"]
     ])
 
     pct_min_specs = json.dumps([
@@ -1430,7 +1474,7 @@ def generate_html(cohort_name: str, plates_data: list[dict],
         "cmax": 10.0,
         "cs": PCT_MIN_CS}
         for ch in CHANNELS
-        for col in [f"Intensity_PercentMinimal_{ch}"]
+        for col in [f"ImageQuality_PercentMinimal_{ch}"]
     ])
 
     mEDIANint_specs = json.dumps([
@@ -1474,6 +1518,8 @@ def generate_html(cohort_name: str, plates_data: list[dict],
                                     for ch in _all_mfi_channels})
     mfi_img_payload = { pd_["name"]: pd_.get("mfi_img", {}) for pd_ in plates_data }
     mfi_img_json    = json.dumps(mfi_img_payload)
+    radius_payload = { pd_["name"]: pd_.get("radius_data", {}) for pd_ in plates_data }
+    radius_json    = json.dumps(radius_payload)
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -1834,21 +1880,11 @@ def generate_html(cohort_name: str, plates_data: list[dict],
       <span style="color:#cc1111;font-size:0.78rem;">■ ≥500</span>
     </div>
   </div>
-<div style="display:flex;align-items:center;gap:14px;margin-bottom:10px;
-              background:var(--panel);border:1px solid var(--border);
-              border-radius:8px;padding:10px 16px;">
-    <label style="color:var(--muted);font-size:0.8rem;white-space:nowrap;">
-      Minimum cell threshold:
-    </label>
-    <input type="range" id="cells-threshold-slider" min="500" max="1000" step="50" value="700"
-           style="flex:1;accent-color:var(--accent);cursor:pointer;">
-    <span id="cells-threshold-val"
-          style="font-size:0.9rem;color:#a8c8ff;font-weight:bold;min-width:38px;text-align:right;">
-      700
-    </span>
-  </div>
   <div class="counts-grid" id="counts-grid"></div>
   <div class="counts-hist-row" id="counts-hist-row"></div>
+  <h3 style="color:#a8c8ff;margin:28px 0 8px 0;font-size:1rem;">Median Radius</h3>
+  <div class="counts-grid" id="radius-grid"></div>
+  <div class="counts-hist-row" id="radius-hist-row"></div>
 </div>
  
 <!-- 5. MFI (Median Fluorescence Intensity) -->
@@ -1857,12 +1893,12 @@ def generate_html(cohort_name: str, plates_data: list[dict],
   <div class="feature-audit">
     <div class="audit-row">
       <span class="audit-label">Hoechst</span>
-      <span class="thresh">Intensity_MeanIntensity_Hoechst</span>
+      <span class="thresh">Intensity_MedianIntensity_Hoechst</span>
       <span class="audit-source">← Nuclei.txt</span>
     </div>
     <div class="audit-row">
       <span class="audit-label">Syto / ER / Golgi / Mito</span>
-      <span class="thresh">Intensity_MeanIntensity_*</span>
+      <span class="thresh">Intensity_MedianIntensity_*</span>
       <span class="audit-source">← Cells.txt</span>
     </div>
     <hr class="audit-sep">
@@ -1928,6 +1964,7 @@ const MFI_DATA     = {mfi_payload_json};
 const MFI_CHANNELS = {mfi_channels_json};
 const MFI_COLORS   = {mfi_colors_json};
 const MFI_IMG      = {mfi_img_json};
+const RADIUS_DATA = {radius_json};
 const PLATES = Object.keys(DATA);
  
 const SLOPE_SPECS  = {slope_specs};
@@ -2422,7 +2459,7 @@ function renderCounts(plateName) {{
     grid.appendChild(card);
 
     function drawCellsHeatmap() {{
-      const threshold = parseInt(document.getElementById('cells-threshold-slider')?.value || 700);
+      const threshold = 700;
       const filtered  = isFiltered();
       const gridcolor = filtered ? 'rgba(0,0,0,0)' : 'rgba(80,90,120,0.4)';
       const cRange    = COUNT_RANGES['Count_Cells'] || [null,null];
@@ -2439,28 +2476,6 @@ function renderCounts(plateName) {{
                (below ? `<br><span style="color:#ff4444">⚠ below threshold (${{threshold}})</span>` : '');
       }}));
 
-      // Shapes: un rectángulo rojo por pozo bajo el umbral
-      // Plotly con ejes categóricos: usar los valores string directamente como x0/y0
-      const shapes = [];
-      ROWS_PLOTLY.forEach((r) => {{
-        COLS.forEach((c) => {{
-          const w    = r + c;
-          const well = pd.wells[w];
-          if (!well || !compoundVisible(well.compound||'')) return;
-          const v = well['Count_Cells'];
-          if (v != null && v < threshold) {{
-            shapes.push({{
-              type: 'rect', xref: 'x', yref: 'y',
-              x0: c,  y0: r,
-              x1: c,  y1: r,
-              line: {{ color: '#ff4444', width: 3 }},
-              fillcolor: 'rgba(0,0,0,0)',
-              layer: 'above',
-            }});
-          }}
-        }});
-      }});
-
       Plotly.react(cid,
         [{{type:'heatmap',z,text,hoverinfo:'text',x:COLS,y:ROWS_PLOTLY,colorscale:'Viridis',
            zmin:cRange[0],zmax:cRange[1],xgap:4,ygap:4,
@@ -2473,21 +2488,11 @@ function renderCounts(plateName) {{
                   showgrid:!filtered,gridcolor,zeroline:false,fixedrange:true,automargin:false}},
           yaxis:{{title:'Row',tickfont:{{size:10}},showgrid:!filtered,gridcolor,zeroline:false,fixedrange:true,automargin:false}},
           hoverlabel:{{bgcolor:'#141c34',bordercolor:'#304080',font:{{size:12,color:'#d0e0ff',family:'monospace'}}}},
-          shapes,
         }},{{responsive:false,displayModeBar:false}});
     }}
 
     drawCellsHeatmap();
 
-    // Conectar el slider — solo cuando la Card ya existe en el DOM
-    const slider = document.getElementById('cells-threshold-slider');
-    const valLbl = document.getElementById('cells-threshold-val');
-    if (slider) {{
-      slider.oninput = () => {{
-        valLbl.textContent = slider.value;
-        drawCellsHeatmap();
-      }};
-    }}
   }})();
  
   // Card 2: Cells/Nuclei ratio with custom colour scale (1=green, 0.99-095=yellow, <0.95=red)
@@ -2679,10 +2684,133 @@ Plotly.react(cidHist,
       {{ responsive: true, displayModeBar: false }}
     );
   }}
+
+  function addRadiusHistCard(cidHist, values, title, color, xLabel) {{
+    const card = document.createElement('div');
+    card.className = 'count-hist-card';
+    histRow2.appendChild(card);
+    if (!values.length) return;
+    const sorted = [...values].sort((a, b) => a - b);
+    const mid    = Math.floor(sorted.length / 2);
+    const median = sorted.length % 2 ? sorted[mid] : (sorted[mid-1] + sorted[mid]) / 2;
+    const medLabel = median.toFixed(2);
+    card.innerHTML = `
+      <div class="count-hist-header">
+        <span class="count-hist-title">${{title}}</span>
+        <span class="count-hist-stat">
+          <span class="count-hist-line" style="border-top:2px dashed #ff4444;height:0;"></span>
+          <span style="color:#ff4444;">Median: ${{medLabel}}</span>
+        </span>
+      </div>
+      <div id="${{cidHist}}"></div>`;
+    Plotly.react(cidHist,
+      [
+        {{type:'histogram', x:values, nbinsx:30,
+          marker:{{color:color, opacity:0.85, line:{{color:'rgba(0,0,0,0.3)', width:0.5}}}},
+          hovertemplate:`${{xLabel}}: %{{x}}<br>Wells: %{{y}}<extra></extra>`,
+        }},
+        {{type:'scatter', mode:'lines',
+          x:[median, median], y:[0, values.length],
+          line:{{color:'#ff4444', width:2, dash:'dash'}},
+          hoverinfo:'skip', showlegend:false,
+        }}
+      ],
+      {{paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'#0a0c18',
+        font:{{color:'#c8d8f0', size:11}},
+        margin:{{t:10, b:50, l:50, r:20}},
+        height:280, showlegend:false,
+        xaxis:{{title:xLabel, tickfont:{{size:10}}, zeroline:false, gridcolor:'rgba(80,90,120,0.4)'}},
+        yaxis:{{title:'Wells', tickfont:{{size:10}}, zeroline:false, gridcolor:'rgba(80,90,120,0.4)', rangemode:'nonnegative'}},
+        bargap:0.05,
+        hoverlabel:{{bgcolor:'#141c34', bordercolor:'#304080', font:{{size:12, color:'#d0e0ff', family:'monospace'}}}},
+      }},
+      {{responsive:true, displayModeBar:false}}
+    );
+  }}
+
   const cellThreshold = parseInt(document.getElementById('cells-threshold-slider')?.value || 700);
   addHistCard('hist-cells',     allCells,     'Cells — distribution',        '#4b8fd7', 'Count_Cells',   cellThreshold);
   addHistCard('hist-ratio',     allRatios,    'Cells/Nuclei — distribution', '#4bd760', 'Ratio',         0.95);
   addHistCard('hist-artifacts', allArtifacts, 'Artifacts — distribution',    '#ff6666', 'Count_Artifacts', null);
+
+  // ── Median Radius section ─────────────────────────────────────────────────
+  const radiusGrid    = document.getElementById('radius-grid');
+  const radiusHistRow = document.getElementById('radius-hist-row');
+  const histRow2 = radiusHistRow;
+  radiusGrid.innerHTML = '';
+  radiusHistRow.innerHTML = '';
+
+  const radiusData = RADIUS_DATA[plateName] || {{}};
+
+  // Cohort-wide range para colorscale compartida
+  const allRadiusVals = Object.values(RADIUS_DATA)
+    .flatMap(p => ['Cells','Nuclei'].flatMap(src =>
+      Object.values(p[src] || {{}})
+    ));
+  const rSorted  = [...allRadiusVals].filter(v => v != null).sort((a,b) => a-b);
+  const rMin = rSorted.length ? rSorted[Math.floor(rSorted.length * 0.02)] : 0;
+  const rMax = rSorted.length ? rSorted[Math.floor(rSorted.length * 0.98)] : 1;
+
+  ['Cells', 'Nuclei'].forEach((src, si) => {{
+    const srcData = radiusData[src] || {{}};
+    const cid     = `radius-${{src.toLowerCase()}}`;
+    const color   = src === 'Cells' ? '#FFB43C' : '#64A0FF';
+
+    // ── Platemap ──────────────────────────────────────────────────────────
+    const card = document.createElement('div');
+    card.className = 'count-card';
+    card.innerHTML = `<div id="${{cid}}"></div>`;
+    radiusGrid.appendChild(card);
+
+    const z    = ROWS_PLOTLY.map(r => COLS.map(c => {{
+      const w = r + c;
+      if (!pd.wells[w] || !compoundVisible(pd.wells[w].compound || '')) return null;
+      return srcData[w] ?? null;
+    }}));
+    const text = ROWS_PLOTLY.map(r => COLS.map(c => {{
+      const w   = r + c;
+      const v   = srcData[w];
+      const cmp = pd.wells[w]?.compound || '';
+      return `<b>${{w}}</b><br>${{cmp}}<br>Median Radius (${{src}}): ${{v != null ? v.toFixed(2) : 'N/A'}}`;
+    }}));
+
+    const filtered3  = isFiltered();
+    const gridcolor3 = filtered3 ? 'rgba(0,0,0,0)' : 'rgba(80,90,120,0.4)';
+    Plotly.react(cid,
+      [{{type:'heatmap', z, text, hoverinfo:'text', x:COLS, y:ROWS_PLOTLY,
+         colorscale:'Viridis', zmin:rMin, zmax:rMax, xgap:4, ygap:4,
+         colorbar:{{thickness:14, len:0.85, tickfont:{{size:10}}}}}}],
+      {{paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'#0a0c18',
+        font:{{color:'#c8d8f0', size:11}},
+        margin:{{t:40, b:50, l:50, r:70}},
+        height:340, autosize:true,
+        title:{{text:`Median Radius — ${{src}}`, font:{{size:13, color:'#a8c8ff'}}, x:0.5}},
+        xaxis:{{title:'Column', tickfont:{{size:10}}, tickvals:COLS,
+                ticktext:COLS.map(c => parseInt(c)), showgrid:!filtered3,
+                gridcolor:gridcolor3, zeroline:false, type:'category'}},
+        yaxis:{{title:'Row', tickfont:{{size:10}}, showgrid:!filtered3,
+                gridcolor:gridcolor3, zeroline:false, type:'category'}},
+        hoverlabel:{{bgcolor:'#141c34', bordercolor:'#304080',
+                     font:{{size:12, color:'#d0e0ff', family:'monospace'}}}},
+      }},
+      {{responsive:true, displayModeBar:false}}
+    );
+
+    // ── Histograma ────────────────────────────────────────────────────────
+    const histVals = Object.entries(srcData)
+      .filter(([w]) => pd.wells[w] && compoundVisible(pd.wells[w].compound || ''))
+      .map(([, v]) => v)
+      .filter(v => v != null);
+
+    addRadiusHistCard(`rhist-${{src.toLowerCase()}}`, histVals,
+                      `Median Radius — ${{src}} distribution`, color, 'Median Radius (px)');
+  }});
+
+  // Placeholder vacío para mantener el grid de 3 columnas balanceado
+  const emptyCard = document.createElement('div');
+  radiusGrid.appendChild(emptyCard);
+  const emptyHist = document.createElement('div');
+  radiusHistRow.appendChild(emptyHist);
 }}
  
 // ── 5. MFI section ────────────────────────────────────────────────────────────
@@ -3061,6 +3189,7 @@ class Collage:
 
         # Auto-detect Cells.txt / Nuclei.txt for MFI
         _md = self.input_dir / "Measurements"
+        self._measurements_dir = _md
         self._source_dfs, self._channel_map = load_mfi_data(
             cells_path  = _md / "Cells.txt"  if (_md / "Cells.txt").exists()  else None,
             nuclei_path = _md / "Nuclei.txt" if (_md / "Nuclei.txt").exists() else None,
@@ -3263,6 +3392,11 @@ class Collage:
             "engine_adaptive": self.engine._adaptive,
             "mfi_data":      _aggregate_mfi_per_well(self._source_dfs, self._channel_map, plate_name) if self._channel_map else {},
             "mfi_img":  self._mfi_img,
+            "radius_data":   load_radius_data(
+                                 cells_path  = self._measurements_dir / "Cells.txt"  if (self._measurements_dir / "Cells.txt").exists()  else None,
+                                 nuclei_path = self._measurements_dir / "Nuclei.txt" if (self._measurements_dir / "Nuclei.txt").exists() else None,
+                                 plate_name  = plate_name,
+                             ),
             "pass_rate":     100 * n_pass / n_wells if n_wells else 0,
             "n_wells":       n_wells,
             "n_pass":        n_pass,
