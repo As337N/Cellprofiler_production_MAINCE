@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>__COHORT__ — Cell Painting QC Report</title>
+<script>__PLOTLY__</script>
+<style>__CSS__</style>
+</head>
+<body>
+<h1>__COHORT__ — Cell Painting QC Report</h1>
+<p class="subtitle">Generated __GENERATED__</p>
+<div class="container">
+ 
+<!-- 1. COHORT SUMMARY -->
+<div class="section">
+  <h2>Cohort Summary</h2>
+  <table class="summary-table">
+    <thead>
+      <tr><th>Plate</th><th>Wells</th>
+          <th>PowerLogLogSlope</th><th>Percent Max</th><th>Percent Min</th><th>Median Intensity</th><th>Signal / Noise (SNR in MFI)</th><th>Positional Effects (ANOVA in MFI)</th>
+    </thead>
+    <tbody id="summary-tbody"></tbody>
+  </table>
+</div>
+ 
+<!-- 2. PLATE BROWSER -->
+<div class="section">
+  <h2>Plate Browser</h2>
+  <div class="browser-controls">
+    <label>Plate</label>
+    <input type="range" id="plate-slider" min="0" step="1" value="0">
+    <span class="plate-name-display" id="plate-name-display"></span>
+    <select id="plate-select"></select>
+  </div>
+ 
+  <!-- Well detail row: info panel (left) + montage (right) -->
+  <div class="browser-body">
+    <div class="well-info-panel" id="well-info">
+      <p class="no-well">Click a well in the overview below to inspect it.</p>
+    </div>
+    <div class="well-montage" id="well-montage">
+      <span class="no-img">Select a well to see its site montage.</span>
+    </div>
+  </div>
+ 
+  <!-- Overview: microscopy thumbnails, clickable via SVG overlay -->
+  <div class="overview-wrap" id="overview-wrap">
+    <img id="overview-img" src="" alt="Plate overview">
+    <svg id="overview-svg" viewBox="0 0 1 1" preserveAspectRatio="none"></svg>
+  </div>
+</div>
+ 
+<!-- 3. QC METRICS -->
+<div class="section">
+  <h2>QC Metrics</h2>
+  <div class="feature-audit">
+    <div class="audit-row">
+      <span class="audit-label">Source</span>
+      All metrics from <span class="thresh">ImageQuality_*</span>
+      <span class="audit-source">← Image.txt</span>
+      &nbsp;— one row per site per well, aggregated to plate level.
+    </div>
+    <hr class="audit-sep">
+    <div class="audit-row">
+      <b style="color:#a8c8f0;">PowerLogLogSlope</b>: log-log slope of the pixel intensity
+      power spectrum. A value near <b>−2</b> indicates a well-focused, artifact-free image
+      consistent with natural scene statistics.
+      <span style="color:#4bd760;">■ green</span> [−2.5, −1.5] &nbsp;·&nbsp;
+      <span style="color:#ffbe00;">■ yellow</span> [−2.7, −2.5] or [−1.5, −1.3] &nbsp;·&nbsp;
+      <span style="color:#ff4444;">■ red</span> outside [−2.7, −1.3].<br>
+      <span style="color:var(--muted);font-size:0.78rem;">
+        Reference: Field, D. J. (1987). Relations between the statistics of natural images and the response properties of cortical cells. <i>Journal of the Optical Society of America A</i>, 4(12), 2379.
+      </span>
+    </div>
+    <hr class="audit-sep">
+    <div class="audit-row">
+      <b style="color:#a8c8f0;">PercentMaximal</b>: fraction of pixels at maximum intensity
+      (saturated). High values indicate overexposure.
+      <span style="color:#4bd760;">■ green</span> &lt; 0.1% &nbsp;·&nbsp;
+      <span style="color:#ffbe00;">■ yellow</span> 0.1–1% &nbsp;·&nbsp;
+      <span style="color:#ff4444;">■ red</span> &gt; 1%.
+    </div>
+    <div class="audit-row" style="margin-top:4px;">
+      <b style="color:#a8c8f0;">PercentMinimal</b>: fraction of pixels at zero intensity
+      (underexposed or clipped). High values indicate insufficient signal.
+      <span style="color:#4bd760;">■ green</span> &lt; 1% &nbsp;·&nbsp;
+      <span style="color:#ffbe00;">■ yellow</span> 1–5% &nbsp;·&nbsp;
+      <span style="color:#ff4444;">■ red</span> &gt; 5%.
+    </div>
+    <hr class="audit-sep">
+    <div class="audit-row">
+        <b style="color:#a8c8f0;">MedianIntensity</b>: median pixel intensity across the image.
+        Used to detect global brightness differences across wells or plates.
+        Colorscale is cohort-normalized (low = red, high = green) — compare within cohort.<br>
+        <span style="font-size:0.8rem;margin-top:4px;display:inline-block;">
+            <b style="color:#c8d8f0;">MAD-score</b> shown in tooltip: deviation from plate/cohort median,
+            expressed in units of MAD (Median Absolute Deviation).
+            &nbsp;·&nbsp;
+            <b style="color:#c8d8f0;">Plate MAD-score</b>: (well − plate_median) / plate_MAD
+            &nbsp;·&nbsp;
+            <b style="color:#c8d8f0;">Cohort MAD-score</b>: (well − cohort_median) / cohort_MAD.<br>
+            <span style="color:#4bd760;">■</span> |score| ≤ 1× typical &nbsp;·&nbsp;
+            <span style="color:#ffbe00;">■</span> 1–3× moderate deviation &nbsp;·&nbsp;
+            <span style="color:#ff4444;">■</span> &gt; 3× strong outlier.
+            &nbsp;·&nbsp;
+            <span style="color:var(--muted);">
+        </span>
+    </div>
+    <hr class="audit-sep">
+    <div class="audit-row" style="color:var(--muted);font-size:0.78rem;">
+      Note: <b style="color:#c8d8f0;">Brightfield</b> channel uses transmitted light and has
+      different intensity characteristics than fluorescence channels — thresholds and colorscales
+      may not apply directly. Use as qualitative reference only.
+    </div>
+    <hr class="audit-sep">
+    <div class="audit-row">
+      <span class="audit-label">Thresholds</span>
+      PowerLogLogSlope <span class="thresh-val">[−2.7, −1.3]</span>
+      &nbsp;·&nbsp; PctMax <span class="thresh-val">&lt; 1%</span>
+      &nbsp;·&nbsp; PctMin <span class="thresh-val">&lt; 5%</span>
+      &nbsp;·&nbsp; Adaptive: median ± 3σ MAD per plate
+    </div>
+  </div>
+  <div class="compound-toolbar" id="compound-toolbar" style="margin-bottom:10px;">
+      <label>Filter by compound:</label>
+      <button class="cmpd-btn ctrl" id="btn-show-all">All</button>
+      <button class="cmpd-btn ctrl" id="btn-hide-all">None</button>
+    </div>
+    <div class="tabs" id="metrics-tabs"></div>
+    <div id="metrics-contents"></div>
+  </div>
+</div>
+ 
+<!-- 4. CELL COUNTS -->
+<div class="section">
+  <h2>Cell Counts</h2>
+<div class="feature-audit">
+    <div class="audit-row" style="margin-bottom:6px;">
+      Cell counts are aggregated per well from <span class="thresh">Image.txt</span> (one row per imaging site).
+      Low cell counts may indicate cytotoxicity, poor seeding, or segmentation failure.
+      The <b style="color:#a8c8f0;">Cells / Nuclei ratio</b> detects segmentation errors:
+      a ratio below 1 means some nuclei were not matched to a cell body, often due to
+      over-confluency, clumping, or incorrect segmentation parameters.
+      <b style="color:#a8c8f0;">Illumination artifacts</b> are objects detected by CellProfiler
+      that do not correspond to real cells — high counts suggest dust, debris, or optical issues.
+    </div>
+    <hr class="audit-sep">
+    <div class="audit-row">
+      <span class="audit-label">Cells</span>
+      <span class="thresh">Count_Cells</span>
+      <span class="audit-source">← Image.txt</span>
+      &nbsp;— use the slider below to flag wells below a minimum count threshold.
+    </div>
+    <div class="audit-row">
+      <span class="audit-label">Ratio</span>
+      <span class="thresh">Count_Cells / Count_Nuclei</span>
+      &nbsp;
+      <span style="color:#4bd760;font-size:0.78rem;">■ 1.00</span>
+      <span style="color:#ffbe00;font-size:0.78rem;">■ 0.99–0.95</span>
+      <span style="color:#ff4444;font-size:0.78rem;">■ &lt;0.95</span>
+    </div>
+    <div class="audit-row">
+      <span class="audit-label">Illum. Artifacts</span>
+      <span class="thresh">Count_Illum_artifacts_filtered</span>
+      <span class="audit-source">← Image.txt</span>
+      &nbsp;—
+      <span style="color:#ffffff;font-size:0.78rem;">■ 0</span>
+      <span style="color:#cc1111;font-size:0.78rem;">■ ≥100</span>
+    </div>
+  </div>
+  <div class="counts-grid" id="counts-grid"></div>
+  <div class="counts-hist-row" id="counts-hist-row"></div>
+  <h3 style="color:#a8c8ff;margin:28px 0 8px 0;font-size:1rem;">Median Radius</h3>
+  <div class="counts-grid" id="radius-grid"></div>
+  <div class="counts-hist-row" id="radius-hist-row"></div>
+</div>
+ 
+<!-- 5. MFI (Median Fluorescence Intensity) -->
+<div class="section">
+  <h2>Median Fluorescence Intensity (MFI)</h2>
+  <div class="feature-audit">
+    <div class="audit-row">
+      <span class="audit-label">Hoechst</span>
+      <span class="thresh">Intensity_MedianIntensity_Hoechst</span>
+      <span class="audit-source">← Nuclei.txt</span>
+    </div>
+    <div class="audit-row">
+      <span class="audit-label">Syto / ER / Golgi / Mito</span>
+      <span class="thresh">Intensity_MedianIntensity_*</span>
+      <span class="audit-source">← Cells.txt</span>
+    </div>
+    <hr class="audit-sep">
+    <div class="audit-row">
+        Per-image median of all objects → one value per site per well &nbsp;·&nbsp;
+        Boxplots show the distribution of those per-site values across rows and columns.
+        </div>
+        <div class="audit-row" style="margin-top:4px;">
+        <b style="color:#a8c8f0;">Δ = MFI<sub>obj</sub> − MFI<sub>img</sub></b>:
+        difference between the median MFI of segmented objects and the whole-image median
+        (ImageQuality_MedianIntensity, Image.txt).
+        </div>
+        <div class="audit-row" style="margin-top:4px;">
+        <b style="color:#a8c8f0;">SNR proxy = Δ / MFI<sub>img</sub></b>:
+        Signal to Noise Ration (SNR), it is the fold-change of object intensity over background — how much brighter the segmented
+        objects are relative to the image background.
+        <span style="color:#4bd760;">■ ≥ 0.5×</span> acceptable &nbsp;·&nbsp;
+        <span style="color:#ffbe00;">■ 0.2–0.5×</span> weak signal, check segmentation &nbsp;·&nbsp;
+        <span style="color:#ff4444;">■ &lt; 0.2×</span> signal indistinguishable from background.
+        Note: thresholds are empirical — compare against DMSO controls within the same experiment
+        for a more robust interpretation.
+    </div>
+    <hr class="audit-sep">
+    <div class="audit-row" style="margin-top:4px;">
+      <b style="color:#a8c8f0;">η² (eta-squared)</b> — one-way ANOVA measuring what fraction
+      of total MFI variance is explained by plate position (row or column).
+      A high η² indicates a <b style="display:inline;">positional effect</b>: the location 
+      of a well on the plate predicts its fluorescence intensity,
+      which should not happen in a well-controlled experiment.
+    </div>
+    <div class="audit-row" style="margin-top:4px;">
+        <b style="color:#c8d8f0;">Hoechst</b> is used as the <b>technical baseline</b>:
+        its η² reflects unavoidable instrumental noise (pipetting, incubator gradients, illumination).
+        All other channels are evaluated <i>relative</i> to this baseline
+        (ratio &lt; 2× = green · 2–4× = yellow · ≥ 4× = red).
+        An additional <b>absolute ceiling of η² ≥ 0.20</b> applies regardless of baseline.
+    </div>
+    <div class="audit-row" style="margin-top:4px;">
+        For Hoechst itself, absolute thresholds from <b style="color:#a8c8f0;">Cohen (1988)</b>
+        are applied (η² &lt; 0.01 negligible · 0.01–0.06 small · 0.06–0.14 medium · ≥ 0.14 large).
+        <span style="color:var(--muted);font-size:0.78rem;">
+            Reference: Cohen, J. (1988). <i>Statistical Power Analysis for the Behavioral Sciences</i>
+            (2nd ed., Ch. 8). Lawrence Erlbaum Associates.
+        </span>
+    </div>
+    <hr class="audit-sep">
+    <div class="audit-row" style="color:var(--muted);font-size:0.78rem;">
+      <span style="color:#4bd760;">■</span> green: no positional effect detected &nbsp;·&nbsp;
+      <span style="color:#ffbe00;">■</span> yellow: mild effect, monitor across plates &nbsp;·&nbsp;
+      <span style="color:#ff4444;">■</span> red: significant positional effect — review pipetting order,
+      incubator gradients, or illumination uniformity
+    </div>
+  </div>
+  <div id="mfi-content"></div>
+  <div id="mfi-tooltip"></div>
+</div>
+ 
+</div><!-- /container -->
+<script>
+__PAYLOAD__
+__JS__
+</script>
+</body>
+</html>
