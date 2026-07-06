@@ -40,6 +40,13 @@ import tifffile as tiff
 from PIL import Image, ImageDraw, ImageFont
 from scipy.stats import median_abs_deviation
 
+# NOTE: `render_report` is imported lazily inside the method that uses it (see
+# the call site below), NOT here at module level. qc.report imports helpers and
+# constants from THIS module at its own module level, so a top-level import here
+# creates a circular import: when you run this script, execution reaches this
+# line, jumps into qc.report, which tries to read names from this module that
+# aren't defined yet (they're further down). The deferred import runs only when
+# the report is actually generated, by which point this module is fully loaded.
 
 # ── Fonts ──────────────────────────────────────────────────────────────────────
 
@@ -1579,9 +1586,14 @@ class Collage:
             montages = self._build_montages_parallel(wells)
             self._render_plate(plate_name, montages)
 
-        # Generate HTML after all plates are processed
+        # Generate HTML after all plates are processed.
+        # Deferred import (breaks the qc.report <-> III_QC_collage circular import):
+        # by now this module is fully initialized, so qc.report can safely pull
+        # its helpers/constants from it.
+        from qc.report import render_report
+
         html_name = f"{self.cohort_name}_QC_report.html"
-        generate_html(
+        render_report(
             cohort_name  = self.cohort_name,
             plates_data  = self._html_plates,
             output_path  = self.output_path / html_name,

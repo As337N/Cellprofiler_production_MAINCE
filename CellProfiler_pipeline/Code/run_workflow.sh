@@ -7,16 +7,15 @@ source /config/variables.env
 set +a
 source /workspace/Code/bash_functions.sh
 
-SECTIONS=(4 5 6 7 8 9) #3-9
+SECTIONS=(3) #2-9
 run_section() { [[ " ${SECTIONS[*]} " == *" $1 "* ]]; }
 
 # ============================================================
 create_output_dirs $OUTPUT $IMAGES_WORKSPACE
 BATCH_SIZE=10000
 
-#### --- 3) Obtain plate collage for quality control --- ####
-if run_section 3; then
-  echo "===***=== [3] QC outlines generation ===***==="
+if run_section 2; then
+  echo "===***=== [3] Prepare QC ===***==="
   NAME_QC="III_QC"
   python $SCRIPT_PY_CELLPROFILER -i $IMAGES_WORKSPACE -o $PATH_CSV --name_csv $NAME_QC --illum --masks
 
@@ -29,6 +28,11 @@ if run_section 3; then
   echo "[INFO] Batchfiles generated for QC"
 
   ejecutar_pipeline "$PATH_BATCH_PIPELINES/Batch_data_QC.h5" 0 "$PATH_QC_IMAGES" "$PATH_CSV/$NAME_QC.csv" $BATCH_SIZE
+fi
+
+#### --- 3) Obtain plate collage for quality control --- ####
+if run_section 3; then
+  echo "===***=== [3] Generate QC report ===***==="
   python $SCRIPT_PY_COLLAGE -i $PATH_QC_IMAGES -o $PATH_QC_COLLAGES --platemap /workspace_images/platemap_${COHORT}.csv --cohort $COHORT 
 fi
 
