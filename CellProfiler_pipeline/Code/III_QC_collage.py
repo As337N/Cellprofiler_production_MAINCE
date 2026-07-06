@@ -92,7 +92,6 @@ def _text_h(draw, text: str, font) -> int:
 THRESHOLDS: dict[str, tuple] = {
     "PowerLogLogSlope": (-2.5, -1.0),
     "MedianIntensity":     (None,  0.95),
-    "FocusScore":       (0.005, None),
 }
 THRESHOLDS_LOCAL_FOCUS: dict[str, tuple] = {
     "Hoechst":           (0.80,  None),
@@ -116,7 +115,6 @@ CHANNEL_COLORS = {
 }
 
 ILLUM_METRICS  = ["PowerLogLogSlope", "MedianIntensity"]
-FOCUS_METRICS  = ["FocusScore", "FocusScore"]
 BORDER_METRIC  = "PowerLogLogSlope"
 METRIC_LABELS  = {
     "PowerLogLogSlope": "Focus", "MedianIntensity": "MaxInt",
@@ -128,7 +126,7 @@ COL_NODATA  = (110, 110, 120)
 
 COUNT_COLS = {
     "Raw": "Count_Raw_nuclei", "Filtered": "Count_Nuclei",
-    "Cells": "Count_Cells",    "Artifacts": "Count_Illum_artifacts",
+    "Cells": "Count_Cells",    "Artifacts": "Count_Illum_artifacts_filtered",
 }
 AREA_COL           = "ImageQuality_TotalArea_Brightfield"
 DEFAULT_IMAGE_AREA = 1_166_400   # 1080×1080 px fallback
@@ -504,8 +502,7 @@ def load_radius_data(cells_path: "Path | None",
     for label, path in [("Cells", cells_path), ("Nuclei", nuclei_path)]:
         if path is None or not path.exists():
             continue
-        skip = _detect_skip_rows(path)
-        df = pd.read_csv(path, sep="\t", low_memory=False, skiprows=skip)
+        df = pd.read_csv(path, sep="\t", low_memory=False)
         if "Metadata_Well" not in df.columns or col not in df.columns:
             print(f"[radius] {col} not found in {path.name} — skipping.")
             continue
@@ -633,7 +630,7 @@ def _make_band(width: int, well_labels_in_row: list, plate_qc: dict,
     QC band below each plate row. Two-pass: first measures needed height,
     then draws. Absorbs the old _measure_band_height function.
     """
-    ALL_METRICS = ILLUM_METRICS + FOCUS_METRICS
+    ALL_METRICS = ILLUM_METRICS
     fw = _font(font_size + 2, bold=True)
     fl = _font(font_size - 1, bold=True)
     fv = _font(font_size - 1, bold=False)
@@ -649,16 +646,15 @@ def _make_band(width: int, well_labels_in_row: list, plate_qc: dict,
         if compound:
             y += _text_h(dd, compound, fv) + 4
         if metrics:
-            for group in (ILLUM_METRICS, FOCUS_METRICS):
-                yc = y
-                for mk in group:
-                    yc += _text_h(dd, f"{METRIC_LABELS[mk]}:", fl) + 1
-                    for col in METRIC_COLS[mk]:
-                        v = metrics.get(col)
-                        if v is not None and not (isinstance(v, float) and np.isnan(v)):
-                            yc += _text_h(dd, " xx: 0.000", fv) + 1
-                    yc += 3
-                max_y = max(max_y, yc)
+            yc = y
+            for mk in ILLUM_METRICS:
+              yc += _text_h(dd, f"{METRIC_LABELS[mk]}:", fl) + 1
+              for col in METRIC_COLS[mk]:
+                  v = metrics.get(col)
+                  if v is not None and not (isinstance(v, float) and np.isnan(v)):
+                      yc += _text_h(dd, " xx: 0.000", fv) + 1
+              yc += 3
+            max_y = max(max_y, yc)
             yc = y + _text_h(dd, "Objects:", fl) + 2
             yc += len(_count_summary(metrics)) * (_text_h(dd, " xx: 000", fv) + 1)
             max_y = max(max_y, yc)
@@ -709,27 +705,25 @@ def _make_band(width: int, well_labels_in_row: list, plate_qc: dict,
 
         col_w   = (tile_width - 10) // 3
         x_left  = x0 + 4
-        x_right = x0 + 4 + col_w
         x_count = x0 + 4 + col_w * 2
 
-        for col_x, group in ((x_left, ILLUM_METRICS), (x_right, FOCUS_METRICS)):
-            y = y_start
-            for mk in group:
-                lbl = METRIC_LABELS[mk]
-                draw.text((col_x, y), f"{lbl}:", fill=(170, 195, 225), font=fl)
-                y += _text_h(draw, f"{lbl}:", fl) + 1
-                for col in METRIC_COLS[mk]:
-                    v = metrics.get(col)
-                    if v is None or (isinstance(v, float) and np.isnan(v)):
-                        continue
-                    ch    = COL_TO_CHANNEL.get(col, col)
-                    short = ch
-                    vc    = engine.val_color(v, mk, ch)
-                    txt   = f" {short}: {v:.3f}"
-                    draw.text((col_x, y + 1), txt, fill=(0, 0, 0), font=fv)
-                    draw.text((col_x, y),     txt, fill=vc,         font=fv)
-                    y += _text_h(draw, txt, fv) + 1
-                y += 3
+        y = y_start
+        for mk in ILLUM_METRICS:
+            lbl = METRIC_LABELS[mk]
+            draw.text((x_left, y), f"{lbl}:", fill=(170, 195, 225), font=fl)
+            y += _text_h(draw, f"{lbl}:", fl) + 1
+            for col in METRIC_COLS[mk]:
+                v = metrics.get(col)
+                if v is None or (isinstance(v, float) and np.isnan(v)):
+                    continue
+                ch    = COL_TO_CHANNEL.get(col, col)
+                short = ch
+                vc    = engine.val_color(v, mk, ch)
+                txt   = f" {short}: {v:.3f}"
+                draw.text((x_left, y + 1), txt, fill=(0, 0, 0), font=fv)
+                draw.text((x_left, y),     txt, fill=vc,         font=fv)
+                y += _text_h(draw, txt, fv) + 1
+            y += 3
 
         y = y_start
         draw.text((x_count, y), "Objects:", fill=(170, 195, 225), font=fl)
@@ -783,7 +777,6 @@ def make_report_footer(width: int, plate_name: str, plate_qc: dict,
     n_wells   = len(plate_qc)
     n_pass    = sum(1 for m in plate_qc.values() if _well_passes_all(m, engine))
     n_illum_p = sum(1 for m in plate_qc.values() if _well_passes_group(m, ILLUM_METRICS, engine))
-    n_focus_p = sum(1 for m in plate_qc.values() if _well_passes_group(m, FOCUS_METRICS, engine))
     pct       = lambda n: f"{100 * n / n_wells:.1f}%" if n_wells else "—"
 
     stats = {mk: {ch: [] for ch in CHANNELS + CHANNELS_EXTRA} for mk in METRIC_COLS}
@@ -837,15 +830,11 @@ def make_report_footer(width: int, plate_name: str, plate_qc: dict,
 
         ic = COL_PASS if n_illum_p / max(n_wells, 1) >= 0.8 else \
              (COL_FAIL if n_illum_p / max(n_wells, 1) < 0.5 else (255, 190, 0))
-        fc_ = COL_PASS if n_focus_p / max(n_wells, 1) >= 0.8 else \
-              (COL_FAIL if n_focus_p / max(n_wells, 1) < 0.5 else (255, 190, 0))
         line(f"  Illumination:  {n_illum_p}/{n_wells} pass ({pct(n_illum_p)})  [Slope + MaxInt]", ic, fb)
-        line(f"  Focus:         {n_focus_p}/{n_wells} pass ({pct(n_focus_p)})  [FocusScore + FocusScore]", fc_, fb)
         rule(); y += 4
 
         for grp_lbl, grp_col, grp_metrics in (
             ("ILLUMINATION METRICS", (255, 200, 80), ILLUM_METRICS),
-            ("FOCUS METRICS",        (100, 180, 255), FOCUS_METRICS),
         ):
             line(f"  {grp_lbl}", grp_col, fs)
             line(f"    {'Metric':<22}  {'Channel':<8}  {'Threshold':<14}  {'Pass':>12}  {'mean ± SD':<22}",
@@ -1250,7 +1239,7 @@ def generate_html(cohort_name: str, plates_data: list[dict],
 
     plates_data: list of dicts, one per plate:
         {name, collage_arr, plate_qc, plate_map, pass_rate,
-         n_wells, n_pass, n_illum_pass, n_focus_pass, mfi_data}
+         n_wells, n_pass, n_illum_pass, mfi_data}
     """
     plotly_js = _fetch_plotly_js()
 
@@ -1314,7 +1303,6 @@ def generate_html(cohort_name: str, plates_data: list[dict],
             "n_wells":      pd_["n_wells"],
             "n_pass":       pd_["n_pass"],
             "n_illum":      pd_["n_illum_pass"],
-            "n_focus":      pd_["n_focus_pass"],
             "wells": _round_floats({
                 well: {
                     "compound": pmap.get(well, ""),
@@ -1490,7 +1478,7 @@ def generate_html(cohort_name: str, plates_data: list[dict],
     # Count columns: cohort-wide p2/p98 so all plates share the same colour scale
     count_ranges_json = json.dumps({
         col: list(_cohort_range(col, 0, None))
-        for col in ["Count_Cells", "Count_Nuclei", "Count_Illum_artifacts"]
+        for col in ["Count_Cells", "Count_Nuclei", "Count_Illum_artifacts_filtered"]
     })
 
     # ── MFI data: build per-plate { channel: { well: [vals] } } ─────────────────
@@ -1617,7 +1605,7 @@ def generate_html(cohort_name: str, plates_data: list[dict],
   .well-montage {{ background: var(--panel); border: 1px solid var(--border);
                    border-radius: 8px; padding: 8px; display: flex;
                    align-items: center; justify-content: center; min-height: 300px; }}
-  .well-montage img {{ max-width: 100%; max-height: 600px; border-radius: 4px; }}
+  .well-montage img {{ max-width: 100%; max-height: 1000px; border-radius: 4px; }}
   .well-montage .no-img {{ color: var(--muted); font-size: 0.82rem; text-align: center; }}
   .section-label {{ font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.07em;
                   color: #4a90d8; font-weight: 700; margin: 10px 0 4px;
@@ -1779,9 +1767,7 @@ def generate_html(cohort_name: str, plates_data: list[dict],
       <span style="color:#ffbe00;">■ yellow</span> [−2.7, −2.5] or [−1.5, −1.3] &nbsp;·&nbsp;
       <span style="color:#ff4444;">■ red</span> outside [−2.7, −1.3].<br>
       <span style="color:var(--muted);font-size:0.78rem;">
-        Reference: Bray, M.A. et al. (2016). Cell Painting, a high-content image-based assay
-        for morphological profiling using multiplexed fluorescent dyes.
-        <i>Nature Protocols</i>, 11(9), 1757–1774.
+        Reference: Field, D. J. (1987). Relations between the statistics of natural images and the response properties of cortical cells. <i>Journal of the Optical Society of America A</i>, 4(12), 2379.
       </span>
     </div>
     <hr class="audit-sep">
@@ -1815,7 +1801,7 @@ def generate_html(cohort_name: str, plates_data: list[dict],
             <span style="color:#ffbe00;">■</span> 1–3× moderate deviation &nbsp;·&nbsp;
             <span style="color:#ff4444;">■</span> &gt; 3× strong outlier.
             &nbsp;·&nbsp;
-            <span style="color:var(--muted);">Reference: Bray et al. (2016), mad-based robust scaling.</span>
+            <span style="color:var(--muted);">
         </span>
     </div>
     <hr class="audit-sep">
@@ -1827,7 +1813,7 @@ def generate_html(cohort_name: str, plates_data: list[dict],
     <hr class="audit-sep">
     <div class="audit-row">
       <span class="audit-label">Thresholds</span>
-      Slope <span class="thresh-val">[−2.7, −1.3]</span>
+      PowerLogLogSlope <span class="thresh-val">[−2.7, −1.3]</span>
       &nbsp;·&nbsp; PctMax <span class="thresh-val">&lt; 1%</span>
       &nbsp;·&nbsp; PctMin <span class="thresh-val">&lt; 5%</span>
       &nbsp;·&nbsp; Adaptive: median ± 3σ MAD per plate
@@ -1873,11 +1859,11 @@ def generate_html(cohort_name: str, plates_data: list[dict],
     </div>
     <div class="audit-row">
       <span class="audit-label">Illum. Artifacts</span>
-      <span class="thresh">Count_Illum_artifacts</span>
+      <span class="thresh">Count_Illum_artifacts_filtered</span>
       <span class="audit-source">← Image.txt</span>
       &nbsp;—
       <span style="color:#ffffff;font-size:0.78rem;">■ 0</span>
-      <span style="color:#cc1111;font-size:0.78rem;">■ ≥500</span>
+      <span style="color:#cc1111;font-size:0.78rem;">■ ≥100</span>
     </div>
   </div>
   <div class="counts-grid" id="counts-grid"></div>
@@ -1974,7 +1960,7 @@ const MEDIANINT_SPECS = {mEDIANint_specs};
 const MAD_SCORES = {mad_scores_json};
 const RED_COUNTS = {red_counts_json};
 const METRIC_GROUPS = [
-  {{ label: 'Slope',        specs: SLOPE_SPECS  }},
+  {{ label: 'PowerLogLogSlope',        specs: SLOPE_SPECS  }},
   {{ label: 'PercentMaximal',   specs: PCT_MAX_SPECS  }},
   {{ label: 'PercentMinimal',   specs: PCT_MIN_SPECS  }},
   {{ label: 'MedianIntensity', specs: MEDIANINT_SPECS }},
@@ -2093,8 +2079,9 @@ function arrMedian(arr) {{
             level = 'bad';
           }} else if (baseRow != null) {{
             const ratio = worst / Math.max(baseRow, baseCol, 0.001);
-            if      (worst >= 0.14 || ratio >= 4) level = 'bad';
-            else if (worst >= 0.06 && ratio >= 2) level = 'warn';
+            if      (worst >= 0.2)                                  level = 'bad';
+            else if (worst >= 0.14 && ratio >= 4)                   level = 'bad';
+            else if (worst >= 0.06 && ratio >= 2 || worst >= 0.14)  level = 'warn';
           }} else {{
             if      (worst >= 0.14) level = 'bad';
             else if (worst >= 0.06) level = 'warn';
@@ -2292,7 +2279,7 @@ function renderWellInfo(plateName, well) {{
 
   html += `<div class="section-label">Cell counts</div>`;
   [['Cells','Count_Cells'],['Nuclei','Count_Nuclei'],
-   ['Raw nuclei','Count_Raw_nuclei'],['Artifacts','Count_Illum_artifacts']].forEach(([lbl,col]) => {{
+   ['Raw nuclei','Count_Raw_nuclei'],['Artifacts','Count_Illum_artifacts_filtered']].forEach(([lbl,col]) => {{
     const v = m[col];
     html += `<div class="metric-row">
       <span class="metric-label">${{lbl}}</span>
@@ -2482,7 +2469,7 @@ function renderCounts(plateName) {{
            colorbar:{{thickness:14,len:0.85,tickfont:{{size:10}},x:1.02,xanchor:'left'}}}}],
         {{paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#0a0c18',
           font:{{color:'#c8d8f0',size:11}},margin:{{t:40,b:50,l:50,r:70}},
-          height:340, 
+          height:340, width:520,
           title:{{text:`Cells (umbral: ${{threshold}})`,font:{{size:13,color:'#a8c8ff'}},x:0.5}},
           xaxis:{{title:'Column',tickfont:{{size:10}},tickvals:COLS,ticktext:COLS.map(c=>parseInt(c)),
                   showgrid:!filtered,gridcolor,zeroline:false,fixedrange:true,automargin:false}},
@@ -2539,7 +2526,7 @@ function renderCounts(plateName) {{
                     tickvals:[0.93, 0.95, 0.97, 1.0],
                     ticktext:['<0.95','0.95','0.97','1.00']}}}}],
        {{paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#0a0c18',
-        font:{{color:'#c8d8f0',size:11}},margin:{{t:40,b:50,l:50,r:20}},height:340,
+        font:{{color:'#c8d8f0',size:11}},margin:{{t:40,b:50,l:50,r:20}},height:340, width:520,
         title:{{text:'Cells / Nuclei ratio',font:{{size:13,color:'#a8c8ff'}},x:0.5}},
         xaxis:{{title:'Column',tickfont:{{size:10}},tickvals:COLS,ticktext:COLS.map(c=>parseInt(c)),
                 showgrid:!filtered,gridcolor,zeroline:false}},
@@ -2548,7 +2535,7 @@ function renderCounts(plateName) {{
       }},{{responsive:true,displayModeBar:false}});
   }})();
  
-  // Card 3: Illumination Artifacts count heatmap (white=0, dark red=500+)
+  // Card 3: Illumination Artifacts count heatmap (white=0, dark red=100+)
   (function() {{
     const cid  = `cnt-artifacts`;
     const card = document.createElement('div');
@@ -2556,7 +2543,7 @@ function renderCounts(plateName) {{
     card.innerHTML = `<div id="${{cid}}"></div>`;
     grid.appendChild(card);
  
-    // White (0 artifacts) -> dark red (500+ artifacts)
+    // White (0 artifacts) -> dark red (100+ artifacts)
     const artifactCS = [
       [0,   '#ffffff'],
       [0.1, '#ffcccc'],
@@ -2568,11 +2555,11 @@ function renderCounts(plateName) {{
     const z    = ROWS_PLOTLY.map(r => COLS.map(c => {{
       const w = r+c, well = pd.wells[w];
       if (!well || !compoundVisible(well.compound||'')) return null;
-      return well['Count_Illum_artifacts'] ?? null;
+      return well['Count_Illum_artifacts_filtered'] ?? null;
     }}));
     const text = ROWS_PLOTLY.map(r => COLS.map(c => {{
       const w    = r+c, well = pd.wells[w];
-      const n    = well?.['Count_Illum_artifacts'];
+      const n    = well?.['Count_Illum_artifacts_filtered'];
       const cmpd = well?.compound || '';
       return `<b>${{w}}</b><br>${{cmpd}}<br>Illum. Artifacts: ${{n!=null?Math.round(n):'N/A'}}`;
     }}));
@@ -2580,11 +2567,11 @@ function renderCounts(plateName) {{
     const gridcolor2 = filtered2 ? 'rgba(0,0,0,0)' : 'rgba(80,90,120,0.4)';
     Plotly.react(cid,
       [{{type:'heatmap',z,text,hoverinfo:'text',x:COLS,y:ROWS_PLOTLY,
-         colorscale:artifactCS, zmin:0, zmax:500, xgap:4,ygap:4,
+         colorscale:artifactCS, zmin:0, zmax:100, xgap:4,ygap:4,
          colorbar:{{thickness:14,len:0.85,tickfont:{{size:10}},
-                    tickvals:[0,100,250,500],ticktext:['0','100','250','≥500']}}}}],
+                    tickvals:[0,100,250,100],ticktext:['0','100','250','≥100']}}}}],
        {{paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#0a0c18',
-        font:{{color:'#c8d8f0',size:11}},margin:{{t:40,b:50,l:50,r:20}},height:340,
+        font:{{color:'#c8d8f0',size:11}},margin:{{t:40,b:50,l:50,r:20}},height:340, width:520,
         title:{{text:'Illum. Artifacts',font:{{size:13,color:'#a8c8ff'}},x:0.5}},
         xaxis:{{title:'Column',tickfont:{{size:10}},tickvals:COLS,ticktext:COLS.map(c=>parseInt(c)),
                 showgrid:!filtered2,gridcolor:gridcolor2,zeroline:false}},
@@ -2605,7 +2592,7 @@ function renderCounts(plateName) {{
     if (!well || !compoundVisible(well.compound || '')) return;
     const cells    = well['Count_Cells'];
     const nuclei   = well['Count_Nuclei'];
-    const arts     = well['Count_Illum_artifacts'];
+    const arts     = well['Count_Illum_artifacts_filtered'];
     if (cells    != null) allCells.push(Math.round(cells));
     if (cells != null && nuclei != null && nuclei > 0)
       allRatios.push(cells / nuclei);
@@ -2646,44 +2633,51 @@ function renderCounts(plateName) {{
       </div>
       <div id="${{cidHist}}"></div>`;
 
-Plotly.react(cidHist,
-      [
-        {{
-          type: 'histogram', x: values,
-          nbinsx: 30,
-          marker: {{ color: color, opacity: 0.85, line: {{ color: 'rgba(0,0,0,0.3)', width: 0.5 }} }},
-          name: xLabel,
-          hovertemplate: `${{xLabel}}: %{{x}}<br>Wells: %{{y}}<extra></extra>`,
-        }},
-        {{
-          type: 'scatter', mode: 'lines',
-          x: [median, median], y: [0, values.length],
-          line: {{ color: '#ff4444', width: 2, dash: 'dash' }},
-          hoverinfo: 'skip', showlegend: false,
-        }},
-        {{
-          type: 'scatter', mode: 'lines',
-          x: [threshold, threshold], y: [0, values.length],
-          line: {{ color: '#ffbe00', width: 2, dash: 'dot' }},
-          hoverinfo: 'skip', showlegend: false,
-          visible: threshold != null ? true : false,
-        }}
-      ],
-      {{
-        paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: '#0a0c18',
-        font: {{ color: '#c8d8f0', size: 11 }},
-        margin: {{ t: 40, b: 50, l: 50, r: 20 }},
-        height: 320,
-        title: {{ text: '', }},
-        xaxis: {{ title: xLabel, tickfont: {{ size: 10 }}, zeroline: false, gridcolor: 'rgba(80,90,120,0.4)' }},
-        yaxis: {{ title: 'Wells', tickfont: {{ size: 10 }}, zeroline: false, gridcolor: 'rgba(80,90,120,0.4)', rangemode: 'nonnegative' }},
-        showlegend: false,
-        bargap: 0.05,
-        hoverlabel: {{ bgcolor: '#141c34', bordercolor: '#304080', font: {{ size: 12, color: '#d0e0ff', family: 'monospace' }} }},
-      }},
-      {{ responsive: true, displayModeBar: false }}
-    );
-  }}
+    const nbins30 = 30
+    const minV30 = Math.min(...values), maxV30 = Math.max(...values);
+    const binW30 = (maxV30 - minV30) / nbins30;
+    const bins30 = new Array(nbins30).fill(0);
+    values.forEach(v => {{ const i = Math.min(Math.floor((v - minV30) / binW30), nbins30 - 1); bins30[i]++; }});
+    const ymax = Math.ceil(Math.max(...bins30) * 1.15);
+
+    Plotly.react(cidHist,
+          [
+            {{
+              type: 'histogram', x: values,
+              nbinsx: 30,
+              marker: {{ color: color, opacity: 0.85, line: {{ color: 'rgba(0,0,0,0.3)', width: 0.5 }} }},
+              name: xLabel,
+              hovertemplate: `${{xLabel}}: %{{x}}<br>Wells: %{{y}}<extra></extra>`,
+            }},
+            {{
+              type: 'scatter', mode: 'lines',
+              x: [median, median], y: [0, ymax],
+              line: {{ color: '#ff4444', width: 2, dash: 'dash' }},
+              hoverinfo: 'skip', showlegend: false,
+            }},
+            {{
+              type: 'scatter', mode: 'lines',
+              x: [threshold, threshold], y: [0, ymax],
+              line: {{ color: '#ffbe00', width: 2, dash: 'dot' }},
+              hoverinfo: 'skip', showlegend: false,
+              visible: threshold != null ? true : false,
+            }}
+          ],
+          {{
+            paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: '#0a0c18',
+            font: {{ color: '#c8d8f0', size: 11 }},
+            margin: {{ t: 40, b: 50, l: 50, r: 20 }},
+            height: 320,
+            title: {{ text: '', }},
+            xaxis: {{ title: xLabel, tickfont: {{ size: 10 }}, zeroline: false, gridcolor: 'rgba(80,90,120,0.4)' }},
+            yaxis: {{ title: 'Wells', tickfont: {{ size: 10 }}, zeroline: false, gridcolor: 'rgba(80,90,120,0.4)', range: [0, ymax] }},
+            showlegend: false,
+            bargap: 0.05,
+            hoverlabel: {{ bgcolor: '#141c34', bordercolor: '#304080', font: {{ size: 12, color: '#d0e0ff', family: 'monospace' }} }},
+          }},
+          {{ responsive: true, displayModeBar: false }}
+        );
+      }}
 
   function addRadiusHistCard(cidHist, values, title, color, xLabel) {{
     const card = document.createElement('div');
@@ -2703,6 +2697,14 @@ Plotly.react(cidHist,
         </span>
       </div>
       <div id="${{cidHist}}"></div>`;
+    
+    const nbins30=30
+    const minV30 = Math.min(...values), maxV30 = Math.max(...values);
+    const binW30 = (maxV30 - minV30) / nbins30;
+    const bins30 = new Array(nbins30).fill(0);
+    values.forEach(v => {{ const i = Math.min(Math.floor((v -minV30) / binW30), nbins30 - 1); bins30[i]++; }});
+    const ymax = Math.ceil(Math.max(...bins30) * 1.15)
+    
     Plotly.react(cidHist,
       [
         {{type:'histogram', x:values, nbinsx:30,
@@ -2710,7 +2712,7 @@ Plotly.react(cidHist,
           hovertemplate:`${{xLabel}}: %{{x}}<br>Wells: %{{y}}<extra></extra>`,
         }},
         {{type:'scatter', mode:'lines',
-          x:[median, median], y:[0, values.length],
+          x:[median, median], y:[0, ymax],
           line:{{color:'#ff4444', width:2, dash:'dash'}},
           hoverinfo:'skip', showlegend:false,
         }}
@@ -2720,7 +2722,7 @@ Plotly.react(cidHist,
         margin:{{t:10, b:50, l:50, r:20}},
         height:280, showlegend:false,
         xaxis:{{title:xLabel, tickfont:{{size:10}}, zeroline:false, gridcolor:'rgba(80,90,120,0.4)'}},
-        yaxis:{{title:'Wells', tickfont:{{size:10}}, zeroline:false, gridcolor:'rgba(80,90,120,0.4)', rangemode:'nonnegative'}},
+        yaxis:{{title:'Wells', tickfont:{{size:10}}, zeroline:false, gridcolor:'rgba(80,90,120,0.4)', range: [0, ymax] }},
         bargap:0.05,
         hoverlabel:{{bgcolor:'#141c34', bordercolor:'#304080', font:{{size:12, color:'#d0e0ff', family:'monospace'}}}},
       }},
@@ -2783,7 +2785,7 @@ Plotly.react(cidHist,
       {{paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'#0a0c18',
         font:{{color:'#c8d8f0', size:11}},
         margin:{{t:40, b:50, l:50, r:70}},
-        height:340, autosize:true,
+        height:340, width:520,
         title:{{text:`Median Radius — ${{src}}`, font:{{size:13, color:'#a8c8ff'}}, x:0.5}},
         xaxis:{{title:'Column', tickfont:{{size:10}}, tickvals:COLS,
                 ticktext:COLS.map(c => parseInt(c)), showgrid:!filtered3,
@@ -2856,8 +2858,8 @@ function mfiRenderBoxplot(divId, plateName, channel, groupBy) {{
     if (!stats) return;
     boxTraces.push({{
       type:'box', name:String(cat), x:[String(cat)],
-      lowerfence:[stats.whislo], q1:[stats.q1], median:[stats.median],
-      q3:[stats.q3], upperfence:[stats.whishi],
+      q1:[stats.q1], median:[stats.median],
+      q3:[stats.q3],
       marker:{{color,size:3,opacity:0.7}}, line:{{color,width:1.5}},
       fillcolor:mfiHexAlpha(color,0.18), showlegend:false,
     }});
@@ -3358,7 +3360,6 @@ class Collage:
         n_wells = len(plate_qc)
         n_pass  = sum(1 for m in plate_qc.values() if _well_passes_all(m, self.engine))
         n_illum = sum(1 for m in plate_qc.values() if _well_passes_group(m, ILLUM_METRICS, self.engine))
-        n_focus = sum(1 for m in plate_qc.values() if _well_passes_group(m, FOCUS_METRICS, self.engine))
 
         # Overview grid: real microscopy thumbnails for all wells
         overview_arr, ov_cw, ov_ch = _make_overview_grid(
@@ -3401,7 +3402,6 @@ class Collage:
             "n_wells":       n_wells,
             "n_pass":        n_pass,
             "n_illum_pass":  n_illum,
-            "n_focus_pass":  n_focus,
         })
 
 

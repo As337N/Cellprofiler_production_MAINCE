@@ -40,6 +40,7 @@ The "/workspace_images/" should be organized as follows:
 Cohort_A/
 ├── Plate_Pxx_/
 │   └── untreated_data/        # Folder with images (must be named exactly "untreated_data")
+|   └── Any other metadata files...
 ├── Plate_Pyy_/
 │   └── untreated_data/
 ├── Plate_Pzz_/

@@ -330,8 +330,8 @@ SaveImages:[module_num:21|svn_version:'Unknown'|variable_revision_number:16|show
     Select image name for file prefix:Syto
     Enter single file name:OrigBlue
     Number of digits:4
-    Append a suffix to the image file name?:No
-    Text to append to the image name:
+    Append a suffix to the image file name?:Yes
+    Text to append to the image name:_P\g<Plate>
     Saved file format:tiff
     Output file location:Elsewhere...|SAVING_OUTPUT_PATH/
     Image bit depth:8-bit integer

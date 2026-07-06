@@ -88,6 +88,7 @@ create_output_dirs() {
     for PLATE in "${PLATES[@]}"; do
 
         PATH_CELLPOSE_SEG="$OUTPUT/CellProfiler_files/Cellpose_seg"
+        PATH_CELLPOSE_LOCAL_MODEL="$OUTPUT/CellProfiler_files/cellpose_models_cache"
         PATH_CSV="$OUTPUT/CellProfiler_files/CSVs"
         PATH_ILLUM_FILES="$OUTPUT/CellProfiler_files/Illum_files"
         PATH_CPPIPE="$OUTPUT/CellProfiler_files/Pipelines"
@@ -112,6 +113,7 @@ create_output_dirs() {
 
         for folder in \
             "$PATH_CELLPOSE_SEG" \
+            "$PATH_CELLPOSE_LOCAL_MODEL" \
             "$PATH_CSV" \
             "$PATH_ILLUM_FILES" \
             "$PATH_CPPIPE" \

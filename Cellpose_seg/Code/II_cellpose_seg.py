@@ -97,7 +97,9 @@ def save_masks(masks, paths, output_dir, max_workers=None):
             mask.astype(np.uint16)
         )
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        ex.map(_save, masks, paths)
+        futures = [ex.submit(_save, mask, path) for mask, path in zip(masks, paths)]
+        for f in futures:
+            f.result()
 
 class CellposeRnaSeg():
     def __init__(self, input_path, output_path, rna_channel, batch_size, regex):
@@ -155,6 +157,7 @@ class CellposeRnaSeg():
         for p in self.input_path.iterdir():
             path_images = p / self.name_image_directories
             if not path_images.exists():
+                print(f"[WARN] No existe {path_images}, salto plate")
                 continue
 
             plate, path_masks = self._mk_plate_dir(path_images)
@@ -165,6 +168,9 @@ class CellposeRnaSeg():
             )
 
             if not img_paths:
+                all_files = [f.name for f in path_images.iterdir()][:5]
+                print(f"[WARN] Plate {plate}: 0 imágenes con patrón '{self.pattern_rna_images}'. "
+                    f"Ejemplos en la carpeta: {all_files}")
                 continue
 
             print(f"[INFO Cellpose segmentation] Plate {plate}: {len(img_paths)} images")
@@ -176,11 +182,8 @@ class CellposeRnaSeg():
             )
             self._process_plate(img_paths, corrected_images, path_masks)
 
-
 def main():
     args = parse_args()
-    model = models.CellposeModel(gpu=True)
-
     pipeline = CellposeRnaSeg(
         input_path=args.input_path,
         output_path=args.output_path,
