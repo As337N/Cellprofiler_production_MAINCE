@@ -27,7 +27,6 @@ import base64
 import io
 import json
 import re
-import urllib.request
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -36,17 +35,14 @@ from pathlib import Path
 import cv2
 import numpy as np
 import pandas as pd
+import polars as pl
 import tifffile as tiff
 from PIL import Image, ImageDraw, ImageFont
 from scipy.stats import median_abs_deviation
 
-# NOTE: `render_report` is imported lazily inside the method that uses it (see
-# the call site below), NOT here at module level. qc.report imports helpers and
-# constants from THIS module at its own module level, so a top-level import here
-# creates a circular import: when you run this script, execution reaches this
-# line, jumps into qc.report, which tries to read names from this module that
-# aren't defined yet (they're further down). The deferred import runs only when
-# the report is actually generated, by which point this module is fully loaded.
+import qc
+
+#TODO: Mover la sección de fuentes al config.py
 
 # ── Fonts ──────────────────────────────────────────────────────────────────────
 
@@ -92,74 +88,7 @@ def _text_h(draw, text: str, font) -> int:
         return font.size if hasattr(font, "size") else 14
 
 
-# ── QC constants ───────────────────────────────────────────────────────────────
-
-# Absolute thresholds (floor / ceiling — always enforced regardless of n_sigma).
-# See ThresholdEngine docstring for per-metric rationale.
-THRESHOLDS: dict[str, tuple] = {
-    "PowerLogLogSlope": (-2.5, -1.0),
-    "MedianIntensity":     (None,  0.95),
-}
-THRESHOLDS_LOCAL_FOCUS: dict[str, tuple] = {
-    "Hoechst":           (0.80,  None),
-    "Syto":          (0.05,  None),
-    "Golgi":       (0.03,  None),
-    "ER":          (0.08,  None),
-    "Mito":        (0.005, None),
-    "Brightfield": (0.001, None),
-}
-
-CHANNELS       = ["Hoechst", "Syto", "Golgi", "ER", "Mito", "Brightfield"]
-CHANNELS_EXTRA = []   # channels with focus metrics only
-
-CHANNEL_LABELS = {
-    "Hoechst": "Hoechst", "Syto": "Sy", "Golgi": "Go",
-    "ER": "ER", "Mito": "Mi", "Brightfield": "BF",
-}
-CHANNEL_COLORS = {
-    "Hoechst": (100, 160, 255), "Syto": (80, 220, 120), "Golgi": (255, 180, 60),
-    "ER": (180, 90, 255), "Mito": (255, 80, 80), "Brightfield": (160, 160, 160),
-}
-
-ILLUM_METRICS  = ["PowerLogLogSlope", "MedianIntensity"]
-BORDER_METRIC  = "PowerLogLogSlope"
-METRIC_LABELS  = {
-    "PowerLogLogSlope": "Focus", "MedianIntensity": "MaxInt",
-}
-
-COL_PASS    = (75,  215,  95)
-COL_FAIL    = (255,  65,  65)
-COL_NODATA  = (110, 110, 120)
-
-COUNT_COLS = {
-    "Raw": "Count_Raw_nuclei", "Filtered": "Count_Nuclei",
-    "Cells": "Count_Cells",    "Artifacts": "Count_Illum_artifacts_filtered",
-}
-AREA_COL           = "ImageQuality_TotalArea_Brightfield"
-DEFAULT_IMAGE_AREA = 1_166_400   # 1080×1080 px fallback
-
-
-def _miq_col(metric: str, channel: str) -> str:
-    if metric == "FocusScore":
-        return f"ImageQuality_FocusScore_{channel}"
-    return f"ImageQuality_{metric}_{channel}"
-
-
-METRIC_COLS: dict[str, list[str]] = {
-    mk: [_miq_col(mk, ch) for ch in CHANNELS]
-    for mk in ("PowerLogLogSlope", "MedianIntensity", "FocusScore", "FocusScore")
-}
-for mk in ("FocusScore", "FocusScore"):
-    METRIC_COLS[mk] += [_miq_col(mk, ch) for ch in CHANNELS_EXTRA]
-
-COL_TO_CHANNEL: dict[str, str] = {
-    col: ch
-    for mk, cols in METRIC_COLS.items()
-    for col in cols
-    for ch in CHANNELS + CHANNELS_EXTRA
-    if ch in col
-}
-
+BORDER_METRIC = "PowerLogLogSlope"
 
 # ── ThresholdEngine ────────────────────────────────────────────────────────────
 
@@ -195,7 +124,7 @@ class ThresholdEngine:
     def fit(self, plate_qc: dict) -> None:
         """Compute adaptive bounds from plate data. Call once per plate."""
         self._adaptive = {}
-        for mk, cols in METRIC_COLS.items():
+        for mk, cols in qc.config.METRIC_COLS.items():
             self._adaptive[mk] = {}
             for col in cols:
                 vals = [
@@ -223,9 +152,9 @@ class ThresholdEngine:
 
         # Absolute check
         if metric_key == "FocusScore":
-            abs_lo, abs_hi = THRESHOLDS_LOCAL_FOCUS.get(channel, (None, None))
+            abs_lo, abs_hi = qc.config.THRESHOLDS_LOCAL_FOCUS.get(channel, (None, None))
         else:
-            abs_lo, abs_hi = THRESHOLDS.get(metric_key, (None, None))
+            abs_lo, abs_hi = qc.config.THRESHOLDS.get(metric_key, (None, None))
 
         abs_fail = (
             (abs_lo is not None and value < abs_lo) or
@@ -233,7 +162,7 @@ class ThresholdEngine:
         )
 
         # Adaptive check — only flags if within an absolute limit direction
-        col      = _miq_col(metric_key, channel) if channel else None
+        col      = qc.config._miq_col(metric_key, channel) if channel else None
         adp_fail = False
         if col and col in self._adaptive.get(metric_key, {}):
             adp_lo, adp_hi = self._adaptive[metric_key][col]
@@ -246,192 +175,11 @@ class ThresholdEngine:
 
     def val_color(self, value, metric_key: str, channel: str = "") -> tuple:
         p = self.passes(value, metric_key, channel)
-        return COL_NODATA if p is None else (COL_PASS if p else COL_FAIL)
+        return qc.config.COL_THRESHOLDS['COL_NODATA'] if p is None else (qc.config.COL_THRESHOLDS['COL_PASS'] if p else qc.config.COL_THRESHOLDS['COL_FAIL'])
 
     def adaptive_bounds(self, metric_key: str, col: str) -> tuple | None:
         """Return (lo, hi) adaptive bounds for a column, or None if not fitted."""
         return self._adaptive.get(metric_key, {}).get(col)
-
-
-# ── Data loaders ───────────────────────────────────────────────────────────────
-
-def load_qc_tsv(tsv_path) -> dict:
-    """Load CellProfiler Image.txt TSV -> {plate: {well: {col: value}}}."""
-    if tsv_path is None:
-        return {}
-    tsv_path = Path(tsv_path)
-    if not tsv_path.exists():
-        print(f"[warn] QC file not found: {tsv_path}")
-        return {}
-
-    df        = pd.read_csv(tsv_path, sep="\t")
-    plate_col = "Metadata_Plate" if "Metadata_Plate" in df.columns else None
-    well_col  = "Metadata_Well"  if "Metadata_Well"  in df.columns else None
-    if well_col is None:
-        print("[warn] Metadata_Well not found — QC enrichment disabled.")
-        return {}
-
-    mean_cols = list(dict.fromkeys(
-        c for cols in METRIC_COLS.values() for c in cols if c in df.columns
-    ))
-    pct_cols  = list(dict.fromkeys(
-        c for c in df.columns
-        if c.startswith("ImageQuality_PercentMaximal_") or 
-           c.startswith("ImageQuality_PercentMinimal_")
-    ))
-    sum_cols  = list(dict.fromkeys(
-        c for c in df.columns
-        if c.startswith("Count_") or c == AREA_COL
-    ))
-    gkeys = [plate_col, well_col] if plate_col else [well_col]
-    grp   = df.groupby(gkeys)
-
-    agg_mean = grp[mean_cols].mean().reset_index() if mean_cols else None
-    agg_pct  = grp[pct_cols].mean().reset_index()  if pct_cols  else None
-    agg_sum  = grp[sum_cols].sum().reset_index()   if sum_cols  else None
-
-    agg = agg_mean
-    if agg_pct is not None:
-        agg = agg.merge(agg_pct, on=gkeys, how="left") if agg is not None else agg_pct
-    if agg_sum is not None:
-        agg = agg.merge(agg_sum, on=gkeys, how="left") if agg is not None else agg_sum
-
-    all_cols = (mean_cols + pct_cols +
-                [c for c in sum_cols if c not in mean_cols and c not in pct_cols])
-    result   = defaultdict(dict)
-    for _, row in agg.iterrows():
-        plate = str(row[plate_col]).strip() if plate_col else "Plate"
-        well  = str(row[well_col]).strip().upper()
-        result[plate][well] = {c: row[c] for c in all_cols if c in row.index}
-
-    print(f"[qc] {sum(len(v) for v in result.values())} wells "
-          f"across {len(result)} plate(s).")
-    return result
-
-
-def load_platemap(platemap_path) -> dict:
-    """Load platemap CSV -> {plate: {well: compound}}."""
-    if platemap_path is None:
-        return {}
-    platemap_path = Path(platemap_path)
-    if not platemap_path.exists():
-        print(f"[warn] Platemap not found: {platemap_path}")
-        return {}
-
-    df           = pd.read_csv(platemap_path)
-    well_col     = next((c for c in df.columns if "Well"        in c), None)
-    compound_col = next((c for c in df.columns if "Compound"    in c
-                         or "Perturbation" in c), None)
-    plate_col    = next((c for c in df.columns if "Plate"       in c), None)
-
-    if not well_col or not compound_col:
-        print(f"[warn] Platemap missing Well/Compound column. Found: {list(df.columns)}")
-        return {}
-
-    result = defaultdict(dict)
-    for _, row in df.iterrows():
-        well  = str(row[well_col]).strip().upper()
-        cmpd  = str(row[compound_col]).strip()
-        raw_p = str(row[plate_col]).strip() if plate_col else "Plate"
-        plate = raw_p if raw_p.startswith("P") else f"P{raw_p}"
-        result[plate][well] = cmpd
-
-    print(f"[platemap] {sum(len(v) for v in result.values())} well->compound mappings.")
-    return result
-
-
-# ── MFI channel definitions ───────────────────────────────────────────────────
-# Hoechst (Hoechst) → Nuclei.txt  |  Syto, ER, Golgi, Mito → Cells.txt
-# Column format: Intensity_MedianIntensity_<Channel>
-
-MFI_COLS_CELLS = {
-    "Syto":  ("Intensity_MedianIntensity_Syto",  "#50DC78"),
-    "ER":    ("Intensity_MedianIntensity_ER",     "#B45AFF"),
-    "Golgi": ("Intensity_MedianIntensity_Golgi",  "#FFB43C"),
-    "Mito":  ("Intensity_MedianIntensity_Mito",   "#FF5050"),
-}
-MFI_COLS_NUCLEI = {
-    "Hoechst": ("Intensity_MedianIntensity_Hoechst", "#64A0FF"),
-}
-MFI_CHANNEL_ORDER = ["Hoechst", "Syto", "ER", "Golgi", "Mito"]
-
-RADIUS_COLS = {
-    "Cells":  "AreaShape_MedianRadius",
-    "Nuclei": "AreaShape_MedianRadius",
-}
-
-MFI_IMG_COLS = {
-    "Hoechst": "ImageQuality_MedianIntensity_Hoechst",
-    "Syto":    "ImageQuality_MedianIntensity_Syto",
-    "ER":      "ImageQuality_MedianIntensity_ER",
-    "Golgi":   "ImageQuality_MedianIntensity_Golgi",
-    "Mito":    "ImageQuality_MedianIntensity_Mito",
-}
-
-def _load_object_tsv(tsv_path: Path, channel_map: dict, label: str) -> "pd.DataFrame | None":
-    """Load one CellProfiler object TSV (Cells.txt or Nuclei.txt)."""
-    if not tsv_path.exists():
-        print(f"[mfi] {label} not found: {tsv_path}")
-        return None
-    df = pd.read_csv(tsv_path, sep="\t", low_memory=False)
-    print(f"[mfi] Loaded {len(df):,} rows from {tsv_path.name}  ({label})")
-    if "Metadata_Well" not in df.columns:
-        print(f"[mfi] Metadata_Well missing in {tsv_path.name} — skipping.")
-        return None
-    df["Metadata_Well"]  = df["Metadata_Well"].astype(str).str.strip().str.upper()
-    df["Metadata_Plate"] = (df["Metadata_Plate"].astype(str).str.strip()
-                            if "Metadata_Plate" in df.columns else "Plate")
-    mfi_cols = [col for col, _ in channel_map.values() if col in df.columns]
-    if not mfi_cols:
-        print(f"[mfi] No MFI columns found in {tsv_path.name} — skipping.")
-        return None
-    keep = (["Metadata_Plate", "Metadata_Well"]
-            + (["ImageNumber"] if "ImageNumber" in df.columns else [])
-            + mfi_cols)
-    return df[keep].copy()
-
-
-def load_mfi_data(cells_path: "Path | None",
-                  nuclei_path: "Path | None") -> "tuple[dict, dict]":
-    """
-    Load Cells.txt and Nuclei.txt and return (source_dfs, channel_map).
-    source_dfs : { channel_label: DataFrame }
-    channel_map: { channel_label: (col_name, hex_colour) }  ordered by MFI_CHANNEL_ORDER
-    """
-    source_dfs:  dict = {}
-    channel_map: dict = {}
-
-    print(f"[DEBUG] cells_path: {cells_path}, nuclei_path: {nuclei_path}")
-
-    if cells_path is not None:
-        df_cells = _load_object_tsv(cells_path, MFI_COLS_CELLS, "Cells")
-        if df_cells is not None:
-            for ch, (col, color) in MFI_COLS_CELLS.items():
-                if col in df_cells.columns:
-                    keep = (["Metadata_Plate", "Metadata_Well"]
-                            + (["ImageNumber"] if "ImageNumber" in df_cells.columns else [])
-                            + [col])
-                    source_dfs[ch]  = df_cells[keep].copy()
-                    channel_map[ch] = (col, color)
-
-    if nuclei_path is not None:
-        df_nuclei = _load_object_tsv(nuclei_path, MFI_COLS_NUCLEI, "Nuclei")
-        if df_nuclei is not None:
-            print(f"[mfi] Nuclei.txt columns: {[c for c in df_nuclei.columns if 'Hoechst' in c or 'Intensity' in c][:10]}")
-            for ch, (col, color) in MFI_COLS_NUCLEI.items():
-                if col in df_nuclei.columns:
-                    keep = (["Metadata_Plate", "Metadata_Well"]
-                            + (["ImageNumber"] if "ImageNumber" in df_nuclei.columns else [])
-                            + [col])
-                    source_dfs[ch]  = df_nuclei[keep].copy()
-                    channel_map[ch] = (col, color)
-
-    if not channel_map:
-        print("[mfi] No usable MFI data found.")
-
-    ordered = {ch: channel_map[ch] for ch in MFI_CHANNEL_ORDER if ch in channel_map}
-    return source_dfs, ordered
-
 
 def _aggregate_mfi_per_well(source_dfs: dict,
                              channel_map: dict,
@@ -441,95 +189,45 @@ def _aggregate_mfi_per_well(source_dfs: dict,
     Groups objects by ImageNumber first (one value per image/site), then collects
     those per-image medians into a list per well — what the boxplots display.
     """
+    def _norm_plate(s: str) -> str:
+        return str(s).strip().lstrip("P").lstrip("0") or "0"
+
+    target = _norm_plate(plate_name)
     result: dict = defaultdict(lambda: defaultdict(list))
+
     for ch, (col, _) in channel_map.items():
         df = source_dfs.get(ch)
         if df is None:
             continue
-        def _norm_plate(s):
-            return str(s).strip().lstrip("P").lstrip("0") or "0"
 
-        mask = df["Metadata_Plate"].astype(str).apply(_norm_plate) == _norm_plate(plate_name)
-        plate_df = df[mask].copy()
-        if plate_df.empty:
-            if df["Metadata_Plate"].nunique() == 1:
-                plate_df = df.copy()
+        norm_expr = (
+            pl.col("Metadata_Plate").cast(pl.Utf8).str.strip_chars()
+              .str.strip_chars_start("P").str.strip_chars_start("0")
+              .replace("", "0")
+        )
+        plate_df = df.filter(norm_expr == target)
+
+        if plate_df.is_empty():
+            if df["Metadata_Plate"].n_unique() == 1:
+                plate_df = df
             else:
                 continue
+
         if "ImageNumber" in plate_df.columns:
-            per_image = (plate_df
-                         .groupby(["Metadata_Plate", "Metadata_Well", "ImageNumber"])[col]
-                         .median()
-                         .reset_index())
+            per_image = plate_df.group_by(
+                ["Metadata_Plate", "Metadata_Well", "ImageNumber"]
+            ).agg(pl.col(col).median())
         else:
             per_image = plate_df
-        for _, row in per_image.iterrows():
+
+        for row in per_image.iter_rows(named=True):
             well = str(row["Metadata_Well"]).strip().upper()
             v    = row[col]
             if v is not None and not (isinstance(v, float) and np.isnan(v)):
                 result[well][ch].append(float(v))
+
     return {well: dict(ch_vals) for well, ch_vals in result.items()}
 
-def load_mfi_img(image_txt_path: "Path | None") -> "dict[str, dict[str, float]]":
-    """
-    Load per-well median MFI from Image.txt.
-    Returns { well: { channel: median_across_sites } }
-    """
-    if image_txt_path is None or not image_txt_path.exists():
-        print(f"[mfi_img] Image.txt not found: {image_txt_path}")
-        return {}
-    df = pd.read_csv(image_txt_path, sep="\t", low_memory=False)
-    if "Metadata_Well" not in df.columns:
-        return {}
-    df["Metadata_Well"] = df["Metadata_Well"].astype(str).str.strip().str.upper()
-
-    result = {}
-    for well, grp in df.groupby("Metadata_Well"):
-        result[well] = {}
-        for ch, col in MFI_IMG_COLS.items():
-            if col in grp.columns:
-                vals = grp[col].dropna().values
-                if len(vals):
-                    result[well][ch] = float(np.median(vals))
-    return result
-
-def load_radius_data(cells_path: "Path | None",
-                     nuclei_path: "Path | None",
-                     plate_name: str) -> "dict[str, dict[str, float]]":
-    """
-    Load AreaShape_MedianRadius from Cells.txt and Nuclei.txt.
-    Returns { 'Cells': { well: median_radius }, 'Nuclei': { well: median_radius } }
-    """
-    col = "AreaShape_MedianRadius"
-    result = {}
-
-    def _norm_plate(s):
-        return str(s).strip().lstrip("P").lstrip("0") or "0"
-
-    for label, path in [("Cells", cells_path), ("Nuclei", nuclei_path)]:
-        if path is None or not path.exists():
-            continue
-        df = pd.read_csv(path, sep="\t", low_memory=False)
-        if "Metadata_Well" not in df.columns or col not in df.columns:
-            print(f"[radius] {col} not found in {path.name} — skipping.")
-            continue
-        df["Metadata_Well"]  = df["Metadata_Well"].astype(str).str.strip().str.upper()
-        df["Metadata_Plate"] = (df["Metadata_Plate"].astype(str).str.strip()
-                                if "Metadata_Plate" in df.columns else "Plate")
-        mask = df["Metadata_Plate"].apply(_norm_plate) == _norm_plate(plate_name)
-        plate_df = df[mask].copy()
-        if plate_df.empty:
-            if df["Metadata_Plate"].nunique() == 1:
-                plate_df = df.copy()
-            else:
-                continue
-        well_medians = (plate_df.groupby("Metadata_Well")[col]
-                        .median()
-                        .dropna()
-                        .to_dict())
-        result[label] = {str(w).strip().upper(): float(v)
-                         for w, v in well_medians.items()}
-    return result
 
 # ── Image helpers ──────────────────────────────────────────────────────────────
 
@@ -576,17 +274,17 @@ def _make_tile(tile: np.ndarray, border_rgb: tuple, border_w: int = 6) -> np.nda
 # ── QC helpers ─────────────────────────────────────────────────────────────────
 
 def _slope_range(plate_qc: dict) -> tuple:
-    cols = METRIC_COLS[BORDER_METRIC]
+    cols = qc.config.METRIC_COLS[BORDER_METRIC]
     vals = [m[col] for m in plate_qc.values() for col in cols
             if (col in m) and m[col] is not None and not np.isnan(m[col])]
-    lo, hi = THRESHOLDS[BORDER_METRIC]
+    lo, hi = qc.config.THRESHOLDS[BORDER_METRIC]
     return (min(vals) if vals else lo, max(vals) if vals else hi)
 
 
 def _slope_to_rgb(well_metrics: dict | None, engine: ThresholdEngine) -> tuple:
     results = [
         engine.passes(well_metrics.get(col) if well_metrics else None, BORDER_METRIC)
-        for col in METRIC_COLS[BORDER_METRIC]
+        for col in qc.config.METRIC_COLS[BORDER_METRIC]
     ]
     results = [r for r in results if r is not None]
     if not results:
@@ -598,17 +296,17 @@ def _slope_to_rgb(well_metrics: dict | None, engine: ThresholdEngine) -> tuple:
 
 
 def _artifact_density(metrics: dict) -> float | None:
-    n = metrics.get(COUNT_COLS["Artifacts"])
+    n = metrics.get(qc.config.COUNT_COLS["Artifacts"])
     if n is None or np.isnan(n):
         return None
-    area = metrics.get(AREA_COL) or DEFAULT_IMAGE_AREA
+    area = metrics.get(qc.config.AREA_COL) or qc.config.DEFAULT_IMAGE_AREA
     return (n / area) * 1000 if area > 0 else None
 
 
 def _count_summary(metrics: dict) -> list[tuple[str, str]]:
     rows = [(lbl, "—" if (v := metrics.get(col)) is None or
              (isinstance(v, float) and np.isnan(v)) else str(int(round(v))))
-            for lbl, col in COUNT_COLS.items()]
+            for lbl, col in qc.config.COUNT_COLS.items()]
     d = _artifact_density(metrics)
     rows.append(("Art/kpx²", "—" if d is None else f"{d:.2f}"))
     return rows
@@ -616,15 +314,15 @@ def _count_summary(metrics: dict) -> list[tuple[str, str]]:
 
 def _well_passes_all(metrics: dict, engine: ThresholdEngine) -> bool:
     return all(
-        engine.passes(metrics.get(col), mk, COL_TO_CHANNEL.get(col, "")) is not False
-        for mk, cols in METRIC_COLS.items() for col in cols
+        engine.passes(metrics.get(col), mk, qc.config.COL_TO_CHANNEL.get(col, "")) is not False
+        for mk, cols in qc.config.METRIC_COLS.items() for col in cols
     )
 
 
 def _well_passes_group(metrics: dict, group: list, engine: ThresholdEngine) -> bool:
     return all(
-        engine.passes(metrics.get(col), mk, COL_TO_CHANNEL.get(col, "")) is not False
-        for mk in group for col in METRIC_COLS[mk]
+        engine.passes(metrics.get(col), mk, qc.config.COL_TO_CHANNEL.get(col, "")) is not False
+        for mk in group for col in qc.config.METRIC_COLS[mk]
     )
 
 
@@ -637,7 +335,7 @@ def _make_band(width: int, well_labels_in_row: list, plate_qc: dict,
     QC band below each plate row. Two-pass: first measures needed height,
     then draws. Absorbs the old _measure_band_height function.
     """
-    ALL_METRICS = ILLUM_METRICS
+    ALL_METRICS = qc.config.ILLUM_METRICS
     fw = _font(font_size + 2, bold=True)
     fl = _font(font_size - 1, bold=True)
     fv = _font(font_size - 1, bold=False)
@@ -654,9 +352,9 @@ def _make_band(width: int, well_labels_in_row: list, plate_qc: dict,
             y += _text_h(dd, compound, fv) + 4
         if metrics:
             yc = y
-            for mk in ILLUM_METRICS:
-              yc += _text_h(dd, f"{METRIC_LABELS[mk]}:", fl) + 1
-              for col in METRIC_COLS[mk]:
+            for mk in qc.config.ILLUM_METRICS:
+              yc += _text_h(dd, f"{qc.config.METRIC_LABELS[mk]}:", fl) + 1
+              for col in qc.config.METRIC_COLS[mk]:
                   v = metrics.get(col)
                   if v is not None and not (isinstance(v, float) and np.isnan(v)):
                       yc += _text_h(dd, " xx: 0.000", fv) + 1
@@ -680,15 +378,15 @@ def _make_band(width: int, well_labels_in_row: list, plate_qc: dict,
 
         pass_vals = [
             engine.passes(metrics.get(col) if metrics else None, mk,
-                          COL_TO_CHANNEL.get(col, ""))
-            for mk in ALL_METRICS for col in METRIC_COLS[mk]
+                          qc.config.COL_TO_CHANNEL.get(col, ""))
+            for mk in ALL_METRICS for col in qc.config.METRIC_COLS[mk]
         ]
         pass_vals = [p for p in pass_vals if p is not None]
 
         if pass_vals:
             frac   = sum(pass_vals) / len(pass_vals)
             tint   = (20, 55, 25) if frac == 1.0 else (55, 15, 15) if frac == 0 else (50, 35, 10)
-            accent = COL_PASS if frac == 1.0 else (COL_FAIL if frac == 0 else (255, 155, 0))
+            accent = qc.config.COL_THRESHOLDS['COL_PASS'] if frac == 1.0 else (qc.config.COL_THRESHOLDS['COL_FAIL'] if frac == 0 else (255, 155, 0))
         else:
             tint, accent = (18, 18, 24), (60, 70, 90)
 
@@ -715,15 +413,15 @@ def _make_band(width: int, well_labels_in_row: list, plate_qc: dict,
         x_count = x0 + 4 + col_w * 2
 
         y = y_start
-        for mk in ILLUM_METRICS:
-            lbl = METRIC_LABELS[mk]
+        for mk in qc.config.ILLUM_METRICS:
+            lbl = qc.config.METRIC_LABELS[mk]
             draw.text((x_left, y), f"{lbl}:", fill=(170, 195, 225), font=fl)
             y += _text_h(draw, f"{lbl}:", fl) + 1
-            for col in METRIC_COLS[mk]:
+            for col in qc.config.METRIC_COLS[mk]:
                 v = metrics.get(col)
                 if v is None or (isinstance(v, float) and np.isnan(v)):
                     continue
-                ch    = COL_TO_CHANNEL.get(col, col)
+                ch    = qc.config.COL_TO_CHANNEL.get(col, col)
                 short = ch
                 vc    = engine.val_color(v, mk, ch)
                 txt   = f" {short}: {v:.3f}"
@@ -736,11 +434,11 @@ def _make_band(width: int, well_labels_in_row: list, plate_qc: dict,
         draw.text((x_count, y), "Objects:", fill=(170, 195, 225), font=fl)
         y += _text_h(draw, "Objects:", fl) + 2
         for lbl, val in _count_summary(metrics):
-            vc = COL_NODATA
+            vc = qc.config.COL_THRESHOLDS['COL_NODATA']
             if lbl == "Art/kpx²":
                 try:
                     fv_ = float(val)
-                    vc  = COL_FAIL if fv_ > 0.05 else ((255, 190, 0) if fv_ > 0.02 else COL_PASS)
+                    vc  = qc.config.COL_THRESHOLDS['COL_FAIL'] if fv_ > 0.05 else ((255, 190, 0) if fv_ > 0.02 else qc.config.COL_THRESHOLDS['COL_PASS'])
                 except ValueError:
                     pass
             else:
@@ -760,7 +458,7 @@ def make_header(width: int, title: str, font_size: int = 20) -> np.ndarray:
     draw   = ImageDraw.Draw(header)
     draw.text((12, 14), title, fill=(180, 220, 255), font=_font(font_size, bold=True))
     draw.rectangle([0, 55, width - 1, 57], fill=(40, 60, 100))
-    legend = [("Pass", COL_PASS), ("Fail", COL_FAIL),
+    legend = [("Pass", qc.config.COL_THRESHOLDS['COL_PASS']), ("Fail", qc.config.COL_THRESHOLDS['COL_FAIL']),
               ("Both pass", (55, 205, 80)), ("Mixed", (255, 145, 0)),
               ("Both fail", (215, 35, 35))]
     x  = width - 12
@@ -783,14 +481,14 @@ def make_report_footer(width: int, plate_name: str, plate_qc: dict,
                         plate_map: dict | None = None) -> np.ndarray:
     n_wells   = len(plate_qc)
     n_pass    = sum(1 for m in plate_qc.values() if _well_passes_all(m, engine))
-    n_illum_p = sum(1 for m in plate_qc.values() if _well_passes_group(m, ILLUM_METRICS, engine))
+    n_illum_p = sum(1 for m in plate_qc.values() if _well_passes_group(m, qc.config.ILLUM_METRICS, engine))
     pct       = lambda n: f"{100 * n / n_wells:.1f}%" if n_wells else "—"
 
-    stats = {mk: {ch: [] for ch in CHANNELS + CHANNELS_EXTRA} for mk in METRIC_COLS}
+    stats = {mk: {ch: [] for ch in qc.config.CHANNELS + qc.config.CHANNELS_EXTRA} for mk in qc.config.METRIC_COLS}
     for m in plate_qc.values():
-        for mk, cols in METRIC_COLS.items():
+        for mk, cols in qc.config.METRIC_COLS.items():
             for col in cols:
-                ch = COL_TO_CHANNEL.get(col, col)
+                ch = qc.config.COL_TO_CHANNEL.get(col, col)
                 v  = m.get(col)
                 if v is not None and not np.isnan(v):
                     stats[mk][ch].append(v)
@@ -798,11 +496,11 @@ def make_report_footer(width: int, plate_name: str, plate_qc: dict,
     failing = []
     for wl, m in sorted(plate_qc.items()):
         reasons = [
-            f"{METRIC_LABELS.get(mk, mk)}/{CHANNEL_LABELS.get(ch_key, '?')}"
-            for mk, cols in METRIC_COLS.items()
+            f"{qc.config.METRIC_LABELS.get(mk, mk)}/{qc.config.CHANNEL_LABELS.get(ch_key, '?')}"
+            for mk, cols in qc.config.METRIC_COLS.items()
             for col in cols
             if (v := m.get(col)) is not None and not np.isnan(v)
-            and engine.passes(v, mk, ch_key := COL_TO_CHANNEL.get(col, "")) is False
+            and engine.passes(v, mk, ch_key := qc.config.COL_TO_CHANNEL.get(col, "")) is False
         ]
         if reasons:
             failing.append((wl, reasons))
@@ -831,45 +529,45 @@ def make_report_footer(width: int, plate_name: str, plate_qc: dict,
         line(f"  QC REPORT — {plate_name}", (180, 210, 255), ft)
         rule((50, 75, 140))
 
-        oc = COL_PASS if n_pass / max(n_wells, 1) >= 0.8 else \
-             (COL_FAIL if n_pass / max(n_wells, 1) < 0.5 else (255, 190, 0))
+        oc = qc.config.COL_THRESHOLDS['COL_PASS'] if n_pass / max(n_wells, 1) >= 0.8 else \
+             (qc.config.COL_THRESHOLDS['COL_FAIL'] if n_pass / max(n_wells, 1) < 0.5 else (255, 190, 0))
         line(f"  Overall:       {n_pass}/{n_wells} wells pass all metrics  ({pct(n_pass)})", oc, fs)
 
-        ic = COL_PASS if n_illum_p / max(n_wells, 1) >= 0.8 else \
-             (COL_FAIL if n_illum_p / max(n_wells, 1) < 0.5 else (255, 190, 0))
+        ic = qc.config.COL_THRESHOLDS['COL_PASS'] if n_illum_p / max(n_wells, 1) >= 0.8 else \
+             (qc.config.COL_THRESHOLDS['COL_FAIL'] if n_illum_p / max(n_wells, 1) < 0.5 else (255, 190, 0))
         line(f"  Illumination:  {n_illum_p}/{n_wells} pass ({pct(n_illum_p)})  [Slope + MaxInt]", ic, fb)
         rule(); y += 4
 
         for grp_lbl, grp_col, grp_metrics in (
-            ("ILLUMINATION METRICS", (255, 200, 80), ILLUM_METRICS),
+            ("ILLUMINATION METRICS", (255, 200, 80), qc.config.ILLUM_METRICS),
         ):
             line(f"  {grp_lbl}", grp_col, fs)
             line(f"    {'Metric':<22}  {'Channel':<8}  {'Threshold':<14}  {'Pass':>12}  {'mean ± SD':<22}",
                  (110, 140, 175), fb)
 
             for mk in grp_metrics:
-                ml = METRIC_LABELS.get(mk, mk)
+                ml = qc.config.METRIC_LABELS.get(mk, mk)
                 first = True
-                for col in METRIC_COLS[mk]:
-                    ch       = COL_TO_CHANNEL.get(col, col)
+                for col in qc.config.METRIC_COLS[mk]:
+                    ch       = qc.config.COL_TO_CHANNEL.get(col, col)
                     vals     = stats[mk].get(ch, [])
                     ch_short = ch
-                    ch_color = CHANNEL_COLORS.get(ch, (150, 170, 200))
+                    ch_color = qc.config.CHANNEL_COLORS.get(ch, (150, 170, 200))
 
                     if mk == "FocusScore":
-                        lo, hi = THRESHOLDS_LOCAL_FOCUS.get(ch, (None, None))
+                        lo, hi = qc.config.THRESHOLDS_LOCAL_FOCUS.get(ch, (None, None))
                     else:
-                        lo, hi = THRESHOLDS.get(mk, (None, None))
+                        lo, hi = qc.config.THRESHOLDS.get(mk, (None, None))
                     tstr = (f"> {lo}" if hi is None else f"< {hi}" if lo is None
                             else f"{lo} to {hi}")
 
                     if vals:
                         np_ = sum(1 for v in vals if engine.passes(v, mk, ch))
                         pp  = 100 * np_ / len(vals)
-                        pc  = COL_PASS if pp >= 80 else (COL_FAIL if pp < 50 else (255, 190, 0))
+                        pc  = qc.config.COL_THRESHOLDS['COL_PASS'] if pp >= 80 else (qc.config.COL_THRESHOLDS['COL_FAIL'] if pp < 50 else (255, 190, 0))
                         stat_str = f"{np_}/{len(vals)} ({pp:.0f}%)   μ={np.mean(vals):.3f}±{np.std(vals):.3f}"
                     else:
-                        pc, stat_str = COL_NODATA, "—"
+                        pc, stat_str = qc.config.COL_THRESHOLDS['COL_NODATA'], "—"
 
                     m_col   = f"    {ml:<22}" if first else f"    {'':22}"
                     row_txt = f"{m_col}  {ch_short:<8}  {tstr:<14}  "
@@ -900,9 +598,9 @@ def make_report_footer(width: int, plate_name: str, plate_qc: dict,
             for i in range(0, len(failing), 5):
                 seg = failing[i:i + 5]
                 line("    " + "   ".join(f"{wl} [{', '.join(r)}]" for wl, r in seg),
-                     COL_FAIL, fr)
+                     qc.config.COL_THRESHOLDS['COL_FAIL'], fr)
         else:
-            line("    None — all wells pass.", COL_PASS, fr)
+            line("    None — all wells pass.", qc.config.COL_THRESHOLDS['COL_PASS'], fr)
         rule(); y += 6
 
         # Object counts table
@@ -917,14 +615,14 @@ def make_report_footer(width: int, plate_name: str, plate_qc: dict,
                                   else str(int(round(v)))
             density  = _artifact_density(m)
             dens_str = "—" if density is None else f"{density:.3f}"
-            dc       = (COL_FAIL if density is not None and density > 0.05
+            dc       = (qc.config.COL_THRESHOLDS['COL_FAIL'] if density is not None and density > 0.05
                         else (255, 190, 0) if density is not None and density > 0.02
-                        else COL_PASS if density is not None else COL_NODATA)
+                        else qc.config.COL_THRESHOLDS['COL_PASS'] if density is not None else qc.config.COL_THRESHOLDS['COL_NODATA'])
             row_txt  = (f"    {wl:<6}  {compound[:28]:<28}  "
-                        f"{fmt(m.get(COUNT_COLS['Raw'])):>6}  "
-                        f"{fmt(m.get(COUNT_COLS['Filtered'])):>8}  "
-                        f"{fmt(m.get(COUNT_COLS['Cells'])):>6}  "
-                        f"{fmt(m.get(COUNT_COLS['Artifacts'])):>9}  ")
+                        f"{fmt(m.get(qc.config.COUNT_COLS['Raw'])):>6}  "
+                        f"{fmt(m.get(qc.config.COUNT_COLS['Filtered'])):>8}  "
+                        f"{fmt(m.get(qc.config.COUNT_COLS['Cells'])):>6}  "
+                        f"{fmt(m.get(qc.config.COUNT_COLS['Artifacts'])):>9}  ")
             if not measure_only:
                 x = 16
                 draw.text((x, y + 1), row_txt, fill=(0, 0, 0), font=fr)
@@ -940,9 +638,9 @@ def make_report_footer(width: int, plate_name: str, plate_qc: dict,
 
         # Threshold reference
         line("  Thresholds applied:", (190, 205, 225), fs)
-        for mk, (lo, hi) in THRESHOLDS.items():
+        for mk, (lo, hi) in qc.config.THRESHOLDS.items():
             tstr = (f"> {lo}" if hi is None else f"< {hi}" if lo is None else f"{lo} to {hi}")
-            line(f"    {METRIC_LABELS.get(mk, mk)}: {tstr}", (150, 170, 195), fr)
+            line(f"    {qc.config.METRIC_LABELS.get(mk, mk)}: {tstr}", (150, 170, 195), fr)
         line(f"  Adaptive: median ± {engine.n_sigma} σ (MAD) — per plate",
              (150, 170, 195), fr)
         y += 16
@@ -955,25 +653,6 @@ def make_report_footer(width: int, plate_name: str, plate_qc: dict,
     fdraw.rectangle([0, 0, width - 1, 5], fill=(40, 60, 120))
     _draw_footer(fdraw, measure_only=False)
     return np.array(footer)
-
-
-# ── HTML report ────────────────────────────────────────────────────────────────
-
-def _fetch_plotly_js() -> str:
-    """Download Plotly JS once and return as string for embedding."""
-    url = "https://cdn.plot.ly/plotly-2.35.2.min.js"
-    cache = Path(__file__).parent / ".plotly_cache.js"
-    if cache.exists():
-        return cache.read_text()
-    print("[html] Downloading Plotly JS for embedding (one-time)…")
-    try:
-        with urllib.request.urlopen(url, timeout=30) as r:
-            js = r.read().decode()
-        cache.write_text(js)
-        return js
-    except Exception as e:
-        print(f"[warn] Could not fetch Plotly: {e}. HTML will use CDN fallback.")
-        return f'/* CDN fallback */\ndocument.write(\'<script src="{url}"></script>\');'
 
 
 def _collage_to_b64(collage_arr: np.ndarray, web_scale: float = 1.0,
@@ -1028,7 +707,7 @@ def _make_overview_grid(montages: dict, plate_qc: dict, plate_map: dict,
     canvas = Image.new("RGB", (W, H), color=(8, 10, 20))
     fdraw  = ImageDraw.Draw(canvas)
     flabel = _font(9, bold=True)
-    slope_cols = METRIC_COLS["PowerLogLogSlope"]
+    slope_cols = qc.config.METRIC_COLS[BORDER_METRIC]
 
     for r in range(plate_rows):
         for c in range(plate_cols):
@@ -1051,7 +730,7 @@ def _make_overview_grid(montages: dict, plate_qc: dict, plate_map: dict,
                 p for col in slope_cols
                 if (v := metrics.get(col)) is not None
                 and not (isinstance(v, float) and np.isnan(v))
-                and (p := _passes_absolute(v, "PowerLogLogSlope")) is not None
+                and (p := _passes_absolute(v, BORDER_METRIC)) is not None
             ]
             n_pass = sum(results) if results else -1
             border = ((40, 45, 70)   if n_pass < 0 else
@@ -1094,7 +773,7 @@ def _make_report_collage(collage_arr: np.ndarray, plate_qc: dict,
     fcmpd = _font(10, bold=False)
     fval  = _font(10, bold=False)
 
-    slope_cols = METRIC_COLS["PowerLogLogSlope"]
+    slope_cols = qc.config.METRIC_COLS[BORDER_METRIC]
 
     for r in range(plate_rows):
         for c in range(plate_cols):
@@ -1108,7 +787,7 @@ def _make_report_collage(collage_arr: np.ndarray, plate_qc: dict,
             results = [
                 p for col in slope_cols
                 if (v := metrics.get(col)) is not None and not np.isnan(v)
-                and (p := _passes_absolute(v, "PowerLogLogSlope")) is not None
+                and (p := _passes_absolute(v, BORDER_METRIC)) is not None
             ]
             n_pass = sum(results) if results else 0
             if not results:
@@ -1137,7 +816,7 @@ def _make_report_collage(collage_arr: np.ndarray, plate_qc: dict,
                 draw.text((x0 + 5, y0 + 22), "DMSO", fill=(120, 140, 180), font=fcmpd)
 
             # Cell count
-            cells = metrics.get(COUNT_COLS["Cells"])
+            cells = metrics.get(qc.config.COUNT_COLS["Cells"])
             if cells is not None and not (isinstance(cells, float) and np.isnan(cells)):
                 draw.text((x0 + 5, y0 + 36), f"n={int(cells)}", fill=(160, 175, 200), font=fval)
 
@@ -1156,9 +835,9 @@ def _passes_absolute(value, metric_key: str, channel: str = "") -> bool | None:
     if value is None or (isinstance(value, float) and np.isnan(value)):
         return None
     if metric_key == "FocusScore":
-        lo, hi = THRESHOLDS_LOCAL_FOCUS.get(channel, (None, None))
+        lo, hi = qc.config.THRESHOLDS_LOCAL_FOCUS.get(channel, (None, None))
     else:
-        lo, hi = THRESHOLDS.get(metric_key, (None, None))
+        lo, hi = qc.config.THRESHOLDS.get(metric_key, (None, None))
     if lo is not None and value < lo: return False
     if hi is not None and value > hi: return False
     return True
@@ -1248,13 +927,12 @@ def generate_html(cohort_name: str, plates_data: list[dict],
         {name, collage_arr, plate_qc, plate_map, pass_rate,
          n_wells, n_pass, n_illum_pass, mfi_data}
     """
-    plotly_js = _fetch_plotly_js()
 
     html_cols = (
-            [c for cols in METRIC_COLS.values() for c in cols] +
-            list(COUNT_COLS.values()) + [AREA_COL] +
-            [f"ImageQuality_PercentMaximal_{ch}" for ch in CHANNELS] +
-            [f"ImageQuality_PercentMinimal_{ch}" for ch in CHANNELS]
+            [c for cols in qc.config.METRIC_COLS.values() for c in cols] +
+            list(qc.config.COUNT_COLS.values()) + [qc.config.AREA_COL] +
+            [f"ImageQuality_PercentMaximal_{ch}" for ch in qc.config.CHANNELS] +
+            [f"ImageQuality_PercentMinimal_{ch}" for ch in qc.config.CHANNELS]
         )
 
     payload = {}
@@ -1271,17 +949,17 @@ def generate_html(cohort_name: str, plates_data: list[dict],
         well_flags = {}
         for well, m in pqc.items():
             abs_fails, adp_fails = [], []
-            for mk, cols in METRIC_COLS.items():
+            for mk, cols in qc.config.METRIC_COLS.items():
                 for col in cols:
                     v  = m.get(col)
-                    ch = COL_TO_CHANNEL.get(col, "")
+                    ch = qc.config.COL_TO_CHANNEL.get(col, "")
                     if v is None or (isinstance(v, float) and np.isnan(v)):
                         continue
                     # Absolute
                     if mk == "FocusScore":
-                        lo, hi = THRESHOLDS_LOCAL_FOCUS.get(ch, (None, None))
+                        lo, hi = qc.config.THRESHOLDS_LOCAL_FOCUS.get(ch, (None, None))
                     else:
-                        lo, hi = THRESHOLDS.get(mk, (None, None))
+                        lo, hi = qc.config.THRESHOLDS.get(mk, (None, None))
                     abs_fail = (lo is not None and v < lo) or (hi is not None and v > hi)
                     # Adaptive
                     adp_col = adp.get(mk, {}).get(col)
@@ -1290,7 +968,7 @@ def generate_html(cohort_name: str, plates_data: list[dict],
                         adp_lo, adp_hi = adp_col
                         adp_fail = (v < adp_lo and lo is not None and v < lo) or                                    (v > adp_hi and hi is not None and v > hi)
                     ch_lbl = ch
-                    met_lbl = METRIC_LABELS.get(mk, mk)
+                    met_lbl = qc.config.METRIC_LABELS.get(mk, mk)
                     tag = f"{met_lbl}/{ch_lbl}"
                     if abs_fail:
                         abs_fails.append(tag)
@@ -1323,10 +1001,10 @@ def generate_html(cohort_name: str, plates_data: list[dict],
 
     # MAD scores para tooltip
     _qc_cols_for_scores = (
-        [f"ImageQuality_PowerLogLogSlope_{ch}" for ch in CHANNELS] +
-        [f"ImageQuality_PercentMaximal_{ch}"      for ch in CHANNELS] +
-        [f"ImageQuality_PercentMinimal_{ch}"      for ch in CHANNELS] +
-        [f"ImageQuality_MedianIntensity_{ch}"  for ch in CHANNELS]
+        [f"ImageQuality_PowerLogLogSlope_{ch}" for ch in qc.config.CHANNELS] +
+        [f"ImageQuality_PercentMaximal_{ch}"      for ch in qc.config.CHANNELS] +
+        [f"ImageQuality_PercentMinimal_{ch}"      for ch in qc.config.CHANNELS] +
+        [f"ImageQuality_MedianIntensity_{ch}"  for ch in qc.config.CHANNELS]
     )
     calc_mad_scores  = {}
     for col in _qc_cols_for_scores:
@@ -1354,18 +1032,18 @@ def generate_html(cohort_name: str, plates_data: list[dict],
         return result
 
     slope_red   = _red_wells(plates_data,
-        [f"ImageQuality_PowerLogLogSlope_{ch}" for ch in CHANNELS],
-        {col: (-2.7, -1.3) for ch in CHANNELS
+        [f"ImageQuality_PowerLogLogSlope_{ch}" for ch in qc.config.CHANNELS],
+        {col: (-2.7, -1.3) for ch in qc.config.CHANNELS
         for col in [f"ImageQuality_PowerLogLogSlope_{ch}"]})
 
     pctmax_red  = _red_wells(plates_data,
-        [f"ImageQuality_PercentMaximal_{ch}" for ch in CHANNELS],
-        {col: (None, 1.0) for ch in CHANNELS
+        [f"ImageQuality_PercentMaximal_{ch}" for ch in qc.config.CHANNELS],
+        {col: (None, 1.0) for ch in qc.config.CHANNELS
         for col in [f"ImageQuality_PercentMaximal_{ch}"]})
 
     pctmin_red  = _red_wells(plates_data,
-        [f"ImageQuality_PercentMinimal_{ch}" for ch in CHANNELS],
-        {col: (None, 5.0) for ch in CHANNELS
+        [f"ImageQuality_PercentMinimal_{ch}" for ch in qc.config.CHANNELS],
+        {col: (None, 5.0) for ch in qc.config.CHANNELS
         for col in [f"ImageQuality_PercentMinimal_{ch}"]})
 
     # medint_red uses MAD-score below — skip _red_wells call
@@ -1376,7 +1054,7 @@ def generate_html(cohort_name: str, plates_data: list[dict],
         pname = pd_["name"]
         count = 0
         for well in pd_["plate_qc"]:
-            for ch in CHANNELS:
+            for ch in qc.config.CHANNELS:
                 col = f"ImageQuality_MedianIntensity_{ch}"
                 sc  = calc_mad_scores.get(col, {}).get(pname, {}).get(well)
                 if sc and abs(sc["z_co"]) > 3:
@@ -1431,7 +1109,7 @@ def generate_html(cohort_name: str, plates_data: list[dict],
         "cmin": -3.0,
         "cmax": -1.0,
         "cs": SLOPE_CS}
-        for ch in CHANNELS
+        for ch in qc.config.CHANNELS
         for col in [f"ImageQuality_PowerLogLogSlope_{ch}"]
     ])
 
@@ -1458,7 +1136,7 @@ def generate_html(cohort_name: str, plates_data: list[dict],
         "cmin": 0,
         "cmax": 2.0,
         "cs": PCT_MAX_CS}
-        for ch in CHANNELS
+        for ch in qc.config.CHANNELS
         for col in [f"ImageQuality_PercentMaximal_{ch}"]
     ])
 
@@ -1468,7 +1146,7 @@ def generate_html(cohort_name: str, plates_data: list[dict],
         "cmin": 0,
         "cmax": 10.0,
         "cs": PCT_MIN_CS}
-        for ch in CHANNELS
+        for ch in qc.config.CHANNELS
         for col in [f"ImageQuality_PercentMinimal_{ch}"]
     ])
 
@@ -1478,7 +1156,7 @@ def generate_html(cohort_name: str, plates_data: list[dict],
         "cmin": _median_cs(col, plates_data)[1],
         "cmax": _median_cs(col, plates_data)[2],
         "cs":   _median_cs(col, plates_data)[0]}
-        for ch in CHANNELS
+        for ch in qc.config.CHANNELS
         for col in [f"ImageQuality_MedianIntensity_{ch}"]
     ])
 
@@ -1502,10 +1180,10 @@ def generate_html(cohort_name: str, plates_data: list[dict],
         mfi_payload[pname] = by_ch
 
     # Ordered channel list and colours from MFI_COLS_*
-    _all_mfi_channels: list = [ch for ch in MFI_CHANNEL_ORDER
+    _all_mfi_channels: list = [ch for ch in qc.config.MFI_DATA['MFI_CHANNEL_ORDER']
                                 if any(ch in by_ch for by_ch in mfi_payload.values())]
-    _mfi_colors: dict = {**{ch: c for ch, (_, c) in MFI_COLS_NUCLEI.items()},
-                          **{ch: c for ch, (_, c) in MFI_COLS_CELLS.items()}}
+    _mfi_colors: dict = {**{ch: c for ch, (_, c) in qc.config.MFI_DATA['MFI_COLS_NUCLEI'].items()},
+                          **{ch: c for ch, (_, c) in qc.config.MFI_DATA['MFI_COLS_CELLS'].items()}}
 
     mfi_payload_json  = json.dumps(mfi_payload)
     mfi_channels_json = json.dumps(_all_mfi_channels)
@@ -1550,12 +1228,12 @@ class Collage:
         self.output_path.mkdir(parents=True, exist_ok=True)
 
         # Auto-detect QC TSV
-        self.qc = load_qc_tsv(qc_tsv)
+        self.qc = qc.loaders.load_qc_tsv(qc_tsv, qc.config.AREA_COL, qc.config.METRIC_COLS)
         if not self.qc:
             _p = self.input_dir / "Measurements" / "Image.txt"
             if _p.exists():
                 print(f"[qc] Auto-detected: {_p}")
-                self.qc = load_qc_tsv(_p)
+                self.qc = qc.loaders.load_qc_tsv(_p, qc.config.AREA_COL, qc.config.METRIC_COLS)
             if not self.qc:
                 print(f"[warn] No QC measurements found. Searched: {_p}")
                 print(f"[warn] Use --qc to specify the path explicitly.")
@@ -1564,19 +1242,19 @@ class Collage:
         # Auto-detect Cells.txt / Nuclei.txt for MFI
         _md = self.input_dir / "Measurements"
         self._measurements_dir = _md
-        self._source_dfs, self._channel_map = load_mfi_data(
+        self._source_dfs, self._channel_map = qc.loaders.load_mfi_data(
             cells_path  = _md / "Cells.txt"  if (_md / "Cells.txt").exists()  else None,
-            nuclei_path = _md / "Nuclei.txt" if (_md / "Nuclei.txt").exists() else None,
+            nuclei_path = _md / "Nuclei.txt" if (_md / "Nuclei.txt").exists() else None
         )
-        self._mfi_img = load_mfi_img(_md / "Image.txt" if (_md / "Image.txt").exists() else None)
+        self._mfi_img = qc.loaders.load_mfi_img(_md / "Image.txt" if (_md / "Image.txt").exists() else None)
 
         # Auto-detect platemap — explicit path or first platemap_*.csv in input dir
-        self.platemap = load_platemap(platemap)
+        self.platemap = qc.loaders.load_platemap(platemap)
         if not self.platemap:
             candidates = sorted(self.input_dir.glob("platemap_*.csv"))
             if candidates:
                 print(f"[platemap] Auto-detected: {candidates[0]}")
-                self.platemap = load_platemap(candidates[0])
+                self.platemap = qc.loaders.load_platemap(candidates[0])
 
         # Process plates and accumulate HTML data
         self._html_plates: list[dict] = []
@@ -1736,7 +1414,7 @@ class Collage:
         # Accumulate HTML data
         n_wells = len(plate_qc)
         n_pass  = sum(1 for m in plate_qc.values() if _well_passes_all(m, self.engine))
-        n_illum = sum(1 for m in plate_qc.values() if _well_passes_group(m, ILLUM_METRICS, self.engine))
+        n_illum = sum(1 for m in plate_qc.values() if _well_passes_group(m, qc.config.ILLUM_METRICS, self.engine))
 
         # Overview grid: real microscopy thumbnails for all wells
         overview_arr, ov_cw, ov_ch = _make_overview_grid(
@@ -1747,8 +1425,8 @@ class Collage:
         flagged_b64 = {}
         for wl, m in plate_qc.items():
             is_flagged = any(
-                self.engine.passes(m.get(col), mk, COL_TO_CHANNEL.get(col, "")) is False
-                for mk, cols in METRIC_COLS.items() for col in cols
+                self.engine.passes(m.get(col), mk, qc.config.COL_TO_CHANNEL.get(col, "")) is False
+                for mk, cols in qc.config.METRIC_COLS.items() for col in cols
             )
             if is_flagged:
                 r_idx = ord(wl[0]) - ord("A") + 1
@@ -1770,7 +1448,7 @@ class Collage:
             "engine_adaptive": self.engine._adaptive,
             "mfi_data":      _aggregate_mfi_per_well(self._source_dfs, self._channel_map, plate_name) if self._channel_map else {},
             "mfi_img":  self._mfi_img,
-            "radius_data":   load_radius_data(
+            "radius_data":   qc.loaders.load_radius_data(
                                  cells_path  = self._measurements_dir / "Cells.txt"  if (self._measurements_dir / "Cells.txt").exists()  else None,
                                  nuclei_path = self._measurements_dir / "Nuclei.txt" if (self._measurements_dir / "Nuclei.txt").exists() else None,
                                  plate_name  = plate_name,
@@ -1786,7 +1464,6 @@ def parse_name(fname: str) -> tuple:
     name     = fname.replace(".tiff", "")
     rc, site, _ = name.split("-")
     return int(rc[:3]), int(rc[3:6]), int(site)
-
 
 # ── CLI ────────────────────────────────────────────────────────────────────────
 

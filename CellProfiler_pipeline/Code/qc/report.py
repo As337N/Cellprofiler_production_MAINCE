@@ -25,14 +25,14 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
+import urllib.request
+
+from qc import config
 
 # ── Phase-1 scaffolding import (to be replaced by proper module imports) ──────
 from III_QC_collage import (
-    _fetch_plotly_js, _collage_to_b64, _make_report_collage,
+    _collage_to_b64, _make_report_collage,
     _round_floats, _mad_scores, _median_cs,
-    CHANNELS, METRIC_COLS, COUNT_COLS, AREA_COL, COL_TO_CHANNEL,
-    METRIC_LABELS, MFI_CHANNEL_ORDER, MFI_COLS_NUCLEI, MFI_COLS_CELLS,
-    THRESHOLDS, THRESHOLDS_LOCAL_FOCUS,
 )
 
 # SLOPE_CS is defined locally in the original generate_html (not a global), so
@@ -53,6 +53,24 @@ SLOPE_CS = [
 _ASSETS = Path(__file__).resolve().parent / "assets"
 
 
+# ── HTML report ────────────────────────────────────────────────────────────────
+
+def _fetch_plotly_js() -> str:
+    """Download Plotly JS once and return as string for embedding."""
+    url = "https://cdn.plot.ly/plotly-2.35.2.min.js"
+    cache = Path(__file__).parent / ".plotly_cache.js"
+    if cache.exists():
+        return cache.read_text()
+    print("[html] Downloading Plotly JS for embedding (one-time)…")
+    try:
+        with urllib.request.urlopen(url, timeout=30) as r:
+            js = r.read().decode()
+        cache.write_text(js)
+        return js
+    except Exception as e:
+        print(f"[warn] Could not fetch Plotly: {e}. HTML will use CDN fallback.")
+        return f'/* CDN fallback */\ndocument.write(\'<script src="{url}"></script>\');'
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Payload construction  (logic copied verbatim from the original generate_html)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -63,10 +81,10 @@ def build_payload(cohort_name: str, plates_data: list[dict]) -> dict:
     the final grouping differs. Returns a plain dict ready for json.dumps.
     """
     html_cols = (
-        [c for cols in METRIC_COLS.values() for c in cols] +
-        list(COUNT_COLS.values()) + [AREA_COL] +
-        [f"ImageQuality_PercentMaximal_{ch}" for ch in CHANNELS] +
-        [f"ImageQuality_PercentMinimal_{ch}" for ch in CHANNELS]
+        [c for cols in config.METRIC_COLS.values() for c in cols] +
+        list(config.COUNT_COLS.values()) + [config.AREA_COL] +
+        [f"ImageQuality_PercentMaximal_{ch}" for ch in config.CHANNELS] +
+        [f"ImageQuality_PercentMinimal_{ch}" for ch in config.CHANNELS]
     )
 
     # ── Per-plate payload (collages, flags, per-well metrics) ────────────────
@@ -82,16 +100,16 @@ def build_payload(cohort_name: str, plates_data: list[dict]) -> dict:
         well_flags = {}
         for well, m in pqc.items():
             abs_fails, adp_fails = [], []
-            for mk, cols in METRIC_COLS.items():
+            for mk, cols in config.METRIC_COLS.items():
                 for col in cols:
                     v  = m.get(col)
-                    ch = COL_TO_CHANNEL.get(col, "")
+                    ch = config.COL_TO_CHANNEL.get(col, "")
                     if v is None or (isinstance(v, float) and np.isnan(v)):
                         continue
                     if mk == "FocusScore":
-                        lo, hi = THRESHOLDS_LOCAL_FOCUS.get(ch, (None, None))
+                        lo, hi = config.THRESHOLDS_LOCAL_FOCUS.get(ch, (None, None))
                     else:
-                        lo, hi = THRESHOLDS.get(mk, (None, None))
+                        lo, hi = config.THRESHOLDS.get(mk, (None, None))
                     abs_fail = (lo is not None and v < lo) or (hi is not None and v > hi)
                     adp_col = adp.get(mk, {}).get(col)
                     adp_fail = False
@@ -100,7 +118,7 @@ def build_payload(cohort_name: str, plates_data: list[dict]) -> dict:
                         adp_fail = (v < adp_lo and lo is not None and v < lo) or \
                                    (v > adp_hi and hi is not None and v > hi)
                     ch_lbl = ch
-                    met_lbl = METRIC_LABELS.get(mk, mk)
+                    met_lbl = config.METRIC_LABELS.get(mk, mk)
                     tag = f"{met_lbl}/{ch_lbl}"
                     if abs_fail:
                         abs_fails.append(tag)
@@ -131,10 +149,10 @@ def build_payload(cohort_name: str, plates_data: list[dict]) -> dict:
 
     # ── MAD scores (tooltip) ─────────────────────────────────────────────────
     _qc_cols_for_scores = (
-        [f"ImageQuality_PowerLogLogSlope_{ch}" for ch in CHANNELS] +
-        [f"ImageQuality_PercentMaximal_{ch}"      for ch in CHANNELS] +
-        [f"ImageQuality_PercentMinimal_{ch}"      for ch in CHANNELS] +
-        [f"ImageQuality_MedianIntensity_{ch}"  for ch in CHANNELS]
+        [f"ImageQuality_PowerLogLogSlope_{ch}" for ch in config.CHANNELS] +
+        [f"ImageQuality_PercentMaximal_{ch}"      for ch in config.CHANNELS] +
+        [f"ImageQuality_PercentMinimal_{ch}"      for ch in config.CHANNELS] +
+        [f"ImageQuality_MedianIntensity_{ch}"  for ch in config.CHANNELS]
     )
     calc_mad_scores = {}
     for col in _qc_cols_for_scores:
@@ -160,16 +178,16 @@ def build_payload(cohort_name: str, plates_data: list[dict]) -> dict:
         return result
 
     slope_red = _red_wells(plates_data,
-        [f"ImageQuality_PowerLogLogSlope_{ch}" for ch in CHANNELS],
-        {col: (-2.7, -1.3) for ch in CHANNELS
+        [f"ImageQuality_PowerLogLogSlope_{ch}" for ch in config.CHANNELS],
+        {col: (-2.7, -1.3) for ch in config.CHANNELS
          for col in [f"ImageQuality_PowerLogLogSlope_{ch}"]})
     pctmax_red = _red_wells(plates_data,
-        [f"ImageQuality_PercentMaximal_{ch}" for ch in CHANNELS],
-        {col: (None, 1.0) for ch in CHANNELS
+        [f"ImageQuality_PercentMaximal_{ch}" for ch in config.CHANNELS],
+        {col: (None, 1.0) for ch in config.CHANNELS
          for col in [f"ImageQuality_PercentMaximal_{ch}"]})
     pctmin_red = _red_wells(plates_data,
-        [f"ImageQuality_PercentMinimal_{ch}" for ch in CHANNELS],
-        {col: (None, 5.0) for ch in CHANNELS
+        [f"ImageQuality_PercentMinimal_{ch}" for ch in config.CHANNELS],
+        {col: (None, 5.0) for ch in config.CHANNELS
          for col in [f"ImageQuality_PercentMinimal_{ch}"]})
 
     medint_red = {}
@@ -177,7 +195,7 @@ def build_payload(cohort_name: str, plates_data: list[dict]) -> dict:
         pname = pd_["name"]
         count = 0
         for well in pd_["plate_qc"]:
-            for ch in CHANNELS:
+            for ch in config.CHANNELS:
                 col = f"ImageQuality_MedianIntensity_{ch}"
                 sc  = calc_mad_scores.get(col, {}).get(pname, {}).get(well)
                 if sc and abs(sc["z_co"]) > 3:
@@ -212,7 +230,7 @@ def build_payload(cohort_name: str, plates_data: list[dict]) -> dict:
     slope_specs = [
         {"col": col, "title": f"Slope — {ch}",
          "cmin": -3.0, "cmax": -1.0, "cs": SLOPE_CS}
-        for ch in CHANNELS
+        for ch in config.CHANNELS
         for col in [f"ImageQuality_PowerLogLogSlope_{ch}"]
     ]
     PCT_MAX_CS = [
@@ -226,13 +244,13 @@ def build_payload(cohort_name: str, plates_data: list[dict]) -> dict:
     pct_max_specs = [
         {"col": col, "title": f"PctMaximal — {ch}",
          "cmin": 0, "cmax": 2.0, "cs": PCT_MAX_CS}
-        for ch in CHANNELS
+        for ch in config.CHANNELS
         for col in [f"ImageQuality_PercentMaximal_{ch}"]
     ]
     pct_min_specs = [
         {"col": col, "title": f"PctMinimal — {ch}",
          "cmin": 0, "cmax": 10.0, "cs": PCT_MIN_CS}
-        for ch in CHANNELS
+        for ch in config.CHANNELS
         for col in [f"ImageQuality_PercentMinimal_{ch}"]
     ]
     medianint_specs = [
@@ -240,7 +258,7 @@ def build_payload(cohort_name: str, plates_data: list[dict]) -> dict:
          "cmin": _median_cs(col, plates_data)[1],
          "cmax": _median_cs(col, plates_data)[2],
          "cs":   _median_cs(col, plates_data)[0]}
-        for ch in CHANNELS
+        for ch in config.CHANNELS
         for col in [f"ImageQuality_MedianIntensity_{ch}"]
     ]
     count_ranges = {
@@ -259,10 +277,10 @@ def build_payload(cohort_name: str, plates_data: list[dict]) -> dict:
                 by_ch.setdefault(ch, {})[well] = vals
         mfi_payload[pname] = by_ch
 
-    _all_mfi_channels = [ch for ch in MFI_CHANNEL_ORDER
+    _all_mfi_channels = [ch for ch in config.MFI_DATA['MFI_CHANNEL_ORDER']
                          if any(ch in by_ch for by_ch in mfi_payload.values())]
-    _mfi_colors = {**{ch: c for ch, (_, c) in MFI_COLS_NUCLEI.items()},
-                   **{ch: c for ch, (_, c) in MFI_COLS_CELLS.items()}}
+    _mfi_colors = {**{ch: c for ch, (_, c) in config.MFI_DATA['MFI_COLS_NUCLEI'].items()},
+                   **{ch: c for ch, (_, c) in config.MFI_DATA['MFI_COLS_CELLS'].items()}}
     mfi_colors = {ch: _mfi_colors.get(ch, "#8ab0d0") for ch in _all_mfi_channels}
     mfi_img_payload = {pd_["name"]: pd_.get("mfi_img", {}) for pd_ in plates_data}
     radius_payload  = {pd_["name"]: pd_.get("radius_data", {}) for pd_ in plates_data}
