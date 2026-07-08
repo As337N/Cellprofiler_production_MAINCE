@@ -300,6 +300,82 @@ function buildOverlaySVG(plateName) {
   });
 }
  
+// ── Cross-platemap well highlight ─────────────────────────────────────────────
+// Registro de gráficos Plotly (heatmaps) para poder resaltar la misma celda en
+// todos. Cada entrada: divId de un heatmap con ejes x:COLS, y:ROWS_PLOTLY.
+const HEATMAP_DIVS = new Set();
+
+// Engancha el click de sincronización a un heatmap. IMPORTANTE: Plotly.react()
+// devuelve una promesa y solo expone gd.on() DESPUÉS de resolverla, así que el
+// binding debe hacerse en el .then — hacerlo síncrono falla ("gd.on is not a
+// function") y por eso los clicks en los platemaps no se registraban.
+function registerHeatmap(divIdOrPromise) {
+  // Compatibilidad: acepta tanto la promesa de Plotly.react como un divId string.
+  const p = (divIdOrPromise && typeof divIdOrPromise.then === 'function')
+    ? divIdOrPromise
+    : Promise.resolve(document.getElementById(divIdOrPromise));
+  p.then(gd => {
+    if (!gd || !gd.id) return;
+    HEATMAP_DIVS.add(gd.id);
+    if (gd._syncBound) return;
+    gd._syncBound = true;
+    // plotly_click → well. Usamos pointIndex (índices en la matriz z), que es
+    // robusto y NO depende de si el eje es categórico o del formato de point.x.
+    // z se construye como ROWS_PLOTLY.map(r => COLS.map(c => …)), por lo que
+    // pointIndex = [fila_en_ROWS_PLOTLY, col_en_COLS].
+    gd.on('plotly_click', ev => {
+      const pt = ev.points && ev.points[0];
+      if (!pt) return;
+      let well = null;
+      if (Array.isArray(pt.pointIndex) && pt.pointIndex.length === 2) {
+        const [yi, xi] = pt.pointIndex;
+        if (ROWS_PLOTLY[yi] && COLS[xi]) well = ROWS_PLOTLY[yi] + COLS[xi];
+      }
+      // Respaldo: normalizar x/y a etiqueta de columna/fila si no hubo pointIndex.
+      if (!well) {
+        const row = String(pt.y);
+        const colNum = parseInt(pt.x, 10);
+        const col = Number.isFinite(colNum) ? String(colNum).padStart(2, '0') : String(pt.x);
+        well = row + col;
+      }
+      if (currentPlate && DATA[currentPlate]?.wells?.[well]) {
+        selectWell(currentPlate, well);
+      }
+    });
+  });
+}
+
+// Rectángulo de resaltado sobre una celda categórica (índice ± 0.5)
+function heatmapHighlightShape(well) {
+  const row = well[0], col = well.slice(1);
+  const xi = COLS.indexOf(col);
+  const yi = ROWS_PLOTLY.indexOf(row);
+  if (xi < 0 || yi < 0) return [];
+  return [{
+    type: 'rect', xref: 'x', yref: 'y',
+    x0: xi - 0.5, x1: xi + 0.5, y0: yi - 0.5, y1: yi + 0.5,
+    line: { color: '#ffffff', width: 3 }, fillcolor: 'rgba(0,0,0,0)',
+    layer: 'above',
+  }];
+}
+
+function highlightWellEverywhere(well) {
+  // 1) MFI grids (divs): limpiar y marcar
+  document.querySelectorAll('.mfi-well-cell.well-selected')
+    .forEach(el => el.classList.remove('well-selected'));
+  MFI_CHANNELS.forEach(ch => {
+    const cell = document.getElementById(`mfi-cell-${ch}-${well}`);
+    if (cell) cell.classList.add('well-selected');
+  });
+
+  // 2) Plotly heatmaps: relayout con la shape (no re-renderiza los datos)
+  const shape = heatmapHighlightShape(well);
+  HEATMAP_DIVS.forEach(divId => {
+    const div = document.getElementById(divId);
+    if (div && div.data) Plotly.relayout(div, { shapes: shape });
+  });
+}
+
 function selectWell(plateName, well) {
   if (selectedWell) {
     const prev = document.getElementById(`sv-${selectedWell}`);
@@ -308,7 +384,8 @@ function selectWell(plateName, well) {
   selectedWell = well;
   const rect = document.getElementById(`sv-${well}`);
   if (rect) rect.classList.add('selected');
- 
+
+  highlightWellEverywhere(well);
   renderWellInfo(plateName, well);
   renderWellMontage(plateName, well);
 }
@@ -552,9 +629,9 @@ function heatmapLayout(title, extraY) {
     paper_bgcolor:'#090b14', plot_bgcolor:'#090b14',
     margin:{t:32,b:42,l:42,r:8}, height:340, width:520,
     title:{text:title, font:{size:11,color:'#8ab0e0'}, x:0.5},
-    xaxis:{ tickfont:{size:9}, showgrid:!filtered, gridcolor, zeroline:false,
+    xaxis:{ type:'category', tickfont:{size:9}, showgrid:!filtered, gridcolor, zeroline:false,
              tickvals:COLS, ticktext:COLS.map(c=>parseInt(c)) },
-    yaxis:{ tickfont:{size:9}, showgrid:!filtered, gridcolor, zeroline:false,
+    yaxis:{ type:'category', tickfont:{size:9}, showgrid:!filtered, gridcolor, zeroline:false,
              title: extraY ? {text:'Row', font:{size:9}} : undefined },
     hoverlabel:{
       bgcolor:'#141c34', bordercolor:'#304080',
@@ -586,9 +663,9 @@ function renderMetrics(plateName) {
         card.className = 'channel-card';
         card.innerHTML = `<div id="${cid}"></div>`;
         grid.appendChild(card);
-        Plotly.react(cid, [makeHeatmap(pd, s)],
+        registerHeatmap(Plotly.react(cid, [makeHeatmap(pd, s)],
           heatmapLayout(s.title, si % 3 === 0),
-          {responsive:true, displayModeBar:false});
+          {responsive:true, displayModeBar:false}));
       });
     }, 0);
     if (isFirst) firstGroup = false;
@@ -637,7 +714,7 @@ function renderCounts(plateName) {
                (below ? `<br><span style="color:#ff4444">⚠ below threshold (${threshold})</span>` : '');
       }));
 
-      Plotly.react(cid,
+      return Plotly.react(cid,
         [{type:'heatmap',z,text,hoverinfo:'text',x:COLS,y:ROWS_PLOTLY,colorscale:'Viridis',
            zmin:cRange[0],zmax:cRange[1],xgap:4,ygap:4,
            colorbar:{thickness:14,len:0.85,tickfont:{size:10},x:1.02,xanchor:'left'}}],
@@ -645,14 +722,14 @@ function renderCounts(plateName) {
           font:{color:'#c8d8f0',size:11},margin:{t:40,b:50,l:50,r:70},
           height:340, width:520,
           title:{text:`Cells (umbral: ${threshold})`,font:{size:13,color:'#a8c8ff'},x:0.5},
-          xaxis:{title:'Column',tickfont:{size:10},tickvals:COLS,ticktext:COLS.map(c=>parseInt(c)),
+          xaxis:{type:'category',title:'Column',tickfont:{size:10},tickvals:COLS,ticktext:COLS.map(c=>parseInt(c)),
                   showgrid:!filtered,gridcolor,zeroline:false,fixedrange:true,automargin:false},
-          yaxis:{title:'Row',tickfont:{size:10},showgrid:!filtered,gridcolor,zeroline:false,fixedrange:true,automargin:false},
+          yaxis:{type:'category',title:'Row',tickfont:{size:10},showgrid:!filtered,gridcolor,zeroline:false,fixedrange:true,automargin:false},
           hoverlabel:{bgcolor:'#141c34',bordercolor:'#304080',font:{size:12,color:'#d0e0ff',family:'monospace'}},
         },{responsive:false,displayModeBar:false});
     }
 
-    drawCellsHeatmap();
+    registerHeatmap(drawCellsHeatmap());
 
   })();
  
@@ -693,7 +770,7 @@ function renderCounts(plateName) {
     }));
     const filtered = isFiltered();
     const gridcolor = filtered ? 'rgba(0,0,0,0)' : 'rgba(80,90,120,0.4)';
-    Plotly.react(cid,
+    registerHeatmap(Plotly.react(cid,
       [{type:'heatmap',z,text,hoverinfo:'text',x:COLS,y:ROWS_PLOTLY,
          colorscale:ratioCS, zmin:0.93, zmax:1.0, xgap:4,ygap:4,
          colorbar:{thickness:14,len:0.85,tickfont:{size:10},
@@ -702,11 +779,11 @@ function renderCounts(plateName) {
        {paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#0a0c18',
         font:{color:'#c8d8f0',size:11},margin:{t:40,b:50,l:50,r:20},height:340, width:520,
         title:{text:'Cells / Nuclei ratio',font:{size:13,color:'#a8c8ff'},x:0.5},
-        xaxis:{title:'Column',tickfont:{size:10},tickvals:COLS,ticktext:COLS.map(c=>parseInt(c)),
+        xaxis:{type:'category',title:'Column',tickfont:{size:10},tickvals:COLS,ticktext:COLS.map(c=>parseInt(c)),
                 showgrid:!filtered,gridcolor,zeroline:false},
-        yaxis:{title:'Row',tickfont:{size:10},showgrid:!filtered,gridcolor,zeroline:false},
+        yaxis:{type:'category',title:'Row',tickfont:{size:10},showgrid:!filtered,gridcolor,zeroline:false},
         hoverlabel:{bgcolor:'#141c34',bordercolor:'#304080',font:{size:12,color:'#d0e0ff',family:'monospace'}},
-      },{responsive:true,displayModeBar:false});
+      },{responsive:true,displayModeBar:false}));
   })();
  
   // Card 3: Illumination Artifacts count heatmap (white=0, dark red=100+)
@@ -739,7 +816,7 @@ function renderCounts(plateName) {
     }));
     const filtered2 = isFiltered();
     const gridcolor2 = filtered2 ? 'rgba(0,0,0,0)' : 'rgba(80,90,120,0.4)';
-    Plotly.react(cid,
+    registerHeatmap(Plotly.react(cid,
       [{type:'heatmap',z,text,hoverinfo:'text',x:COLS,y:ROWS_PLOTLY,
          colorscale:artifactCS, zmin:0, zmax:100, xgap:4,ygap:4,
          colorbar:{thickness:14,len:0.85,tickfont:{size:10},
@@ -747,11 +824,11 @@ function renderCounts(plateName) {
        {paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#0a0c18',
         font:{color:'#c8d8f0',size:11},margin:{t:40,b:50,l:50,r:20},height:340, width:520,
         title:{text:'Illum. Artifacts',font:{size:13,color:'#a8c8ff'},x:0.5},
-        xaxis:{title:'Column',tickfont:{size:10},tickvals:COLS,ticktext:COLS.map(c=>parseInt(c)),
+        xaxis:{type:'category',title:'Column',tickfont:{size:10},tickvals:COLS,ticktext:COLS.map(c=>parseInt(c)),
                 showgrid:!filtered2,gridcolor:gridcolor2,zeroline:false},
-        yaxis:{title:'Row',tickfont:{size:10},showgrid:!filtered2,gridcolor:gridcolor2,zeroline:false},
+        yaxis:{type:'category',title:'Row',tickfont:{size:10},showgrid:!filtered2,gridcolor:gridcolor2,zeroline:false},
         hoverlabel:{bgcolor:'#141c34',bordercolor:'#304080',font:{size:12,color:'#d0e0ff',family:'monospace'}},
-      },{responsive:true,displayModeBar:false});
+      },{responsive:true,displayModeBar:false}));
   })();
   // ── Histograms row ────────────────────────────────────────────────────────
   const histRow = document.getElementById('counts-hist-row');
@@ -952,7 +1029,7 @@ function renderCounts(plateName) {
 
     const filtered3  = isFiltered();
     const gridcolor3 = filtered3 ? 'rgba(0,0,0,0)' : 'rgba(80,90,120,0.4)';
-    Plotly.react(cid,
+    registerHeatmap(Plotly.react(cid,
       [{type:'heatmap', z, text, hoverinfo:'text', x:COLS, y:ROWS_PLOTLY,
          colorscale:'Viridis', zmin:rMin, zmax:rMax, xgap:4, ygap:4,
          colorbar:{thickness:14, len:0.85, tickfont:{size:10}}}],
@@ -970,7 +1047,7 @@ function renderCounts(plateName) {
                      font:{size:12, color:'#d0e0ff', family:'monospace'}},
       },
       {responsive:true, displayModeBar:false}
-    );
+    ));
 
     // ── Histograma ────────────────────────────────────────────────────────
     const histVals = Object.entries(srcData)
@@ -1129,6 +1206,9 @@ function mfiRenderPlatemap(channel, plateName) {
         tt.style.left=(e.clientX+15)+'px'; tt.style.top=(e.clientY-12)+'px';
       });
       cell.addEventListener('mouseleave', () => document.getElementById('mfi-tooltip').style.display='none');
+      if (visible) cell.addEventListener('click', () => {
+        if (currentPlate) selectWell(currentPlate, well);
+      });
       grid.appendChild(cell);
     });
   });
@@ -1311,6 +1391,9 @@ function applyGlobalFilter() {
   renderMetrics(currentPlate);
   renderCounts(currentPlate);
   renderMFI();
+  // Los gráficos se recrean en setTimeout(…,0); re-aplicar el resaltado del well
+  // seleccionado una vez que las celdas/heatmaps existan de nuevo.
+  if (selectedWell) setTimeout(() => highlightWellEverywhere(selectedWell), 0);
 }
 
  

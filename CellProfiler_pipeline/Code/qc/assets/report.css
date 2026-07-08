@@ -186,6 +186,9 @@
                            border-color: rgba(255,255,255,0.6) !important; }
   .mfi-well-cell.dimmed { opacity: 0.12; }
   .mfi-well-cell.lit    { opacity: 1 !important; border-color: rgba(255,255,255,0.5); }
+  .mfi-well-cell.well-selected { border-color: #ffffff !important; border-width: 2.5px !important;
+                                 box-shadow: 0 0 0 1px #ffffff, 0 0 8px rgba(255,255,255,0.5);
+                                 z-index: 5; }
   /* Tooltip */
   #mfi-tooltip { position: fixed; background: #141c34; border: 1px solid #304080;
                    border-radius: 7px; padding: 8px 13px; font-size: 11px;
