@@ -1,4 +1,4 @@
-  :root {
+:root {
     --bg:     #0d0f1a; --panel: #13162a; --border: #1e2540;
     --text:   #c8d8f0; --muted: #6a7a9a;
     --pass:   #4bd760; --fail:  #ff4444; --warn: #ffbe00; --accent: #3a7bd5;
@@ -67,7 +67,7 @@
   .plate-name-display { font-size: 1rem; color: #a8c8ff; font-weight: bold; min-width: 110px; text-align: center; }
  
   /* Well detail panel */
-  .browser-body { display: grid; grid-template-columns: 280px 1fr; gap: 14px; margin-bottom: 14px; }
+  .browser-body { display: grid; grid-template-columns: 280px 1fr 280px; gap: 14px; margin-bottom: 14px; }
   .well-info-panel { background: var(--panel); border: 1px solid var(--border);
                       border-radius: 8px; padding: 14px; overflow-y: auto; max-height: 480px; }
   .well-info-panel h3 { font-size: 0.95rem; color: #a8c8ff; margin-bottom: 8px; }
@@ -88,6 +88,16 @@
                    align-items: center; justify-content: center; min-height: 300px; }
   .well-montage img { max-width: 100%; max-height: 1000px; border-radius: 4px; }
   .well-montage .no-img { color: var(--muted); font-size: 0.82rem; text-align: center; }
+  /* Site overlay on the montage */
+  .montage-wrap { position: relative; display: inline-block; line-height: 0; }
+  .montage-wrap img { display: block; }
+  .montage-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+  .site-cell { fill: transparent; stroke: rgba(255,255,255,0.10); stroke-width: 0.006;
+               cursor: pointer; transition: fill 0.1s; }
+  .site-cell:hover { fill: rgba(58,123,213,0.28); }
+  .site-cell.selected { fill: rgba(58,123,213,0.45) !important;
+                        stroke: #ffffff !important; stroke-width: 0.03 !important; }
+  .site-cell.site-empty { cursor: default; pointer-events: none; }
   .section-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.07em;
                   color: #4a90d8; font-weight: 700; margin: 10px 0 4px;
                   border-bottom: 1px solid #1e2f50; padding-bottom: 3px; }

@@ -209,6 +209,7 @@ PLATES.forEach((p, i) =>
  
 let currentPlate = null;
 let selectedWell = null;
+let selectedSite = null;
  
 function renderPlate(idx) {
   const name    = PLATES[idx];
@@ -227,6 +228,8 @@ function renderPlate(idx) {
     '<p class="no-well">Click a well in the overview below to inspect it.</p>';
   document.getElementById('well-montage').innerHTML =
     '<span class="no-img">Select a well to see its site montage.</span>';
+  selectedSite = null;
+  clearSiteInfo();
  
   renderMetrics(name);
   renderCounts(name);
@@ -367,14 +370,122 @@ function renderWellMontage(plateName, well) {
   const pd  = DATA[plateName];
   const b64 = pd.flagged_b64[well];
   const el  = document.getElementById('well-montage');
-  if (b64) {
-    el.innerHTML = `<img src="data:image/jpeg;base64,${b64}" alt="Well ${well} montage">`;
-  } else {
+  selectedSite = null;
+  clearSiteInfo();
+
+  if (!b64) {
     const flags = pd.well_flags[well];
     el.innerHTML = flags
       ? '<span class="no-img">Flagged well — montage not pre-generated.</span>'
       : '<span class="no-img">Well passes all QC thresholds — no image preloaded.</span>';
+    return;
   }
+
+  // Montage is a square 3×3 grid of sites (build_well_montage). Overlay a
+  // matching 3×3 SVG of clickable cells so each site can be inspected.
+  const siteData = (pd.site_data || {})[well] || {};
+  const nGrid    = 3;  // ceil(sqrt(9)); montage is padded to a full 3×3
+  el.innerHTML = `
+    <div class="montage-wrap">
+      <img src="data:image/jpeg;base64,${b64}" alt="Well ${well} montage">
+      <svg class="montage-overlay" viewBox="0 0 ${nGrid} ${nGrid}"
+           preserveAspectRatio="none"></svg>
+    </div>`;
+
+  const svg = el.querySelector('.montage-overlay');
+  for (let s = 1; s <= nGrid * nGrid; s++) {
+    const gr = Math.floor((s - 1) / nGrid);
+    const gc = (s - 1) % nGrid;
+    const hasData = Object.prototype.hasOwnProperty.call(siteData, String(s));
+
+    // Peor color entre todas las métricas del sitio (rojo > amarillo > verde)
+    let border = null;
+    if (hasData) {
+      const m = siteData[String(s)];
+      const colors = ALL_METRIC_SPECS
+        .map(spec => specColor(m[spec.col], spec))
+        .filter(Boolean);
+      border = worstColor(colors);
+    }
+
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('class', 'site-cell' + (hasData ? '' : ' site-empty'));
+    rect.setAttribute('id', `site-${s}`);
+    rect.setAttribute('x', gc + 0.02);
+    rect.setAttribute('y', gr + 0.02);
+    rect.setAttribute('width', 0.96);
+    rect.setAttribute('height', 0.96);
+    // style.* (no setAttribute) para ganarle a la regla CSS .site-cell
+    if (border) {
+      rect.style.stroke = border;
+      rect.style.strokeWidth = '0.02';
+    }
+    if (hasData) rect.onclick = () => selectSite(plateName, well, s);
+    svg.appendChild(rect);
+  }
+}
+
+function selectSite(plateName, well, site) {
+  if (selectedSite != null) {
+    const prev = document.getElementById(`site-${selectedSite}`);
+    if (prev) prev.classList.remove('selected');
+  }
+  selectedSite = site;
+  const rect = document.getElementById(`site-${site}`);
+  if (rect) rect.classList.add('selected');
+  renderSiteInfo(plateName, well, site);
+}
+
+function clearSiteInfo() {
+  const el = document.getElementById('site-info');
+  if (el) el.innerHTML =
+    '<p class="no-well">Click a site tile in the montage to inspect it.</p>';
+}
+
+function renderSiteInfo(plateName, well, site) {
+  const pd = DATA[plateName];
+  const m  = ((pd.site_data || {})[well] || {})[String(site)] || {};
+
+  // Same colour logic as the well-info panel (interpolates the spec colorscale).
+  function siteSpecColor(v, spec) {
+    if (v == null) return '';
+    const t = Math.max(0, Math.min(1, (v - spec.cmin) / (spec.cmax - spec.cmin)));
+    const cs = spec.cs;
+    for (let i = 0; i < cs.length - 1; i++) {
+      if (t >= cs[i][0] && t <= cs[i+1][0]) {
+        if (cs[i][1] === cs[i+1][1]) return cs[i][1];
+        if (cs[i][0] === cs[i+1][0]) return cs[i+1][1];
+        return cs[i][1];
+      }
+    }
+    return cs[cs.length-1][1];
+  }
+
+  let html = `<h3>${well} · site ${site}</h3>
+    <div class="well-compound">${(pd.wells[well]||{}).compound || '—'}</div>`;
+
+  html += `<div class="section-label">Cell counts</div>`;
+  [['Cells','Count_Cells'],['Nuclei','Count_Nuclei'],
+   ['Raw nuclei','Count_Raw_nuclei'],['Artifacts','Count_Illum_artifacts_filtered']]
+   .forEach(([lbl,col]) => {
+    const v = m[col];
+    html += `<div class="metric-row">
+      <span class="metric-label">${lbl}</span>
+      <span class="metric-val">${v != null ? Math.round(v) : '—'}</span>
+    </div>`;
+  });
+
+  ALL_METRIC_SPECS.forEach(spec => {
+    const v = m[spec.col];
+    if (v == null) return;
+    const color = siteSpecColor(v, spec);
+    html += `<div class="metric-row">
+      <span class="metric-label">${spec.title}</span>
+      <span class="metric-val" style="color:${color}">${fmt3(v)}</span>
+    </div>`;
+  });
+
+  document.getElementById('site-info').innerHTML = html;
 }
  
 slider.oninput   = () => renderPlate(+slider.value);

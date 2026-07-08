@@ -1227,16 +1227,21 @@ class Collage:
         self.engine       = ThresholdEngine(n_sigma=n_sigma)
         self.output_path.mkdir(parents=True, exist_ok=True)
 
-        # Auto-detect QC TSV
-        self.qc = qc.loaders.load_qc_tsv(qc_tsv, qc.config.AREA_COL, qc.config.METRIC_COLS)
-        if not self.qc:
+        # Auto-detect QC TSV — load once at SITE level, derive well level from it.
+        self.qc_sites = qc.loaders.load_qc_tsv_sites(
+            qc_tsv, qc.config.AREA_COL, qc.config.METRIC_COLS)
+        if not self.qc_sites:
             _p = self.input_dir / "Measurements" / "Image.txt"
             if _p.exists():
                 print(f"[qc] Auto-detected: {_p}")
-                self.qc = qc.loaders.load_qc_tsv(_p, qc.config.AREA_COL, qc.config.METRIC_COLS)
-            if not self.qc:
+                self.qc_sites = qc.loaders.load_qc_tsv_sites(
+                    _p, qc.config.AREA_COL, qc.config.METRIC_COLS)
+            if not self.qc_sites:
                 print(f"[warn] No QC measurements found. Searched: {_p}")
                 print(f"[warn] Use --qc to specify the path explicitly.")
+        # Per-well QC is derived from the site-level source of truth.
+        self.qc = qc.loaders.collapse_sites_to_wells(
+            self.qc_sites, qc.config.AREA_COL, qc.config.METRIC_COLS)
         
 
         # Auto-detect Cells.txt / Nuclei.txt for MFI
@@ -1366,6 +1371,8 @@ class Collage:
 
         plate_qc  = self._lookup_plate(self.qc,      plate_name, label="QC")
         plate_map = self._lookup_plate(self.platemap, plate_name, label="platemap")
+        # Site-level QC for this plate: {well: {field: {col: val}}}
+        plate_qc_sites = self._lookup_plate(self.qc_sites, plate_name, label="QC-sites")
 
         # Fit adaptive thresholds for this plate
         if plate_qc:
@@ -1443,6 +1450,7 @@ class Collage:
             "overview_cw":   ov_cw,
             "overview_ch":   ov_ch,
             "plate_qc":      plate_qc,
+            "plate_qc_sites": plate_qc_sites,
             "plate_map":     plate_map,
             "flagged_b64":   flagged_b64,
             "engine_adaptive": self.engine._adaptive,

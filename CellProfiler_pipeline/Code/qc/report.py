@@ -145,6 +145,15 @@ def build_payload(cohort_name: str, plates_data: list[dict]) -> dict:
                 }
                 for well, m in pqc.items()
             }),
+            # Per-site QC: { well: { field: { col: val } } } — same columns as the
+            # well-info panel, so the site panel can reuse the well-level specs.
+            "site_data": _round_floats({
+                well: {
+                    str(field): {c: fvals.get(c) for c in html_cols if c in fvals}
+                    for field, fvals in fields.items()
+                }
+                for well, fields in (pd_.get("plate_qc_sites") or {}).items()
+            }),
         }
 
     # ── MAD scores (tooltip) ─────────────────────────────────────────────────

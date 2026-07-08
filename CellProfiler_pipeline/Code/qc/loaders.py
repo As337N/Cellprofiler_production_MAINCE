@@ -3,9 +3,82 @@ from pathlib import Path
 import polars as pl
 from qc import config
 
+# ── Aggregation policy ─────────────────────────────────────────────────────────
+# Site-level values collapse to well-level with a per-column rule:
+#   · mean_cols (metrics: Slope, MedianIntensity, FocusScore…) → mean over sites
+#   · pct_cols  (PercentMaximal / PercentMinimal)              → mean over sites
+#   · sum_cols  (Count_*, AREA_COL)                            → sum over sites
+# These mirror exactly the aggregation performed inside load_qc_tsv_sites so that
+# a collapsed well is identical to what a native per-well group_by would produce.
+
+def _classify_cols(cols, AREA_COL, METRIC_COLS):
+    """Split a list of column names into (mean, pct, sum) aggregation buckets."""
+    metric_cols = {c for vals in METRIC_COLS.values() for c in vals}
+    mean_cols, pct_cols, sum_cols = [], [], []
+    for c in cols:
+        if c in metric_cols:
+            mean_cols.append(c)
+        elif (c.startswith("ImageQuality_PercentMaximal_") or
+              c.startswith("ImageQuality_PercentMinimal_")):
+            pct_cols.append(c)
+        elif c.startswith("Count_") or c == AREA_COL:
+            sum_cols.append(c)
+        else:
+            # Unknown columns default to mean (safe for intensity-like values).
+            mean_cols.append(c)
+    return mean_cols, pct_cols, sum_cols
+
+
+def collapse_sites_to_wells(site_qc: dict, AREA_COL, METRIC_COLS) -> dict:
+    """Collapse {plate: {well: {field: {col: val}}}} → {plate: {well: {col: val}}}.
+
+    Each column is aggregated across a well's sites using the policy above
+    (metrics/percentages averaged, counts/area summed). Nulls and NaNs are
+    ignored per column; a well with no valid value for a column omits it.
+
+    This is the single source of truth for per-well QC: load once at site level,
+    derive well level on demand instead of re-reading the TSV.
+    """
+    result: dict = {}
+    for plate, wells in site_qc.items():
+        result[plate] = {}
+        for well, fields in wells.items():
+            # Union of columns present across this well's sites.
+            all_cols = {c for fv in fields.values() for c in fv}
+            mean_cols, pct_cols, sum_cols = _classify_cols(
+                all_cols, AREA_COL, METRIC_COLS)
+
+            collapsed: dict = {}
+            for col in mean_cols + pct_cols:
+                vals = [fv[col] for fv in fields.values()
+                        if col in fv and fv[col] is not None
+                        and not (isinstance(fv[col], float) and _isnan(fv[col]))]
+                if vals:
+                    collapsed[col] = sum(vals) / len(vals)
+            for col in sum_cols:
+                vals = [fv[col] for fv in fields.values()
+                        if col in fv and fv[col] is not None
+                        and not (isinstance(fv[col], float) and _isnan(fv[col]))]
+                if vals:
+                    collapsed[col] = sum(vals)
+            result[plate][well] = collapsed
+    return result
+
+
+def _isnan(x) -> bool:
+    return x != x
+
+
 # ── Data loaders ───────────────────────────────────────────────────────────────
-def load_qc_tsv(tsv_path, AREA_COL, METRIC_COLS) -> dict:
-    """Load CellProfiler Image.txt TSV -> {plate: {well: {col: value}}}."""
+def load_qc_tsv_sites(tsv_path, AREA_COL, METRIC_COLS) -> dict:
+    """Per-site QC values, sin colapsar sites.
+
+    Agrupa por [plate, well, field]. Es la fuente única de verdad: el nivel de
+    well se deriva bajo demanda con collapse_sites_to_wells(), evitando releer el
+    TSV y garantizando que ambos niveles no diverjan.
+
+    Returns {plate: {well: {field: {col: value}}}}.
+    """
     if tsv_path is None:
         return {}
     tsv_path = Path(tsv_path)
@@ -16,8 +89,12 @@ def load_qc_tsv(tsv_path, AREA_COL, METRIC_COLS) -> dict:
     df        = pl.read_csv(tsv_path, separator="\t")
     plate_col = "Metadata_Plate" if "Metadata_Plate" in df.columns else None
     well_col  = "Metadata_Well"  if "Metadata_Well"  in df.columns else None
+    field_col = "Metadata_Field" if "Metadata_Field" in df.columns else None
     if well_col is None:
-        print("[warn] Metadata_Well not found — QC enrichment disabled.")
+        print("[warn] Metadata_Well not found — site-level QC disabled.")
+        return {}
+    if field_col is None:
+        print("[warn] Metadata_Field not found — site-level QC disabled.")
         return {}
 
     mean_cols = list(dict.fromkeys(
@@ -33,11 +110,8 @@ def load_qc_tsv(tsv_path, AREA_COL, METRIC_COLS) -> dict:
         if c.startswith("Count_") or c == AREA_COL
     ))
 
-    gkeys = [plate_col, well_col] if plate_col else [well_col]
+    gkeys = ([plate_col] if plate_col else []) + [well_col, field_col]
 
-    # Build all aggregation expressions in one pass. pct_cols overlap-safe:
-    # mean_cols and pct_cols are disjoint by construction (different prefixes),
-    # and sum_cols is filtered below to avoid double-counting any shared name.
     agg_exprs = (
         [pl.col(c).mean() for c in mean_cols] +
         [pl.col(c).mean() for c in pct_cols] +
@@ -54,14 +128,17 @@ def load_qc_tsv(tsv_path, AREA_COL, METRIC_COLS) -> dict:
         [c for c in sum_cols if c not in mean_cols and c not in pct_cols]
     )
 
-    result = defaultdict(dict)
+    result: dict = {}
     for row in agg.iter_rows(named=True):
         plate = str(row[plate_col]).strip() if plate_col else "Plate"
         well  = str(row[well_col]).strip().upper()
-        result[plate][well] = {c: row[c] for c in all_cols if c in row}
+        field = int(row[field_col])
+        (result.setdefault(plate, {})
+               .setdefault(well, {})[field]) = {c: row[c] for c in all_cols if c in row}
 
-    print(f"[qc] {sum(len(v) for v in result.values())} wells "
-          f"across {len(result)} plate(s).")
+    n_sites = sum(len(fields) for p in result.values() for fields in p.values())
+    print(f"[qc-sites] {n_sites} sites across "
+          f"{sum(len(v) for v in result.values())} wells, {len(result)} plate(s).")
     return result
 
 
