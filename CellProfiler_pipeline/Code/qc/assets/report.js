@@ -1944,7 +1944,7 @@ renderPlate(0);
 
   // Viewport fijo (el canvas visible). La imagen se dibuja escalada por zoom con
   // offset pan. clamp del pan para no salir de la imagen.
-  const VIEW = 512;
+  const VIEW = 720;
   function clampPan() {
     const m = S.meta;
     const scale = baseScale() * S.zoom;
