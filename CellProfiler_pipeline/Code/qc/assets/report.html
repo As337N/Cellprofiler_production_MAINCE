@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>__COHORT__ — Cell Painting QC Report</title>
 <script>__PLOTLY__</script>
+<script>__UTIF__</script>
 <style>__CSS__</style>
 </head>
 <body>
@@ -262,7 +263,113 @@
   <div id="mfi-content"></div>
   <div id="mfi-tooltip"></div>
 </div>
- 
+
+<!-- 6. IMAGE VIEWER (optional layer — activates when a CSV + TIFFs are loaded) -->
+<div class="section" id="imgviewer-section">
+  <h2>Image Viewer <span class="iv-optional">optional</span></h2>
+  <div class="feature-audit">
+    <div class="audit-row">
+      View the real microscopy image for a given <b style="color:#a8c8f0;">well · site · channel</b>.
+      This layer is <b>optional</b> and keeps the report lightweight: images are
+      <b>not</b> embedded. You provide a CSV that links each image, then select the
+      <span class="thresh">.tif</span> files from your computer — nothing is uploaded, all
+      decoding happens locally in your browser.
+    </div>
+    <hr class="audit-sep">
+    <div class="audit-row" style="color:var(--muted);font-size:0.78rem;">
+      <b style="color:#ffbe00;">Important — intensity display is for visualization only.</b>
+      The image shown is a 16-bit original mapped to 8-bit for display (windowing),
+      with optional brightness/contrast. These adjustments change only what you
+      <i>see</i>; they do <b>not</b> alter the underlying data. Quantitative
+      measurements in this report come from the original 16-bit pixel values, shown
+      in the histogram below. Use the image to inspect morphology and artifacts, not
+      to judge absolute intensity by eye.
+    </div>
+  </div>
+
+  <!-- Loaders -->
+  <div class="iv-loaders">
+    <label class="iv-btn">
+      <input type="file" id="iv-csv-input" accept=".csv,.txt" hidden>
+      1 · Load image CSV
+    </label>
+    <label class="iv-btn iv-btn-disabled" id="iv-files-label">
+      <input type="file" id="iv-files-input" accept=".tif,.tiff" multiple hidden disabled>
+      2 · Select .tif files
+    </label>
+    <span class="iv-status" id="iv-status">No CSV loaded — the report works fully without it.</span>
+  </div>
+
+  <!-- Viewer body: hidden until ready -->
+  <div class="iv-body" id="iv-body" style="display:none;">
+    <!-- Selectors -->
+    <div class="iv-selectors">
+      <label>Plate <select id="iv-plate"></select></label>
+      <label>Well <select id="iv-well"></select></label>
+      <label>Site <select id="iv-field"></select></label>
+      <div class="iv-channel-tabs" id="iv-channel-tabs"></div>
+    </div>
+
+    <div class="iv-main">
+      <!-- Left: image canvas + transform header -->
+      <div class="iv-image-col">
+        <div class="iv-transform-head" id="iv-transform-head">
+          <span class="iv-th-title">Display transform</span>
+          <span class="iv-th-detail" id="iv-transform-detail">—</span>
+        </div>
+        <div class="iv-canvas-wrap">
+          <canvas id="iv-canvas"></canvas>
+          <div class="iv-canvas-msg" id="iv-canvas-msg">Select a well · site · channel to view its image.</div>
+        </div>
+        <!-- Alerts -->
+        <div class="iv-alerts" id="iv-alerts"></div>
+      </div>
+
+      <!-- Right: metadata + histogram + controls -->
+      <div class="iv-side-col">
+        <div class="iv-meta" id="iv-meta">
+          <div class="section-label">Image metadata</div>
+          <div id="iv-meta-rows"><span class="no-well">—</span></div>
+        </div>
+
+        <div class="iv-hist">
+          <div class="section-label">Original pixel intensity (16-bit)</div>
+          <canvas id="iv-hist-canvas" width="260" height="110"></canvas>
+          <div class="iv-hist-stats" id="iv-hist-stats"></div>
+        </div>
+
+        <div class="iv-controls">
+          <div class="section-label">Windowing (visualization only)</div>
+          <div class="iv-ctrl-row">
+            <label>Percentile low</label>
+            <input type="number" id="iv-plo" value="0.5" min="0" max="50" step="0.1">
+            <label>high</label>
+            <input type="number" id="iv-phi" value="99.5" min="50" max="100" step="0.1">
+            <button class="iv-mini-btn" id="iv-auto">Auto</button>
+          </div>
+          <div class="iv-ctrl-row">
+            <label>Window min</label>
+            <input type="number" id="iv-wlo" step="1">
+            <label>max</label>
+            <input type="number" id="iv-whi" step="1">
+          </div>
+          <div class="iv-ctrl-row">
+            <label>Brightness</label>
+            <input type="range" id="iv-brightness" min="0.2" max="4" step="0.05" value="1">
+            <span class="iv-ctrl-val" id="iv-brightness-val">1.00×</span>
+          </div>
+          <div class="iv-ctrl-row">
+            <label>Contrast</label>
+            <input type="range" id="iv-contrast" min="0.2" max="4" step="0.05" value="1">
+            <span class="iv-ctrl-val" id="iv-contrast-val">1.00×</span>
+          </div>
+          <button class="iv-mini-btn" id="iv-reset">Reset display</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 </div><!-- /container -->
 <script>
 __PAYLOAD__

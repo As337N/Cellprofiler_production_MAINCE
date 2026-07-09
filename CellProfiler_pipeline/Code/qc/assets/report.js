@@ -1550,3 +1550,358 @@ function applyGlobalFilter() {
  
 // ── Init ──────────────────────────────────────────────────────────────────────
 renderPlate(0);
+// ═════════════════════════════════════════════════════════════════════════════
+// IMAGE VIEWER (optional layer) — real TIFF images per well·site·channel.
+// Files are user-provided (file picker), decoded locally with UTIF.js. Nothing
+// is uploaded. Intensity windowing is visualization-only; the histogram shows
+// the untouched 16-bit values so quantitative judgement stays on real data.
+// ═════════════════════════════════════════════════════════════════════════════
+(function initImageViewer() {
+  const IMG_CHANNELS = ['Hoechst', 'Syto', 'Golgi', 'ER', 'Mito', 'Brightfield'];
+  const COMPRESSION_NAMES = {1:'Uncompressed',5:'LZW',6:'JPEG (old)',7:'JPEG',
+    8:'Deflate (Adobe)',32773:'PackBits',32946:'Deflate'};
+  const SAMPLEFORMAT_NAMES = {1:'unsigned int',2:'signed int',3:'float'};
+  const PHOTOMETRIC_NAMES = {0:'WhiteIsZero',1:'BlackIsZero',2:'RGB',3:'Palette'};
+
+  // Estado del visor
+  const S = {
+    imgIndex: null, fileMap: null,
+    plate: null, well: null, field: null, channel: 'Hoechst',
+    meta: null, hist: null, win: {lo:0, hi:65535},
+    brightness: 1, contrast: 1,
+  };
+
+  // ── CSV mínimo (el Image.txt reducido: sin comas internas) ──────────────────
+  function parseCSV(text) {
+    const lines = text.replace(/\r\n/g, '\n').split('\n').filter(l => l.length);
+    if (!lines.length) return [];
+    const split = line => {
+      // soporta campos entrecomillados por robustez, aunque el CSV no los use
+      const out = []; let cur = '', q = false;
+      for (let i = 0; i < line.length; i++) {
+        const c = line[i];
+        if (q) { if (c === '"') q = false; else cur += c; }
+        else if (c === '"') q = true;
+        else if (c === ',') { out.push(cur); cur = ''; }
+        else cur += c;
+      }
+      out.push(cur); return out;
+    };
+    const header = split(lines[0]);
+    return lines.slice(1).map(l => {
+      const cells = split(l), row = {};
+      header.forEach((h, i) => row[h.trim()] = (cells[i] ?? '').trim());
+      return row;
+    });
+  }
+
+  function buildImageIndex(rows) {
+    const index = {};
+    for (const row of rows) {
+      const plate = String(row.Metadata_Plate ?? '').trim();
+      const well  = String(row.Metadata_Well  ?? '').trim().toUpperCase();
+      const field = String(row.Metadata_Field ?? '').trim();
+      if (!well || !field) continue;
+      const byField = ((index[plate] = index[plate] || {})[well] = index[plate][well] || {});
+      const byChannel = (byField[field] = byField[field] || {});
+      for (const ch of IMG_CHANNELS) {
+        const fn = row[`Image_FileName_${ch}`];
+        if (fn) byChannel[ch] = String(fn).trim();
+      }
+    }
+    return index;
+  }
+
+  function buildFileMap(fileList) {
+    const map = {};
+    for (const f of fileList) map[f.name.split(/[\\/]/).pop().toLowerCase()] = f;
+    return map;
+  }
+
+  // ── Decodificación TIFF + metadatos ─────────────────────────────────────────
+  function decodeTiff(ab) {
+    const ifds = UTIF.decode(ab);
+    const ifd = ifds[0];
+    UTIF.decodeImage(ab, ifd, ifds);
+    const bits = (ifd.t258 && ifd.t258[0]) || 8;
+    const spp  = (ifd.t277 && ifd.t277[0]) || 1;
+    const cmpr = (ifd.t259 && ifd.t259[0]) || 1;
+    const sfmt = (ifd.t339 && ifd.t339[0]) || 1;
+    const photo = (ifd.t262 && ifd.t262[0]);
+    const px = ifd.width * ifd.height;
+    let raw, maxPossible;
+    if (bits === 16) { raw = new Uint16Array(ifd.data.buffer, ifd.data.byteOffset, px*spp); maxPossible = 65535; }
+    else if (bits === 8) { raw = new Uint8Array(ifd.data.buffer, ifd.data.byteOffset, px*spp); maxPossible = 255; }
+    else { raw = new Float32Array(ifd.data.buffer, ifd.data.byteOffset, px*spp); maxPossible = null; }
+    return {width:ifd.width, height:ifd.height, bits, samplesPerPixel:spp,
+            compression:cmpr, sampleFormat:sfmt, photometric:photo, raw, maxPossible};
+  }
+
+  function computeHistogram(raw, spp, maxPossible, nBins) {
+    nBins = nBins || 256;
+    const n = spp === 1 ? raw.length : Math.floor(raw.length / spp);
+    let mn = Infinity, mx = -Infinity, sum = 0;
+    for (let i = 0; i < n; i++) { const v = raw[i*spp]; if (v<mn)mn=v; if (v>mx)mx=v; sum+=v; }
+    const hi = maxPossible != null ? maxPossible : mx;
+    const lo = maxPossible != null ? 0 : mn;
+    const span = (hi - lo) || 1;
+    const bins = new Float64Array(nBins);
+    for (let i = 0; i < n; i++) {
+      let b = Math.floor(((raw[i*spp] - lo) / span) * nBins);
+      if (b < 0) b = 0; if (b >= nBins) b = nBins - 1; bins[b]++;
+    }
+    return {min:mn, max:mx, mean:sum/n, nPixels:n, bins, nBins, lo, hi,
+            satFrac:bins[nBins-1]/n, zeroFrac:bins[0]/n, maxPossible};
+  }
+
+  function percentilesFromHist(hist, plo, phi) {
+    const total = hist.nPixels, tLo = total*(plo/100), tHi = total*(phi/100);
+    const binW = (hist.hi - hist.lo) / hist.nBins;
+    let acc = 0, vLo = hist.lo, vHi = hist.hi, foundLo = false;
+    for (let b = 0; b < hist.nBins; b++) {
+      acc += hist.bins[b];
+      if (!foundLo && acc >= tLo) { vLo = hist.lo + b*binW; foundLo = true; }
+      if (acc >= tHi) { vHi = hist.lo + (b+1)*binW; break; }
+    }
+    if (vHi <= vLo) vHi = vLo + binW;
+    return {lo:vLo, hi:vHi};
+  }
+
+  function renderRGBA(raw, spp, w, h, win, brightness, contrast) {
+    const n = w*h, out = new Uint8ClampedArray(n*4), span = (win.hi - win.lo) || 1;
+    for (let i = 0; i < n; i++) {
+      let g = ((raw[i*spp] - win.lo) / span) * 255;
+      g = (g - 128) * contrast + 128; g = g * brightness;
+      if (g < 0) g = 0; else if (g > 255) g = 255;
+      const o = i*4; out[o]=out[o+1]=out[o+2]=g; out[o+3]=255;
+    }
+    return out;
+  }
+
+  // ── DOM refs ────────────────────────────────────────────────────────────────
+  const el = id => document.getElementById(id);
+  const refs = {};
+  ['iv-csv-input','iv-files-input','iv-files-label','iv-status','iv-body',
+   'iv-plate','iv-well','iv-field','iv-channel-tabs','iv-canvas','iv-canvas-msg',
+   'iv-transform-detail','iv-meta-rows','iv-hist-canvas','iv-hist-stats','iv-alerts',
+   'iv-plo','iv-phi','iv-auto','iv-wlo','iv-whi','iv-brightness','iv-contrast',
+   'iv-brightness-val','iv-contrast-val','iv-reset'].forEach(id => refs[id] = el(id));
+
+  if (!refs['iv-csv-input']) return;  // sección no presente → salir
+
+  // ── Carga de CSV ────────────────────────────────────────────────────────────
+  refs['iv-csv-input'].addEventListener('change', ev => {
+    const file = ev.target.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const rows = parseCSV(reader.result);
+        S.imgIndex = buildImageIndex(rows);
+        const nPlates = Object.keys(S.imgIndex).length;
+        const nRows = rows.length;
+        setStatus(`CSV loaded: ${nRows} rows, ${nPlates} plate(s). Now select the .tif files.`, 'ok');
+        refs['iv-files-input'].disabled = false;
+        refs['iv-files-label'].classList.remove('iv-btn-disabled');
+        populatePlateSelect();
+        refs['iv-body'].style.display = 'block';
+      } catch (e) { setStatus('Could not parse CSV: ' + e.message, 'warn'); }
+    };
+    reader.readAsText(file);
+  });
+
+  // ── Selección de archivos TIFF ──────────────────────────────────────────────
+  refs['iv-files-input'].addEventListener('change', ev => {
+    const files = Array.from(ev.target.files);
+    if (!files.length) return;
+    S.fileMap = buildFileMap(files);
+    setStatus(`${files.length} image file(s) ready. Select well · site · channel below.`, 'ok');
+    tryRenderCurrent();
+  });
+
+  function setStatus(msg, cls) {
+    refs['iv-status'].textContent = msg;
+    refs['iv-status'].className = 'iv-status' + (cls ? ' ' + cls : '');
+  }
+
+  // ── Selectores encadenados ──────────────────────────────────────────────────
+  function populatePlateSelect() {
+    const plates = Object.keys(S.imgIndex).sort();
+    refs['iv-plate'].innerHTML = plates.map(p => `<option value="${p}">${p}</option>`).join('');
+    S.plate = plates[0];
+    populateWellSelect();
+  }
+  function populateWellSelect() {
+    const wells = Object.keys(S.imgIndex[S.plate] || {}).sort();
+    refs['iv-well'].innerHTML = wells.map(w => `<option value="${w}">${w}</option>`).join('');
+    S.well = wells[0];
+    populateFieldSelect();
+  }
+  function populateFieldSelect() {
+    const fields = Object.keys((S.imgIndex[S.plate] || {})[S.well] || {})
+      .sort((a,b) => (+a) - (+b));
+    refs['iv-field'].innerHTML = fields.map(f => `<option value="${f}">${f}</option>`).join('');
+    S.field = fields[0];
+    populateChannelTabs();
+  }
+  function populateChannelTabs() {
+    const avail = ((S.imgIndex[S.plate] || {})[S.well] || {})[S.field] || {};
+    refs['iv-channel-tabs'].innerHTML = '';
+    IMG_CHANNELS.forEach(ch => {
+      const b = document.createElement('button');
+      const has = !!avail[ch];
+      b.className = 'iv-ch-tab' + (ch === S.channel ? ' active' : '') + (has ? '' : ' missing');
+      b.textContent = ch;
+      b.title = has ? avail[ch] : 'no file name in CSV for this channel';
+      b.onclick = () => { S.channel = ch; refreshChannelTabs(); tryRenderCurrent(); };
+      refs['iv-channel-tabs'].appendChild(b);
+    });
+    tryRenderCurrent();
+  }
+  function refreshChannelTabs() {
+    [...refs['iv-channel-tabs'].children].forEach(b =>
+      b.classList.toggle('active', b.textContent === S.channel));
+  }
+
+  refs['iv-plate'].onchange = e => { S.plate = e.target.value; populateWellSelect(); };
+  refs['iv-well'].onchange  = e => { S.well  = e.target.value; populateFieldSelect(); };
+  refs['iv-field'].onchange = e => { S.field = e.target.value; populateChannelTabs(); };
+
+  // ── Render de la imagen seleccionada ────────────────────────────────────────
+  function tryRenderCurrent() {
+    const fn = ((S.imgIndex?.[S.plate]?.[S.well]?.[S.field]) || {})[S.channel];
+    const canvas = refs['iv-canvas'], msg = refs['iv-canvas-msg'];
+    if (!fn) { showMsg('No file name in the CSV for this channel.'); return; }
+    if (!S.fileMap) { showMsg('Select the .tif files (button 2) to display images.'); return; }
+    const file = S.fileMap[fn.toLowerCase()];
+    if (!file) { showMsg(`File "${fn}" not among the selected files.`); return; }
+
+    showMsg('Decoding…');
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const meta = decodeTiff(reader.result);
+        S.meta = meta;
+        S.hist = computeHistogram(meta.raw, meta.samplesPerPixel, meta.maxPossible, 256);
+        // auto-windowing con percentiles actuales
+        applyAutoWindow();
+        renderMeta(fn);
+        drawHistogram();
+        paintCanvas();
+        renderAlerts();
+        canvas.style.display = 'block'; msg.style.display = 'none';
+      } catch (e) { showMsg('Decode error: ' + e.message); }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function showMsg(t) {
+    refs['iv-canvas'].style.display = 'none';
+    refs['iv-canvas-msg'].style.display = 'block';
+    refs['iv-canvas-msg'].textContent = t;
+  }
+
+  function applyAutoWindow() {
+    const plo = parseFloat(refs['iv-plo'].value), phi = parseFloat(refs['iv-phi'].value);
+    S.win = percentilesFromHist(S.hist, isNaN(plo)?0.5:plo, isNaN(phi)?99.5:phi);
+    refs['iv-wlo'].value = Math.round(S.win.lo);
+    refs['iv-whi'].value = Math.round(S.win.hi);
+  }
+
+  function paintCanvas() {
+    const m = S.meta, canvas = refs['iv-canvas'];
+    canvas.width = m.width; canvas.height = m.height;
+    const ctx = canvas.getContext('2d');
+    const rgba = renderRGBA(m.raw, m.samplesPerPixel, m.width, m.height, S.win, S.brightness, S.contrast);
+    ctx.putImageData(new ImageData(rgba, m.width, m.height), 0, 0);
+    // header de transformación
+    refs['iv-transform-detail'].textContent =
+      `16-bit → 8-bit · window [${Math.round(S.win.lo)}, ${Math.round(S.win.hi)}]` +
+      ` · brightness ${S.brightness.toFixed(2)}× · contrast ${S.contrast.toFixed(2)}×`;
+  }
+
+  function renderMeta(fn) {
+    const m = S.meta;
+    const rows = [
+      ['File name', fn],
+      ['Dimensions', `${m.width} × ${m.height} px`],
+      ['Bit depth', `${m.bits}-bit ${SAMPLEFORMAT_NAMES[m.sampleFormat] || ''}`.trim()],
+      ['Samples/px', m.samplesPerPixel],
+      ['Compression', COMPRESSION_NAMES[m.compression] || `code ${m.compression}`],
+      ['Photometric', PHOTOMETRIC_NAMES[m.photometric] ?? '—'],
+    ];
+    refs['iv-meta-rows'].innerHTML = rows.map(([k,v]) =>
+      `<div class="iv-meta-row"><span class="iv-meta-key">${k}</span><span class="iv-meta-val">${v}</span></div>`
+    ).join('');
+  }
+
+  // ── Histograma con marcas de ventana + zona de saturación ───────────────────
+  function drawHistogram() {
+    const h = S.hist, cv = refs['iv-hist-canvas'];
+    const W = cv.width, H = cv.height, ctx = cv.getContext('2d');
+    ctx.clearRect(0, 0, W, H);
+    const pad = 2, plotH = H - 8;
+    // escala log para ver colas (saturación/fondo)
+    const maxCount = Math.max(...h.bins);
+    const logMax = Math.log10(maxCount + 1);
+    const bw = (W - pad*2) / h.nBins;
+    for (let b = 0; b < h.nBins; b++) {
+      const val = Math.log10(h.bins[b] + 1) / logMax;
+      const barH = val * plotH;
+      const x = pad + b * bw;
+      // color: último bin (saturación) en rojo, primer bin (cero) en gris, resto azul
+      if (b === h.nBins - 1 && h.bins[b] > 0) ctx.fillStyle = '#ff4444';
+      else if (b === 0) ctx.fillStyle = '#5a6a80';
+      else ctx.fillStyle = '#3a7bd5';
+      ctx.fillRect(x, H - 4 - barH, Math.max(1, bw - 0.3), barH);
+    }
+    // líneas de ventana lo/hi (mapear valor → x)
+    const toX = v => pad + ((v - h.lo) / ((h.hi - h.lo) || 1)) * (W - pad*2);
+    [['#4bd760', S.win.lo], ['#4bd760', S.win.hi]].forEach(([c, v]) => {
+      const x = toX(v); ctx.strokeStyle = c; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x, 2); ctx.lineTo(x, H - 4); ctx.stroke();
+    });
+    // stats
+    const satPct = (h.satFrac*100), zeroPct = (h.zeroFrac*100);
+    refs['iv-hist-stats'].innerHTML =
+      `<b>min</b> ${h.min} · <b>max</b> ${h.max} · <b>mean</b> ${h.mean.toFixed(1)}` +
+      ` · <b>range</b> 0–${h.maxPossible ?? '—'}<br>` +
+      `<b>saturated</b> ${satPct.toFixed(2)}% · <b>zero</b> ${zeroPct.toFixed(1)}%` +
+      ` · <span style="color:#4bd760">▏</span> window [${Math.round(S.win.lo)}, ${Math.round(S.win.hi)}]`;
+  }
+
+  // ── Alertas automáticas ─────────────────────────────────────────────────────
+  function renderAlerts() {
+    const h = S.hist, out = [];
+    const satPct = h.satFrac*100, zeroPct = h.zeroFrac*100;
+    if (satPct >= 1) out.push(['danger', `⚠ ${satPct.toFixed(1)}% of pixels are saturated (clipped at max). Quantitative intensity is unreliable for this image.`]);
+    else if (satPct >= 0.1) out.push(['warn', `⚠ ${satPct.toFixed(2)}% of pixels are saturated — check exposure.`]);
+    if (zeroPct >= 80) out.push(['warn', `⚠ ${zeroPct.toFixed(0)}% of pixels are zero — image may be underexposed or mostly background.`]);
+    // rango dinámico bajo: max muy por debajo del tope de bits
+    if (h.maxPossible && h.max < h.maxPossible * 0.05)
+      out.push(['info', `Low dynamic range: brightest pixel is ${h.max} of ${h.maxPossible} (${(h.max/h.maxPossible*100).toFixed(1)}% of range). Windowing is stretching a narrow band.`]);
+    refs['iv-alerts'].innerHTML = out.map(([lvl, msg]) =>
+      `<div class="iv-alert iv-alert-${lvl}">${msg}</div>`).join('');
+  }
+
+  // ── Controles ───────────────────────────────────────────────────────────────
+  refs['iv-auto'].onclick = () => { if (!S.hist) return; applyAutoWindow(); drawHistogram(); paintCanvas(); };
+  refs['iv-wlo'].onchange = () => { S.win.lo = parseFloat(refs['iv-wlo'].value); drawHistogram(); paintCanvas(); };
+  refs['iv-whi'].onchange = () => { S.win.hi = parseFloat(refs['iv-whi'].value); drawHistogram(); paintCanvas(); };
+  refs['iv-brightness'].oninput = () => {
+    S.brightness = parseFloat(refs['iv-brightness'].value);
+    refs['iv-brightness-val'].textContent = S.brightness.toFixed(2) + '×';
+    if (S.meta) paintCanvas();
+  };
+  refs['iv-contrast'].oninput = () => {
+    S.contrast = parseFloat(refs['iv-contrast'].value);
+    refs['iv-contrast-val'].textContent = S.contrast.toFixed(2) + '×';
+    if (S.meta) paintCanvas();
+  };
+  refs['iv-reset'].onclick = () => {
+    S.brightness = 1; S.contrast = 1;
+    refs['iv-brightness'].value = 1; refs['iv-contrast'].value = 1;
+    refs['iv-brightness-val'].textContent = '1.00×'; refs['iv-contrast-val'].textContent = '1.00×';
+    if (S.hist) { applyAutoWindow(); drawHistogram(); }
+    if (S.meta) paintCanvas();
+  };
+})();

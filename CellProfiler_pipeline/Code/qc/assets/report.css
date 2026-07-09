@@ -247,3 +247,73 @@
                    border-radius: 7px; padding: 8px 13px; font-size: 11px;
                    color: #d0e0ff; pointer-events: none; display: none; z-index: 9999;
                    line-height: 1.65; max-width: 210px; box-shadow: 0 4px 18px rgba(0,0,0,0.6); }
+
+  /* ── Image Viewer ── */
+  .iv-optional { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.08em;
+                 color: #7a6a30; background: #2a2410; border: 1px solid #4a3e18;
+                 border-radius: 8px; padding: 1px 8px; vertical-align: middle; margin-left: 8px; }
+  .iv-loaders { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+  .iv-btn { display: inline-block; padding: 8px 16px; border-radius: 6px;
+            background: var(--accent); color: #fff; font-size: 0.82rem; font-weight: 600;
+            cursor: pointer; border: 1px solid var(--accent); transition: filter 0.12s; }
+  .iv-btn:hover { filter: brightness(1.12); }
+  .iv-btn-disabled { background: #1a2040; color: var(--muted); border-color: var(--border);
+                     cursor: not-allowed; }
+  .iv-status { font-size: 0.8rem; color: var(--muted); }
+  .iv-status.ok { color: var(--pass); }
+  .iv-status.warn { color: var(--warn); }
+
+  .iv-selectors { display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+                  background: var(--panel); border: 1px solid var(--border);
+                  border-radius: 8px; padding: 12px 16px; margin-bottom: 12px; }
+  .iv-selectors label { color: var(--muted); font-size: 0.8rem; display: flex;
+                        align-items: center; gap: 6px; }
+  .iv-selectors select { background: #1a2040; color: var(--text); border: 1px solid var(--border);
+                         border-radius: 4px; padding: 4px 8px; font-size: 0.85rem; cursor: pointer; }
+  .iv-channel-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-left: auto; }
+  .iv-ch-tab { padding: 4px 12px; border-radius: 5px; border: 1px solid var(--border);
+               background: #1a2040; color: var(--muted); font-size: 0.78rem; cursor: pointer;
+               transition: all 0.12s; }
+  .iv-ch-tab:hover { color: var(--text); border-color: var(--accent); }
+  .iv-ch-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
+  .iv-ch-tab.missing { opacity: 0.4; }
+
+  .iv-main { display: grid; grid-template-columns: 1fr 300px; gap: 16px; align-items: start; }
+  .iv-image-col { display: flex; flex-direction: column; gap: 10px; }
+  .iv-transform-head { background: #0d1830; border: 1px solid #2a4070; border-left: 3px solid var(--accent);
+                       border-radius: 6px; padding: 8px 14px; font-size: 0.78rem; }
+  .iv-th-title { color: #a8c8f0; font-weight: 600; }
+  .iv-th-detail { color: #7ac0f0; font-family: monospace; margin-left: 8px; }
+  .iv-canvas-wrap { position: relative; background: #050810; border: 1px solid var(--border);
+                    border-radius: 8px; display: flex; align-items: center; justify-content: center;
+                    min-height: 360px; overflow: hidden; }
+  .iv-canvas-wrap canvas { max-width: 100%; max-height: 640px; image-rendering: pixelated; display: none; }
+  .iv-canvas-msg { color: var(--muted); font-size: 0.85rem; text-align: center; padding: 20px; }
+
+  .iv-alerts { display: flex; flex-direction: column; gap: 6px; }
+  .iv-alert { padding: 8px 12px; border-radius: 6px; font-size: 0.8rem; display: flex; gap: 8px; align-items: center; }
+  .iv-alert-warn { background: #3a2e00; color: var(--warn); border: 1px solid #5a4a10; }
+  .iv-alert-danger { background: #3a0f0f; color: var(--fail); border: 1px solid #5a2020; }
+  .iv-alert-info { background: #0d1830; color: #8ab4d8; border: 1px solid #2a4070; }
+
+  .iv-side-col { display: flex; flex-direction: column; gap: 16px; }
+  .iv-meta-row { display: flex; justify-content: space-between; padding: 3px 0;
+                 border-bottom: 1px solid #1a1f35; font-size: 0.78rem; }
+  .iv-meta-key { color: var(--muted); }
+  .iv-meta-val { color: var(--text); font-family: monospace; }
+  .iv-hist canvas { display: block; background: #080b14; border: 1px solid var(--border);
+                    border-radius: 6px; width: 100%; height: auto; }
+  .iv-hist-stats { font-size: 0.74rem; color: var(--muted); margin-top: 6px; line-height: 1.6; }
+  .iv-hist-stats b { color: #c8d8f0; }
+
+  .iv-controls { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+  .iv-ctrl-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+  .iv-ctrl-row label { color: var(--muted); font-size: 0.76rem; }
+  .iv-ctrl-row input[type=number] { width: 62px; background: #1a2040; color: var(--text);
+                                     border: 1px solid var(--border); border-radius: 4px; padding: 3px 6px;
+                                     font-size: 0.78rem; font-family: monospace; }
+  .iv-ctrl-row input[type=range] { flex: 1; min-width: 90px; accent-color: var(--accent); }
+  .iv-ctrl-val { font-family: monospace; font-size: 0.76rem; color: var(--text); min-width: 44px; }
+  .iv-mini-btn { padding: 3px 12px; border-radius: 5px; border: 1px solid var(--border);
+                 background: #1a2040; color: var(--text); font-size: 0.76rem; cursor: pointer; }
+  .iv-mini-btn:hover { border-color: var(--accent); color: #a8c8ff; }

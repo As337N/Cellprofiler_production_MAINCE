@@ -344,5 +344,8 @@ def render_report(cohort_name: str, plates_data: list[dict],
     html = html.replace("__PLOTLY__",    plotly_js)
     html = html.replace("__PAYLOAD__",   payload_js)
     html = html.replace("__JS__",        _read_asset("report.js"))
+    # UTIF.js: decodificador TIFF para el visor de imágenes opcional. Se embebe
+    # como asset para que el reporte sea autocontenido (no requiere internet).
+    html = html.replace("__UTIF__",      _read_asset("utif.js"))
 
     Path(output_path).write_text(html, encoding="utf-8")
