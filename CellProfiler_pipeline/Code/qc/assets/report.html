@@ -125,6 +125,14 @@
       &nbsp;·&nbsp; Adaptive: median ± 3σ MAD per plate
     </div>
   </div>
+  <!-- Site-level metrics table (por well seleccionado) -->
+  <div class="site-table-wrap" id="qc-site-table-wrap" style="display:none;">
+    <div class="site-table-head">
+      <span class="site-table-title" id="qc-site-table-title">Site-level metrics</span>
+      <div class="site-table-tabs" id="qc-site-table-tabs"></div>
+    </div>
+    <div id="qc-site-table"></div>
+  </div>
   <div class="compound-toolbar" id="compound-toolbar" style="margin-bottom:10px;">
       <label>Filter by compound:</label>
       <button class="cmpd-btn ctrl" id="btn-show-all">All</button>
@@ -171,6 +179,13 @@
       <span style="color:#ffffff;font-size:0.78rem;">■ 0</span>
       <span style="color:#cc1111;font-size:0.78rem;">■ ≥100</span>
     </div>
+  </div>
+  <!-- Site-level counts table (por well seleccionado) -->
+  <div class="site-table-wrap" id="counts-site-table-wrap" style="display:none;">
+    <div class="site-table-head">
+      <span class="site-table-title" id="counts-site-table-title">Site-level counts</span>
+    </div>
+    <div id="counts-site-table"></div>
   </div>
   <div class="counts-grid" id="counts-grid"></div>
   <div class="counts-hist-row" id="counts-hist-row"></div>

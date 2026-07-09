@@ -230,6 +230,7 @@ function renderPlate(idx) {
     '<span class="no-img">Select a well to see its site montage.</span>';
   selectedSite = null;
   clearSiteInfo();
+  hideSiteTables();
  
   renderMetrics(name);
   renderCounts(name);
@@ -388,6 +389,7 @@ function selectWell(plateName, well) {
   highlightWellEverywhere(well);
   renderWellInfo(plateName, well);
   renderWellMontage(plateName, well);
+  renderSiteTables(plateName, well);
 }
  
 // ── Well info panel ───────────────────────────────────────────────────────────
@@ -564,7 +566,153 @@ function renderSiteInfo(plateName, well, site) {
 
   document.getElementById('site-info').innerHTML = html;
 }
- 
+
+// ── Site-level metric tables (QC Metrics / Cell Counts) ───────────────────────
+// Canales QC derivados del sufijo de columna de los slope specs, en el orden en
+// que Python los emitió (config.CHANNELS). Cada spec.col = ImageQuality_<m>_<ch>.
+const QC_CHANNELS = SLOPE_SPECS.map(s => s.col.split('_').pop());
+
+// Nº de sitios a mostrar: el máximo field observado en cualquier well (default 9).
+function _maxSites() {
+  let n = 0;
+  PLATES.forEach(p => {
+    const sd = DATA[p].site_data || {};
+    Object.values(sd).forEach(fields => {
+      Object.keys(fields).forEach(f => { const k = parseInt(f, 10); if (k > n) n = k; });
+    });
+  });
+  return n || 9;
+}
+const N_SITES = _maxSites();
+const SITE_IDS = Array.from({length: N_SITES}, (_, i) => i + 1);
+
+// Filas de la tabla QC para un canal dado: [{label, specGroup}] → col por canal.
+const QC_ROW_DEFS = [
+  { label: 'PowerLogLogSlope', specs: SLOPE_SPECS   },
+  { label: 'PercentMaximal',   specs: PCT_MAX_SPECS },
+  { label: 'PercentMinimal',   specs: PCT_MIN_SPECS },
+  { label: 'MedianIntensity',  specs: MEDIANINT_SPECS },
+];
+
+let qcSiteTableChannel = QC_CHANNELS[0] || null;
+
+function _siteVal(plateName, well, site, col) {
+  const fields = (DATA[plateName].site_data || {})[well] || {};
+  const f = fields[String(site)];
+  return f ? f[col] : undefined;
+}
+
+// Valor agregado por well (ya calculado en Python: media para métricas/%, suma
+// para counts — collapse_sites_to_wells). Aquí solo se lee.
+function _wellVal(plateName, well, col) {
+  const m = (DATA[plateName].wells || {})[well];
+  return m ? m[col] : undefined;
+}
+
+function _buildSiteTableHTML(headerCells, rows, hasWellCol) {
+  // headerCells: ['Metric', 'Site 1', …, 'Well']; rows: [{label, cells:[html]}]
+  // Si hasWellCol, la última columna se destaca como agregado del well.
+  const lastIdx = headerCells.length - 1;
+  let h = '<table class="site-table"><thead><tr>';
+  headerCells.forEach((c, i) => {
+    let cls = i === 0 ? 'site-th-metric' : 'site-th-site';
+    if (hasWellCol && i === lastIdx) cls = 'site-th-well';
+    h += `<th class="${cls}">${c}</th>`;
+  });
+  h += '</tr></thead><tbody>';
+  rows.forEach(r => {
+    h += `<tr><td class="site-td-metric">${r.label}</td>`;
+    r.cells.forEach((c, i) => {
+      const cls = (hasWellCol && i === r.cells.length - 1) ? 'site-td-well' : 'site-td-val';
+      h += `<td class="${cls}">${c}</td>`;
+    });
+    h += '</tr>';
+  });
+  return h + '</tbody></table>';
+}
+
+function renderQCSiteTable(plateName, well) {
+  const wrap = document.getElementById('qc-site-table-wrap');
+  if (!well || !DATA[plateName].site_data || !DATA[plateName].site_data[well]) {
+    wrap.style.display = 'none';
+    return;
+  }
+  wrap.style.display = 'block';
+  document.getElementById('qc-site-table-title').textContent =
+    `Site-level metrics — ${well}`;
+
+  // Pestañas de canal (una vez por well render; resalta la activa)
+  const tabsEl = document.getElementById('qc-site-table-tabs');
+  tabsEl.innerHTML = '';
+  if (!QC_CHANNELS.includes(qcSiteTableChannel)) qcSiteTableChannel = QC_CHANNELS[0];
+  QC_CHANNELS.forEach(ch => {
+    const b = document.createElement('button');
+    b.className = 'site-tab' + (ch === qcSiteTableChannel ? ' active' : '');
+    b.textContent = ch;
+    b.onclick = () => { qcSiteTableChannel = ch; renderQCSiteTable(plateName, well); };
+    tabsEl.appendChild(b);
+  });
+
+  const ch = qcSiteTableChannel;
+  const header = ['Metric', ...SITE_IDS.map(s => `Site ${s}`), 'Well'];
+  const rows = QC_ROW_DEFS.map(def => {
+    // spec del canal activo dentro de este grupo de métrica
+    const spec = def.specs.find(s => s.col.endsWith('_' + ch));
+    const col  = spec ? spec.col : null;
+    const fmtCell = v => {
+      if (v == null) return '<span class="site-na">—</span>';
+      const color = spec ? specColor(v, spec) : null;
+      return `<span style="color:${color || 'var(--text)'}">${fmt3(v)}</span>`;
+    };
+    const cells = SITE_IDS.map(s => fmtCell(col ? _siteVal(plateName, well, s, col) : undefined));
+    cells.push(fmtCell(col ? _wellVal(plateName, well, col) : undefined));  // agregado por well
+    return { label: def.label, cells };
+  });
+
+  document.getElementById('qc-site-table').innerHTML =
+    _buildSiteTableHTML(header, rows, true);
+}
+
+function renderCountsSiteTable(plateName, well) {
+  const wrap = document.getElementById('counts-site-table-wrap');
+  if (!well || !DATA[plateName].site_data || !DATA[plateName].site_data[well]) {
+    wrap.style.display = 'none';
+    return;
+  }
+  wrap.style.display = 'block';
+  document.getElementById('counts-site-table-title').textContent =
+    `Site-level counts — ${well}`;
+
+  const header = ['Count', ...SITE_IDS.map(s => `Site ${s}`), 'Well'];
+  const COUNT_ROWS = [
+    ['Cells',      'Count_Cells'],
+    ['Nuclei',     'Count_Nuclei'],
+    ['Raw nuclei', 'Count_Raw_nuclei'],
+    ['Artifacts',  'Count_Illum_artifacts_filtered'],
+  ];
+  const fmtCount = v => v == null ? '<span class="site-na">—</span>' : String(Math.round(v));
+  const rows = COUNT_ROWS.map(([label, col]) => {
+    const cells = SITE_IDS.map(s => fmtCount(_siteVal(plateName, well, s, col)));
+    cells.push(fmtCount(_wellVal(plateName, well, col)));  // suma por well (Python)
+    return { label, cells };
+  });
+
+  document.getElementById('counts-site-table').innerHTML =
+    _buildSiteTableHTML(header, rows, true);
+}
+
+function renderSiteTables(plateName, well) {
+  renderQCSiteTable(plateName, well);
+  renderCountsSiteTable(plateName, well);
+}
+
+function hideSiteTables() {
+  const q = document.getElementById('qc-site-table-wrap');
+  const c = document.getElementById('counts-site-table-wrap');
+  if (q) q.style.display = 'none';
+  if (c) c.style.display = 'none';
+}
+
 slider.oninput   = () => renderPlate(+slider.value);
 pSelect.onchange = () => renderPlate(+pSelect.value);
  
@@ -1393,7 +1541,10 @@ function applyGlobalFilter() {
   renderMFI();
   // Los gráficos se recrean en setTimeout(…,0); re-aplicar el resaltado del well
   // seleccionado una vez que las celdas/heatmaps existan de nuevo.
-  if (selectedWell) setTimeout(() => highlightWellEverywhere(selectedWell), 0);
+  if (selectedWell) setTimeout(() => {
+    highlightWellEverywhere(selectedWell);
+    renderSiteTables(currentPlate, selectedWell);
+  }, 0);
 }
 
  
