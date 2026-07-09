@@ -317,3 +317,44 @@
   .iv-mini-btn { padding: 3px 12px; border-radius: 5px; border: 1px solid var(--border);
                  background: #1a2040; color: var(--text); font-size: 0.76rem; cursor: pointer; }
   .iv-mini-btn:hover { border-color: var(--accent); color: #a8c8ff; }
+
+  /* ── Image Viewer: regex overrides, load-note, zoom ── */
+  .iv-regex-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+                  background: #0d1220; border: 1px dashed var(--border);
+                  border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; }
+  .iv-regex-title { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em;
+                    color: var(--muted); font-weight: 600; }
+  .iv-regex-row label { color: var(--muted); font-size: 0.76rem; display: flex;
+                        flex-direction: column; gap: 3px; }
+  .iv-regex-row input[type=text] { background: #1a2040; color: var(--text);
+                    border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px;
+                    font-size: 0.8rem; font-family: monospace; min-width: 200px; }
+  .iv-regex-row input.iv-regex-bad { border-color: var(--fail); }
+  .iv-regex-hint { font-size: 0.74rem; color: var(--muted); }
+  .iv-regex-hint.ok { color: var(--pass); }
+  .iv-regex-hint.bad { color: var(--fail); }
+
+  .iv-loadnote { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+                 padding: 8px 14px; border-radius: 6px; margin-bottom: 12px;
+                 background: #10131f; border: 1px solid var(--border); font-size: 0.8rem; }
+  .iv-loadnote-label { color: var(--muted); flex-shrink: 0; }
+  .iv-loadnote-path { font-family: monospace; word-break: break-all; }
+  .iv-loadnote.provided { border-color: #1a4020; background: #0e1a10; }
+  .iv-loadnote.provided .iv-loadnote-path { color: var(--pass); }
+  .iv-loadnote.missing .iv-loadnote-path { color: var(--muted); }
+  .iv-loadnote-tag { font-size: 0.68rem; padding: 1px 7px; border-radius: 8px; flex-shrink: 0; }
+  .iv-loadnote-tag.provided { background: #1a4020; color: var(--pass); }
+  .iv-loadnote-tag.missing { background: #24283a; color: var(--muted); }
+
+  .iv-canvas-wrap { cursor: grab; }
+  .iv-canvas-wrap.panning { cursor: grabbing; }
+  .iv-canvas-hint { font-size: 0.72rem; color: var(--muted); text-align: center; margin-top: -4px; }
+  .iv-zoom-hud { position: absolute; top: 8px; right: 8px; display: flex; align-items: center;
+                 gap: 8px; background: rgba(10,14,26,0.85); border: 1px solid var(--border);
+                 border-radius: 6px; padding: 4px 8px; }
+  .iv-zoom-level { font-family: monospace; font-size: 0.76rem; color: var(--text); }
+
+  .iv-hist-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+  .iv-hist-toggle { font-size: 0.72rem; color: var(--muted); display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  .iv-meta-tag { font-size: 0.68rem; padding: 1px 7px; border-radius: 8px; margin-left: 6px; }
+  .iv-meta-tag.off-list { background: #3a2e00; color: var(--warn); }

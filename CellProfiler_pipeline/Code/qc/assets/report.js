@@ -1565,11 +1565,52 @@ renderPlate(0);
 
   // Estado del visor
   const S = {
-    imgIndex: null, fileMap: null,
+    imgIndex: null, fileMap: null, rawRows: null,
     plate: null, well: null, field: null, channel: 'Hoechst',
     meta: null, hist: null, win: {lo:0, hi:65535},
     brightness: 1, contrast: 1,
+    regexPlate: '', regexName: '',
+    // zoom/pan: escala y offset del canvas mostrado
+    zoom: 1, panX: 0, panY: 0,
+    histRegion: false,   // histograma sobre región visible vs imagen completa
   };
+
+  // Extrae {plate?, well?, field?} vía regex; grupos por nombre o por orden.
+  // Para el nombre: si hay 3 grupos numéricos (row,col,field) se arma el well.
+  function applyPlateRegex(pathStr, pattern) {
+    if (!pattern) return null;
+    try {
+      const m = new RegExp(pattern).exec(pathStr || '');
+      if (!m) return null;
+      // grupo nombrado 'plate' o primer grupo de captura
+      const g = m.groups && m.groups.plate != null ? m.groups.plate : m[1];
+      return g != null ? String(g).trim() : null;
+    } catch { return null; }
+  }
+  function applyNameRegex(fileName, pattern) {
+    if (!pattern) return null;
+    try {
+      const m = new RegExp(pattern).exec(fileName || '');
+      if (!m) return null;
+      if (m.groups && (m.groups.well || m.groups.row)) {
+        if (m.groups.well) {
+          return { well: String(m.groups.well).trim().toUpperCase(),
+                   field: m.groups.field != null ? String(m.groups.field).trim() : null };
+        }
+        // row+col numéricos → letra+padded
+        const row = parseInt(m.groups.row, 10), col = parseInt(m.groups.col, 10);
+        const well = String.fromCharCode(64 + row) + String(col).padStart(2, '0');
+        return { well, field: m.groups.field != null ? String(m.groups.field).trim() : null };
+      }
+      // por orden: (row)(col)(field) numéricos
+      if (m.length >= 4) {
+        const row = parseInt(m[1], 10), col = parseInt(m[2], 10);
+        const well = String.fromCharCode(64 + row) + String(col).padStart(2, '0');
+        return { well, field: String(m[3]).trim() };
+      }
+      return null;
+    } catch { return null; }
+  }
 
   // ── CSV mínimo (el Image.txt reducido: sin comas internas) ──────────────────
   function parseCSV(text) {
@@ -1598,15 +1639,31 @@ renderPlate(0);
   function buildImageIndex(rows) {
     const index = {};
     for (const row of rows) {
-      const plate = String(row.Metadata_Plate ?? '').trim();
-      const well  = String(row.Metadata_Well  ?? '').trim().toUpperCase();
-      const field = String(row.Metadata_Field ?? '').trim();
+      // plate: regex sobre el path (si se dio) o Metadata_Plate del CSV
+      let plate = String(row.Metadata_Plate ?? '').trim();
+      if (S.regexPlate) {
+        // usar el path de cualquier canal disponible
+        let anyPath = '';
+        for (const ch of IMG_CHANNELS) { if (row[`Image_PathName_${ch}`]) { anyPath = row[`Image_PathName_${ch}`]; break; } }
+        const p = applyPlateRegex(anyPath, S.regexPlate);
+        if (p != null) plate = p;
+      }
+      // well/field: regex sobre el file name (si se dio) o Metadata_* del CSV
+      let well  = String(row.Metadata_Well  ?? '').trim().toUpperCase();
+      let field = String(row.Metadata_Field ?? '').trim();
+      if (S.regexName) {
+        let anyName = '';
+        for (const ch of IMG_CHANNELS) { if (row[`Image_FileName_${ch}`]) { anyName = row[`Image_FileName_${ch}`]; break; } }
+        const r = applyNameRegex(anyName, S.regexName);
+        if (r) { if (r.well) well = r.well; if (r.field != null) field = r.field; }
+      }
       if (!well || !field) continue;
       const byField = ((index[plate] = index[plate] || {})[well] = index[plate][well] || {});
       const byChannel = (byField[field] = byField[field] || {});
       for (const ch of IMG_CHANNELS) {
         const fn = row[`Image_FileName_${ch}`];
-        if (fn) byChannel[ch] = String(fn).trim();
+        if (fn) byChannel[ch] = { file: String(fn).trim(),
+                                 path: String(row[`Image_PathName_${ch}`] ?? '').trim() };
       }
     }
     return index;
@@ -1654,6 +1711,33 @@ renderPlate(0);
             satFrac:bins[nBins-1]/n, zeroFrac:bins[0]/n, maxPossible};
   }
 
+  // Histograma sobre una región rectangular [x0,y0]-[x1,y1] (píxeles imagen).
+  function computeHistogramRegion(raw, spp, width, maxPossible, x0, y0, x1, y1, nBins) {
+    nBins = nBins || 256;
+    x0 = Math.max(0, Math.floor(x0)); y0 = Math.max(0, Math.floor(y0));
+    x1 = Math.min(width, Math.ceil(x1)); y1 = Math.ceil(y1);
+    let mn = Infinity, mx = -Infinity, sum = 0, n = 0;
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        const v = raw[(y*width + x)*spp];
+        if (v<mn)mn=v; if (v>mx)mx=v; sum+=v; n++;
+      }
+    }
+    if (n === 0) return computeHistogram(raw, spp, maxPossible, nBins);
+    const hi = maxPossible != null ? maxPossible : mx;
+    const lo = maxPossible != null ? 0 : mn;
+    const span = (hi - lo) || 1;
+    const bins = new Float64Array(nBins);
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        let b = Math.floor(((raw[(y*width + x)*spp] - lo) / span) * nBins);
+        if (b < 0) b = 0; if (b >= nBins) b = nBins - 1; bins[b]++;
+      }
+    }
+    return {min:mn, max:mx, mean:sum/n, nPixels:n, bins, nBins, lo, hi,
+            satFrac:bins[nBins-1]/n, zeroFrac:bins[0]/n, maxPossible, region:true};
+  }
+
   function percentilesFromHist(hist, plo, phi) {
     const total = hist.nPixels, tLo = total*(plo/100), tHi = total*(phi/100);
     const binW = (hist.hi - hist.lo) / hist.nBins;
@@ -1685,7 +1769,10 @@ renderPlate(0);
    'iv-plate','iv-well','iv-field','iv-channel-tabs','iv-canvas','iv-canvas-msg',
    'iv-transform-detail','iv-meta-rows','iv-hist-canvas','iv-hist-stats','iv-alerts',
    'iv-plo','iv-phi','iv-auto','iv-wlo','iv-whi','iv-brightness','iv-contrast',
-   'iv-brightness-val','iv-contrast-val','iv-reset'].forEach(id => refs[id] = el(id));
+   'iv-brightness-val','iv-contrast-val','iv-reset',
+   'iv-regex-plate','iv-regex-name','iv-regex-hint','iv-loadnote','iv-loadnote-path',
+   'iv-canvas-wrap','iv-zoom-hud','iv-zoom-level','iv-zoom-reset','iv-hist-region'
+  ].forEach(id => refs[id] = el(id));
 
   if (!refs['iv-csv-input']) return;  // sección no presente → salir
 
@@ -1696,6 +1783,7 @@ renderPlate(0);
     reader.onload = () => {
       try {
         const rows = parseCSV(reader.result);
+        S.rawRows = rows;
         S.imgIndex = buildImageIndex(rows);
         const nPlates = Object.keys(S.imgIndex).length;
         const nRows = rows.length;
@@ -1751,7 +1839,7 @@ renderPlate(0);
       const has = !!avail[ch];
       b.className = 'iv-ch-tab' + (ch === S.channel ? ' active' : '') + (has ? '' : ' missing');
       b.textContent = ch;
-      b.title = has ? avail[ch] : 'no file name in CSV for this channel';
+      b.title = has ? avail[ch].file : 'no file name in CSV for this channel';
       b.onclick = () => { S.channel = ch; refreshChannelTabs(); tryRenderCurrent(); };
       refs['iv-channel-tabs'].appendChild(b);
     });
@@ -1766,14 +1854,33 @@ renderPlate(0);
   refs['iv-well'].onchange  = e => { S.well  = e.target.value; populateFieldSelect(); };
   refs['iv-field'].onchange = e => { S.field = e.target.value; populateChannelTabs(); };
 
+  // ── Nota "Load file" con estado (provided/missing) ──────────────────────────
+  function updateLoadNote() {
+    const entry = ((S.imgIndex?.[S.plate]?.[S.well]?.[S.field]) || {})[S.channel];
+    const note = refs['iv-loadnote'], pathEl = refs['iv-loadnote-path'];
+    // limpiar tag previo
+    const oldTag = note.querySelector('.iv-loadnote-tag'); if (oldTag) oldTag.remove();
+    note.classList.remove('provided', 'missing');
+    if (!entry) { pathEl.textContent = '— no file name in CSV for this channel —'; return null; }
+    const full = entry.path ? `${entry.path}/${entry.file}` : entry.file;
+    pathEl.textContent = full;
+    const provided = !!(S.fileMap && S.fileMap[entry.file.toLowerCase()]);
+    note.classList.add(provided ? 'provided' : 'missing');
+    const tag = document.createElement('span');
+    tag.className = 'iv-loadnote-tag ' + (provided ? 'provided' : 'missing');
+    tag.textContent = provided ? 'provided ✓' : 'not provided';
+    note.appendChild(tag);
+    return entry;
+  }
+
   // ── Render de la imagen seleccionada ────────────────────────────────────────
   function tryRenderCurrent() {
-    const fn = ((S.imgIndex?.[S.plate]?.[S.well]?.[S.field]) || {})[S.channel];
+    const entry = updateLoadNote();
     const canvas = refs['iv-canvas'], msg = refs['iv-canvas-msg'];
-    if (!fn) { showMsg('No file name in the CSV for this channel.'); return; }
+    if (!entry) { showMsg('No file name in the CSV for this channel.'); return; }
     if (!S.fileMap) { showMsg('Select the .tif files (button 2) to display images.'); return; }
-    const file = S.fileMap[fn.toLowerCase()];
-    if (!file) { showMsg(`File "${fn}" not among the selected files.`); return; }
+    const file = S.fileMap[entry.file.toLowerCase()];
+    if (!file) { showMsg(`File "${entry.file}" not among the selected files.`); return; }
 
     showMsg('Decoding…');
     const reader = new FileReader();
@@ -1781,18 +1888,34 @@ renderPlate(0);
       try {
         const meta = decodeTiff(reader.result);
         S.meta = meta;
-        S.hist = computeHistogram(meta.raw, meta.samplesPerPixel, meta.maxPossible, 256);
-        // auto-windowing con percentiles actuales
+        // reset de zoom/pan al cargar nueva imagen
+        S.zoom = 1; S.panX = 0; S.panY = 0;
+        recomputeHist();
         applyAutoWindow();
-        renderMeta(fn);
+        renderMeta(entry);
         drawHistogram();
         paintCanvas();
         renderAlerts();
         canvas.style.display = 'block'; msg.style.display = 'none';
+        refs['iv-zoom-hud'].style.display = 'flex';
+        updateZoomLabel();
       } catch (e) { showMsg('Decode error: ' + e.message); }
     };
     reader.readAsArrayBuffer(file);
   }
+
+  // Histograma sobre imagen completa o región visible según toggle.
+  function recomputeHist() {
+    const m = S.meta;
+    if (S.histRegion && S.zoom > 1) {
+      const r = visibleRegion();
+      S.hist = computeHistogramRegion(m.raw, m.samplesPerPixel, m.width, m.maxPossible,
+                                      r.x0, r.y0, r.x1, r.y1, 256);
+    } else {
+      S.hist = computeHistogram(m.raw, m.samplesPerPixel, m.maxPossible, 256);
+    }
+  }
+
 
   function showMsg(t) {
     refs['iv-canvas'].style.display = 'none';
@@ -1807,22 +1930,77 @@ renderPlate(0);
     refs['iv-whi'].value = Math.round(S.win.hi);
   }
 
-  function paintCanvas() {
-    const m = S.meta, canvas = refs['iv-canvas'];
-    canvas.width = m.width; canvas.height = m.height;
-    const ctx = canvas.getContext('2d');
+  // Canvas fuente offscreen con la imagen a 8-bit (se rehace solo al cambiar
+  // windowing/brillo/contraste, no al hacer zoom/pan).
+  let _srcCanvas = null;
+  function rebuildSource() {
+    const m = S.meta;
+    if (!_srcCanvas) _srcCanvas = document.createElement('canvas');
+    _srcCanvas.width = m.width; _srcCanvas.height = m.height;
+    const sctx = _srcCanvas.getContext('2d');
     const rgba = renderRGBA(m.raw, m.samplesPerPixel, m.width, m.height, S.win, S.brightness, S.contrast);
-    ctx.putImageData(new ImageData(rgba, m.width, m.height), 0, 0);
-    // header de transformación
+    sctx.putImageData(new ImageData(rgba, m.width, m.height), 0, 0);
+  }
+
+  // Viewport fijo (el canvas visible). La imagen se dibuja escalada por zoom con
+  // offset pan. clamp del pan para no salir de la imagen.
+  const VIEW = 512;
+  function clampPan() {
+    const m = S.meta;
+    const scale = baseScale() * S.zoom;
+    const imgW = m.width * scale, imgH = m.height * scale;
+    // permitir pan solo si la imagen excede el viewport
+    const maxX = Math.max(0, (imgW - VIEW) / 2), maxY = Math.max(0, (imgH - VIEW) / 2);
+    S.panX = Math.max(-maxX, Math.min(maxX, S.panX));
+    S.panY = Math.max(-maxY, Math.min(maxY, S.panY));
+  }
+  function baseScale() {
+    const m = S.meta;
+    return Math.min(VIEW / m.width, VIEW / m.height);  // fit inicial
+  }
+
+  function paintCanvas(skipSrc) {
+    const m = S.meta, canvas = refs['iv-canvas'];
+    if (!skipSrc) rebuildSource();
+    canvas.width = VIEW; canvas.height = VIEW;
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    ctx.fillStyle = '#050810'; ctx.fillRect(0, 0, VIEW, VIEW);
+    clampPan();
+    const scale = baseScale() * S.zoom;
+    const imgW = m.width * scale, imgH = m.height * scale;
+    const dx = (VIEW - imgW) / 2 + S.panX, dy = (VIEW - imgH) / 2 + S.panY;
+    ctx.drawImage(_srcCanvas, dx, dy, imgW, imgH);
     refs['iv-transform-detail'].textContent =
       `16-bit → 8-bit · window [${Math.round(S.win.lo)}, ${Math.round(S.win.hi)}]` +
       ` · brightness ${S.brightness.toFixed(2)}× · contrast ${S.contrast.toFixed(2)}×`;
   }
 
-  function renderMeta(fn) {
+  // Región de la imagen (en píxeles fuente) actualmente visible en el viewport.
+  function visibleRegion() {
     const m = S.meta;
+    const scale = baseScale() * S.zoom;
+    const imgW = m.width * scale, imgH = m.height * scale;
+    const dx = (VIEW - imgW) / 2 + S.panX, dy = (VIEW - imgH) / 2 + S.panY;
+    // esquina superior izquierda del viewport en coords imagen
+    const x0 = Math.max(0, (0 - dx) / scale), y0 = Math.max(0, (0 - dy) / scale);
+    const x1 = Math.min(m.width, (VIEW - dx) / scale), y1 = Math.min(m.height, (VIEW - dy) / scale);
+    return {x0, y0, x1, y1};
+  }
+
+  function updateZoomLabel() { refs['iv-zoom-level'].textContent = S.zoom.toFixed(1) + '×'; }
+
+  function renderMeta(entry) {
+    const m = S.meta;
+    // ¿la imagen mostrada está en la lista pedida (CSV) para la selección actual?
+    // Siempre lo está por construcción (entry viene del índice), pero marcamos si
+    // el archivo entregado no coincide exactamente con lo pedido.
+    const offList = !(S.fileMap && S.fileMap[entry.file.toLowerCase()]);
+    const nameCell = entry.file +
+      (offList ? ' <span class="iv-meta-tag off-list">not in requested list</span>' : '');
     const rows = [
-      ['File name', fn],
+      ['File name', nameCell],
+      ['Source path', entry.path || '—'],
       ['Dimensions', `${m.width} × ${m.height} px`],
       ['Bit depth', `${m.bits}-bit ${SAMPLEFORMAT_NAMES[m.sampleFormat] || ''}`.trim()],
       ['Samples/px', m.samplesPerPixel],
@@ -1903,5 +2081,78 @@ renderPlate(0);
     refs['iv-brightness-val'].textContent = '1.00×'; refs['iv-contrast-val'].textContent = '1.00×';
     if (S.hist) { applyAutoWindow(); drawHistogram(); }
     if (S.meta) paintCanvas();
+  };
+
+  // ── Regex opcionales: re-indexan el CSV al cambiar ──────────────────────────
+  function reindexWithRegex() {
+    if (!S.rawRows) return;
+    S.regexPlate = refs['iv-regex-plate'].value.trim();
+    S.regexName  = refs['iv-regex-name'].value.trim();
+    // validar sintaxis de cada regex; marcar campo si es inválido
+    let ok = true, hint = [];
+    [['iv-regex-plate', S.regexPlate], ['iv-regex-name', S.regexName]].forEach(([id, pat]) => {
+      const inp = refs[id];
+      if (!pat) { inp.classList.remove('iv-regex-bad'); return; }
+      try { new RegExp(pat); inp.classList.remove('iv-regex-bad'); }
+      catch { inp.classList.add('iv-regex-bad'); ok = false; hint.push(id.includes('plate')?'plate':'name'); }
+    });
+    if (!ok) {
+      refs['iv-regex-hint'].textContent = 'Invalid regex: ' + hint.join(', ');
+      refs['iv-regex-hint'].className = 'iv-regex-hint bad';
+      return;
+    }
+    S.imgIndex = buildImageIndex(S.rawRows);
+    const nPlates = Object.keys(S.imgIndex).length;
+    refs['iv-regex-hint'].textContent =
+      (S.regexPlate || S.regexName ? 'Override active — ' : 'Using CSV metadata — ') +
+      `${nPlates} plate(s) detected`;
+    refs['iv-regex-hint'].className = 'iv-regex-hint ok';
+    populatePlateSelect();
+  }
+  refs['iv-regex-plate'].addEventListener('change', reindexWithRegex);
+  refs['iv-regex-name'].addEventListener('change', reindexWithRegex);
+
+  // ── Toggle histograma región/completa ───────────────────────────────────────
+  refs['iv-hist-region'].addEventListener('change', () => {
+    S.histRegion = refs['iv-hist-region'].checked;
+    if (S.meta) { recomputeHist(); drawHistogram(); }
+  });
+
+  // ── Zoom (rueda) + pan (arrastre) ───────────────────────────────────────────
+  const wrap = refs['iv-canvas-wrap'] || document.getElementById('iv-canvas-wrap');
+  if (wrap) {
+    wrap.addEventListener('wheel', ev => {
+      if (!S.meta) return;
+      ev.preventDefault();
+      const factor = ev.deltaY < 0 ? 1.15 : 1/1.15;
+      S.zoom = Math.max(1, Math.min(20, S.zoom * factor));
+      if (S.zoom === 1) { S.panX = 0; S.panY = 0; }
+      paintCanvas(true);   // solo re-dibuja (no reconstruye source)
+      updateZoomLabel();
+      if (S.histRegion) { recomputeHist(); drawHistogram(); }
+    }, { passive: false });
+
+    let dragging = false, lastX = 0, lastY = 0;
+    wrap.addEventListener('mousedown', ev => {
+      if (!S.meta || S.zoom <= 1) return;
+      dragging = true; lastX = ev.clientX; lastY = ev.clientY;
+      wrap.classList.add('panning');
+    });
+    window.addEventListener('mousemove', ev => {
+      if (!dragging) return;
+      S.panX += (ev.clientX - lastX); S.panY += (ev.clientY - lastY);
+      lastX = ev.clientX; lastY = ev.clientY;
+      paintCanvas(true);
+    });
+    window.addEventListener('mouseup', () => {
+      if (!dragging) return;
+      dragging = false; wrap.classList.remove('panning');
+      if (S.histRegion) { recomputeHist(); drawHistogram(); }
+    });
+  }
+  refs['iv-zoom-reset'].onclick = () => {
+    S.zoom = 1; S.panX = 0; S.panY = 0;
+    paintCanvas(true); updateZoomLabel();
+    if (S.histRegion) { recomputeHist(); drawHistogram(); }
   };
 })();

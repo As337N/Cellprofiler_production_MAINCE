@@ -302,12 +302,32 @@
 
   <!-- Viewer body: hidden until ready -->
   <div class="iv-body" id="iv-body" style="display:none;">
+    <!-- Optional regex overrides -->
+    <div class="iv-regex-row">
+      <span class="iv-regex-title">Optional overrides</span>
+      <label title="Applied to Image_PathName from the CSV. Leave empty to use Metadata_Plate.">
+        Plate regex (on path)
+        <input type="text" id="iv-regex-plate" placeholder="e.g. _P(\d+)_">
+      </label>
+      <label title="Applied to the file name. Leave empty to use Metadata_Well/Field.">
+        Well/Site regex (on file name)
+        <input type="text" id="iv-regex-name" placeholder="e.g. (\d{3})(\d{3})-(\d+)-">
+      </label>
+      <span class="iv-regex-hint" id="iv-regex-hint"></span>
+    </div>
+
     <!-- Selectors -->
     <div class="iv-selectors">
       <label>Plate <select id="iv-plate"></select></label>
       <label>Well <select id="iv-well"></select></label>
       <label>Site <select id="iv-field"></select></label>
       <div class="iv-channel-tabs" id="iv-channel-tabs"></div>
+    </div>
+
+    <!-- Load-file note: which file corresponds to the current selection -->
+    <div class="iv-loadnote" id="iv-loadnote">
+      <span class="iv-loadnote-label">Load file for visualization:</span>
+      <span class="iv-loadnote-path" id="iv-loadnote-path">—</span>
     </div>
 
     <div class="iv-main">
@@ -317,10 +337,15 @@
           <span class="iv-th-title">Display transform</span>
           <span class="iv-th-detail" id="iv-transform-detail">—</span>
         </div>
-        <div class="iv-canvas-wrap">
+        <div class="iv-canvas-wrap" id="iv-canvas-wrap">
           <canvas id="iv-canvas"></canvas>
           <div class="iv-canvas-msg" id="iv-canvas-msg">Select a well · site · channel to view its image.</div>
+          <div class="iv-zoom-hud" id="iv-zoom-hud" style="display:none;">
+            <button class="iv-mini-btn" id="iv-zoom-reset" title="Reset zoom/pan">Reset view</button>
+            <span class="iv-zoom-level" id="iv-zoom-level">1.0×</span>
+          </div>
         </div>
+        <div class="iv-canvas-hint">Scroll to zoom · drag to pan</div>
         <!-- Alerts -->
         <div class="iv-alerts" id="iv-alerts"></div>
       </div>
@@ -333,7 +358,12 @@
         </div>
 
         <div class="iv-hist">
-          <div class="section-label">Original pixel intensity (16-bit)</div>
+          <div class="iv-hist-head">
+            <div class="section-label" style="border:none;margin:0;">Original pixel intensity (16-bit)</div>
+            <label class="iv-hist-toggle" title="Compute histogram over the whole image or only the region currently visible after zoom/pan.">
+              <input type="checkbox" id="iv-hist-region"> region only
+            </label>
+          </div>
           <canvas id="iv-hist-canvas" width="260" height="110"></canvas>
           <div class="iv-hist-stats" id="iv-hist-stats"></div>
         </div>
