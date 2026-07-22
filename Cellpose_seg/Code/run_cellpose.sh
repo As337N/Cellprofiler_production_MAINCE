@@ -10,7 +10,8 @@ if run_section 2; then
   #### --- 2) Cellpose segmentation --- ####
   echo "*** $PWD ***"
   export TQDM_DISABLE=1
-  python3 $SCRIPT_PY_CELLPOSE $IMAGES_WORKSPACE /output/CellProfiler_files/Cellpose_seg --rna_channel 4 --batch-size 36
+  python3 $SCRIPT_PY_CELLPOSE "$IMAGES_WORKSPACE" /output/CellProfiler_files/Cellpose_seg \
+  --rna_channel 3 --batch-size 36
 fi
 
 END_TIME=$(date +%s)

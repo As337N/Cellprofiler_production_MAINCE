@@ -7,12 +7,12 @@ source /config/variables.env
 set +a
 source /workspace/Code/bash_functions.sh
 
-SECTIONS=(3) #2-9
+SECTIONS=(2 3) #2-9
 run_section() { [[ " ${SECTIONS[*]} " == *" $1 "* ]]; }
 
 # ============================================================
 create_output_dirs $OUTPUT $IMAGES_WORKSPACE
-BATCH_SIZE=10000
+BATCH_SIZE=0
 
 if run_section 2; then
   echo "===***=== [3] Prepare QC ===***==="
@@ -27,7 +27,7 @@ if run_section 2; then
      "$PATH_BATCH_PIPELINES/Batch_data_QC.h5"
   echo "[INFO] Batchfiles generated for QC"
 
-  ejecutar_pipeline "$PATH_BATCH_PIPELINES/Batch_data_QC.h5" 0 "$PATH_QC_IMAGES" "$PATH_CSV/$NAME_QC.csv" $BATCH_SIZE
+  ejecutar_pipeline --pipeline "$PATH_BATCH_PIPELINES/Batch_data_QC.h5" --illum 0 --out "$PATH_QC_IMAGES" --metadata "$PATH_CSV/$NAME_QC.csv" --batch_size $BATCH_SIZE
 fi
 
 #### --- 3) Obtain plate collage for quality control --- ####
@@ -50,7 +50,7 @@ if run_section 4; then
      "$PATH_BATCH_PIPELINES/Batch_data_MP.h5"
   echo "[INFO] Batchfiles generated"
 
-  ejecutar_pipeline "$PATH_BATCH_PIPELINES/Batch_data_MP.h5" 0 "$PATH_PROFILES" "$PATH_CSV/$NAME_MP.csv" $BATCH_SIZE
+  ejecutar_pipeline --pipeline "$PATH_BATCH_PIPELINES/Batch_data_MP.h5" --ilum 0 --out "$PATH_PROFILES" --metadata "$PATH_CSV/$NAME_MP.csv" --batch_size $BATCH_SIZE
 fi
 
 #### --- 5) Feature postprocessing [Aggregation, Normalization and Reduction] --- ####

@@ -137,95 +137,74 @@ create_output_dirs() {
 }
 
 
-ejecutar_pipeline() {
-  local BATCH_DATA="$1"
-  local ILUMINACION="${2:-1}"
-  local OUT_ROOT="${3:-}"
-  local METADATA_CSV="${4:-}"
-  local USER_BATCH_SIZE="${5:-0}"   # si > 0, sobrescribe el cálculo automático
+# ============================================================
+#  Resource detection → prints MAX_JOBS to stdout
+# ============================================================
+calculate_max_jobs() {
+  local ram_per_batch="${CP_RAM_PER_BATCH:-4000}"   # MiB per worker
 
-  # --- MODO ILUMINACIÓN (sin batches) ---
-  if [ "$ILUMINACION" -eq 1 ]; then
-    echo "[INFO] Modo iluminación (sin fraccionar)"
-    cellprofiler -c -r -p "$BATCH_DATA" -o "$OUT_ROOT"
-    return
-  fi
+  local nproc mem_free max_by_ram max_jobs
+  nproc=$(nproc)
+  mem_free=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)
 
-  # --- Validaciones ---
-  if [ ! -f "$METADATA_CSV" ]; then
-    echo "[ERROR] No se encontró METADATA_CSV"
-    return 1
-  fi
+  max_by_ram=$(( mem_free / ram_per_batch ))
+  [ "$max_by_ram" -lt 1 ] && max_by_ram=1
 
-  local TOTAL_SETS=$(( $(wc -l < "$METADATA_CSV") - 1 ))
+  local cpu_fraction="${CP_CPU_FRACTION:-75}"
+  local usable_cores=$(( nproc * cpu_fraction / 100 ))
+  [ "$usable_cores" -lt 1 ] && usable_cores=1
 
-  # ================================================================
-  #   DETECCIÓN AUTOMÁTICA DE CPU + RAM PARALELIZACIÓN REAL
-  # ================================================================
+  max_jobs=$(( max_by_ram < usable_cores ? max_by_ram : usable_cores ))
 
-  # núcleos
-  local NPROC=$(nproc)
+  # Logs to stderr so they don't contaminate the stdout return value
+  {
+    echo "[INFO] Available RAM: ${mem_free} MiB"
+    echo "[INFO] Available cores: ${nproc}"
+    echo "[INFO] Max jobs (RAM):  ${max_by_ram}"
+    echo "[INFO] Max jobs (CPU):  ${usable_cores}"
+    echo "[INFO] Effective parallel workers: ${max_jobs}"
+  } >&2
 
-  # RAM total y libre (en MiB)
-  local MEM_TOTAL=$(grep MemTotal /proc/meminfo | awk '{print int($2/1024)}')
-  local MEM_FREE=$(grep MemAvailable /proc/meminfo | awk '{print int($2/1024)}')
+  echo "$max_jobs"
+}
 
-  echo "[INFO] Total RAM: ${MEM_TOTAL} MiB"
-  echo "[INFO] Available RAM: ${MEM_FREE} MiB"
-  echo "[INFO] Available cores: $NPROC"
+# ============================================================
+#  Number of image sets = CSV rows - 1 (header)
+# ============================================================
+count_image_sets() {
+  local csv="$1"
+  echo $(( $(wc -l < "$csv") - 1 ))
+}
 
-  # ---------- Estimación de RAM por batch ----------
-  # regla empírica: CellProfiler suele usar 200–600 MB por batch dependiendo del pipeline
-  # ajustable si quieres
-  local RAM_PER_BATCH="${CP_RAM_PER_BATCH:-500}"   # en MiB
+# ============================================================
+#  Launch batches in parallel, respecting MAX_JOBS
+# ============================================================
+launch_batches() {
+  local batch_data="$1"
+  local out_root="$2"
+  local total_sets="$3"
+  local batch_size="$4"
+  local max_jobs="$5"
 
-  # máximo de jobs por RAM
-  local MAX_BY_RAM=$(( MEM_FREE / RAM_PER_BATCH ))
-  [ "$MAX_BY_RAM" -lt 1 ] && MAX_BY_RAM=1
+  local start=1 end outdir
+  while [ "$start" -le "$total_sets" ]; do
+    end=$(( start + batch_size - 1 ))
+    [ "$end" -gt "$total_sets" ] && end="$total_sets"
 
-  # máximo total (limitado también por CPU)
-  local MAX_JOBS=$(( MAX_BY_RAM < NPROC ? MAX_BY_RAM : NPROC ))
+    outdir="$out_root/batch_${start}_${end}"
+    mkdir -p "$outdir"
 
-  echo "[INFO]   Max jobs per RAM: $MAX_BY_RAM"
-  echo "[INFO]   Max jobs per CPU: $NPROC"
-  echo "[INFO]   Effective parallel works: $MAX_JOBS"
-
-  # ---------- Tamaño automático del batch ----------
-  local BATCH_SIZE="$USER_BATCH_SIZE"
-  if [ "$BATCH_SIZE" -le 0 ]; then
-      BATCH_SIZE=$(( (TOTAL_SETS + MAX_JOBS - 1) / MAX_JOBS ))
-  fi
-
-  echo "[INFO] Batch size: $BATCH_SIZE"
-
-  # ================================================================
-  #   EJECUCIÓN EN PARALELO AUTOMÁTICO
-  # ================================================================
-  local start=1
-  local running=0
-
-  while [ "$start" -le "$TOTAL_SETS" ]; do
-    local end=$(( start + BATCH_SIZE - 1 ))
-    [ "$end" -gt "$TOTAL_SETS" ] && end="$TOTAL_SETS"
-
-    local OUTDIR="$OUT_ROOT/batch_${start}_${end}"
-    mkdir -p "$OUTDIR"
+    # Wait if MAX_JOBS are already running (real count, no manual counter)
+    while [ "$(jobs -r | wc -l)" -ge "$max_jobs" ]; do
+      wait -n
+    done
 
     echo "[INFO] Launching batch: $start → $end"
-
     cellprofiler -c -r \
-      -p "$BATCH_DATA" \
+      -p "$batch_data" \
       -f "$start" \
       -l "$end" \
-      -o "$OUTDIR" &
-
-    running=$(( running + 1 ))
-
-    # Si ya hay muchos jobs corriendo, esperar
-    if [ "$running" -ge "$MAX_JOBS" ]; then
-      wait -n
-      running=$(( running - 1 ))
-    fi
+      -o "$outdir" &
 
     start=$(( end + 1 ))
   done
@@ -234,3 +213,77 @@ ejecutar_pipeline() {
   echo "[INFO] All batch processing done"
 }
 
+# ============================================================
+#  Orchestrator: parse flags and delegate
+# ============================================================
+ejecutar_pipeline() {
+  local BATCH_DATA=""
+  local ILLUMINATION=1
+  local OUT_ROOT=""
+  local METADATA_CSV=""
+  local USER_BATCH_SIZE=0
+
+  # --- Flag parsing ---
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -p|--pipeline)   BATCH_DATA="$2";      shift 2 ;;
+      -i|--illum)      ILLUMINATION="$2";    shift 2 ;;
+      -o|--out)        OUT_ROOT="$2";        shift 2 ;;
+      -m|--metadata)   METADATA_CSV="$2";    shift 2 ;;
+      -b|--batch_size) USER_BATCH_SIZE="$2"; shift 2 ;;
+      -h|--help)
+        echo "Usage: ejecutar_pipeline -p <batch.h5> [-i 0|1] [-o <outdir>] [-m <metadata.csv>] [-b <batch_size>]"
+        return 0 ;;
+      *)
+        echo "[ERROR] Unknown flag: $1" >&2
+        return 1 ;;
+    esac
+  done
+
+  # --- Common validations ---
+  if [ -z "$BATCH_DATA" ]; then
+    echo "[ERROR] Missing -p/--pipeline" >&2
+    return 1
+  fi
+  if [ ! -f "$BATCH_DATA" ]; then
+    echo "[ERROR] Pipeline not found: $BATCH_DATA" >&2
+    return 1
+  fi
+
+  # --- Illumination mode (no splitting) ---
+  if [ "$ILLUMINATION" -eq 1 ]; then
+    echo "[INFO] Illumination mode (no splitting)"
+    cellprofiler -c -r -p "$BATCH_DATA" -o "$OUT_ROOT"
+    return
+  fi
+
+  # --- Batch mode validations ---
+  if [ -z "$OUT_ROOT" ]; then
+    echo "[ERROR] Missing -o/--out in batch mode" >&2
+    return 1
+  fi
+  if [ ! -f "$METADATA_CSV" ]; then
+    echo "[ERROR] METADATA_CSV not found: $METADATA_CSV" >&2
+    return 1
+  fi
+  if ! [[ "$USER_BATCH_SIZE" =~ ^[0-9]+$ ]]; then
+    echo "[ERROR] --batch_size must be an integer" >&2
+    return 1
+  fi
+
+  # --- Parallelism and batch size calculation ---
+  local TOTAL_SETS MAX_JOBS BATCH_SIZE
+  TOTAL_SETS=$(count_image_sets "$METADATA_CSV")
+  MAX_JOBS=$(calculate_max_jobs)
+
+  BATCH_SIZE="$USER_BATCH_SIZE"
+  if [ "$BATCH_SIZE" -le 0 ]; then
+    BATCH_SIZE=$(( (TOTAL_SETS + MAX_JOBS - 1) / MAX_JOBS ))
+  fi
+
+  echo "[INFO] Total image sets: $TOTAL_SETS"
+  echo "[INFO] Batch size: $BATCH_SIZE"
+
+  # --- Execution ---
+  launch_batches "$BATCH_DATA" "$OUT_ROOT" "$TOTAL_SETS" "$BATCH_SIZE" "$MAX_JOBS"
+}

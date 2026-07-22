@@ -15,7 +15,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-CHANNELS: Dict[int, str] = {
+"""CHANNELS: Dict[int, str] = { #Custom
     1: "Mito",
     2: "Golgi",
     3: "Brightfield",
@@ -23,8 +23,19 @@ CHANNELS: Dict[int, str] = {
     5: "ER",
     6: "Hoechst",
 }
+"""
+CHANNELS: Dict[int, str] = { #JUMP-MoA
+    1: "Mito",
+    2: "Golgi",
+    3: "Syto",
+    4: "ER",
+    5: "Hoechst",
+    6: "Brightfield",
+}
 
-FILENAME_REGEX = re.compile(r"^\d(?P<Row>\d{2})\d(?P<Column>\d{2})-(?P<Field>\d)-\d{3}(?P<Plane>\d{3})(?P<Channel>\d{3})\.tif")
+
+#FILENAME_REGEX = re.compile(r"^\d(?P<Row>\d{2})\d(?P<Column>\d{2})-(?P<Field>\d)-\d{3}(?P<Plane>\d{3})(?P<Channel>\d{3})\.tif")
+FILENAME_REGEX = re.compile(r"^r(?P<Row>\d{2})c(?P<Column>\d{2})f(?P<Field>\d{2})p(?P<Plane>\d{2})-ch(?P<Channel>\d)(?:sk\d+fk\d+fl\d+)?\.tiff?$")
 PLATE_REGEX = re.compile(r"_P(?P<Plate>\d{2})_")
 
 
@@ -78,8 +89,8 @@ def _parse_single_file(
 
     meta = match.groupdict()
 
-    if int(meta["Plane"]) != 2:
-        return None
+    #if int(meta["Plane"]) != 2:
+    #    return None
 
     plate_match = PLATE_REGEX.search(str(path))
     if not plate_match:

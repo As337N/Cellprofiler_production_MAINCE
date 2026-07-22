@@ -30,7 +30,7 @@ if run_section 1; then
    mv $PATH_BATCH_PIPELINES/Batch_data.h5 \
       $PATH_BATCH_PIPELINES/Batch_data_Illum.h5
    echo "Batch files generated"
-   ejecutar_pipeline "$PATH_BATCH_PIPELINES/Batch_data_Illum.h5" 1
+   ejecutar_pipeline -p "$PATH_BATCH_PIPELINES/Batch_data_Illum.h5" -i 1
 fi
 
 END_TIME=$(date +%s)

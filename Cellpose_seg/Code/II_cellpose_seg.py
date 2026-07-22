@@ -12,6 +12,18 @@ import numpy as np
 import torch
 import tifffile as tiff
 
+MODEL_PATH = Path(__file__).parent / "sam-model" / "cpsam"
+if not MODEL_PATH.exists():
+    raise FileNotFoundError(f"cpsam weights not found at {MODEL_PATH}")
+
+# Harmony / JUMP: r09c22f02p01-ch4sk1fk1fl1.tiff
+DEFAULT_CHANNEL_REGEX = (
+    r"^r(?P<Row>\d{2})c(?P<Column>\d{2})f(?P<Field>\d{2})p(?P<Plane>\d{2})"
+    r"-ch(?P<Channel>\d)(?:sk\d+fk\d+fl\d+)?\.tiff?$"
+)
+
+# Dataset custom: ..._002004.tif  ->  r"00200(?P<Channel>\d)\.tiff?$"
+# DEFAULT_CHANNEL_REGEX = r"00200(?P<Channel>\d)\.tiff?$"
 
 def apply_plate_illumination_correction(
     image_paths: list[Path],
@@ -75,6 +87,7 @@ def apply_plate_illumination_correction(
 
     return corrected_images
 
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Cellpose segmentation of RNA channel per plate."
@@ -84,11 +97,19 @@ def parse_args():
     parser.add_argument("--rna_channel", type=int, default=4)
     parser.add_argument("--batch-size", type=int, default=12)
     parser.add_argument("--regex", type=str, default=r"_P(?P<Plate>\d{2})_")
+    parser.add_argument(
+        "--channel-regex",
+        type=str,
+        default=DEFAULT_CHANNEL_REGEX,
+        help="Regex con un grupo nombrado 'Channel' que capture el índice de canal.",
+    )
     return parser.parse_args()
+
 
 def load_images(images_path):
     with ThreadPoolExecutor() as ex:
         return list(ex.map(imread, images_path))
+
 
 def save_masks(masks, paths, output_dir, max_workers=None):
     def _save(mask, path):
@@ -101,19 +122,29 @@ def save_masks(masks, paths, output_dir, max_workers=None):
         for f in futures:
             f.result()
 
+
 class CellposeRnaSeg():
-    def __init__(self, input_path, output_path, rna_channel, batch_size, regex):
-        self.model = models.CellposeModel(gpu=True)
+    def __init__(self, input_path, output_path, rna_channel, batch_size, regex, channel_regex):
+        self.model = models.CellposeModel(gpu=True, pretrained_model=str(MODEL_PATH))
         self.input_path = input_path
         self.output_path = output_path
         self.plate_regex = re.compile(regex)
-        self.pattern_rna_images = f"00200{rna_channel}.tif"
+        self.channel_regex = re.compile(channel_regex)
+        if "Channel" not in self.channel_regex.groupindex:
+            raise ValueError(
+                f"--channel-regex debe contener un grupo nombrado 'Channel': {channel_regex}"
+            )
+        self.rna_channel = rna_channel
         self.batch_size = batch_size
         self.name_image_directories = "untreated_data"
 
     def _get_plate(self, path: Path) -> str:
         m = self.plate_regex.search(str(path))
         return m.group("Plate") if m else "unknown"
+
+    def _is_rna_image(self, path: Path) -> bool:
+        m = self.channel_regex.search(path.name)
+        return m is not None and int(m.group("Channel")) == self.rna_channel
 
     def _mk_plate_dir(self, path_images):
         plate = self._get_plate(path_images)
@@ -152,9 +183,11 @@ class CellposeRnaSeg():
 
             save_masks(masks, batch_paths, path_masks)
 
-
     def run(self, illumination_npy: Path):
         for p in self.input_path.iterdir():
+            if not p.is_dir():
+                continue
+
             path_images = p / self.name_image_directories
             if not path_images.exists():
                 print(f"[WARN] No existe {path_images}, salto plate")
@@ -162,15 +195,13 @@ class CellposeRnaSeg():
 
             plate, path_masks = self._mk_plate_dir(path_images)
 
-            img_paths = sorted(
-                f for f in path_images.iterdir()
-                if f.name.endswith(self.pattern_rna_images)
-            )
+            img_paths = sorted(f for f in path_images.iterdir() if self._is_rna_image(f))
 
             if not img_paths:
                 all_files = [f.name for f in path_images.iterdir()][:5]
-                print(f"[WARN] Plate {plate}: 0 imágenes con patrón '{self.pattern_rna_images}'. "
-                    f"Ejemplos en la carpeta: {all_files}")
+                print(f"[WARN] Plate {plate}: 0 imágenes para canal {self.rna_channel} "
+                      f"con patrón '{self.channel_regex.pattern}'. "
+                      f"Ejemplos en la carpeta: {all_files}")
                 continue
 
             print(f"[INFO Cellpose segmentation] Plate {plate}: {len(img_paths)} images")
@@ -182,16 +213,19 @@ class CellposeRnaSeg():
             )
             self._process_plate(img_paths, corrected_images, path_masks)
 
+
 def main():
     args = parse_args()
     pipeline = CellposeRnaSeg(
         input_path=args.input_path,
         output_path=args.output_path,
         regex=args.regex,
+        channel_regex=args.channel_regex,
         rna_channel=args.rna_channel,
         batch_size=args.batch_size
     )
     pipeline.run(illumination_npy=Path("/output/CellProfiler_files/Illum_files/Illum_Syto.npy"))
+
 
 if __name__=="__main__":
     start_time = time.perf_counter()
