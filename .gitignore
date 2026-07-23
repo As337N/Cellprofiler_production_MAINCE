@@ -2,7 +2,7 @@
 *.out
 ./logs/
 .gitignore
-
+./Cellpose_seg/Code/sam-model/*
 .env
 __pycache__
 variables.env
