@@ -12,12 +12,12 @@ run_section() { [[ " ${SECTIONS[*]} " == *" $1 "* ]]; }
 
 # ============================================================
 create_output_dirs $OUTPUT $IMAGES_WORKSPACE
-BATCH_SIZE=0
+BATCH_SIZE=1000
 
 if run_section 2; then
   echo "===***=== [3] Prepare QC ===***==="
   NAME_QC="III_QC"
-  python $SCRIPT_PY_CELLPROFILER -i $IMAGES_WORKSPACE -o $PATH_CSV --name_csv $NAME_QC --illum --masks
+  python $SCRIPT_PY_CELLPROFILER -i $IMAGES_WORKSPACE -o $PATH_CSV --name_csv $NAME_QC --illum --masks --channel_dict "$CHANNEL_DICT" --filename_regex "$FILENAME_REGEX"
 
   CSV_COUNT=$(find "$PATH_CPPIPE" -maxdepth 1 -name "*.csv" | wc -l)
   echo "[INFO] Se van a procesar $CSV_COUNT archivos CSV en $PATH_CPPIPE"
@@ -33,14 +33,16 @@ fi
 #### --- 3) Obtain plate collage for quality control --- ####
 if run_section 3; then
   echo "===***=== [3] Generate QC report ===***==="
-  python $SCRIPT_PY_COLLAGE -i $PATH_QC_IMAGES -o $PATH_QC_COLLAGES --platemap /workspace_images/platemap_${COHORT}.csv --cohort $COHORT 
+  python $SCRIPT_PY_AGGREGATE_QC_OUTPUT --input "$PATH_QC_IMAGES"
+  python $SCRIPT_PY_COLLAGE -i $PATH_QC_IMAGES -o $PATH_QC_COLLAGES --platemap /workspace_images/platemap_${COHORT}.csv --cohort $COHORT --rows 16 --cols 24
+  echo "[INFO] QC report generated in ${PATH_QC_COLLAGES}"
 fi
 
 #### --- 4) Calculate CellProfiler features --- ####
 if run_section 4; then
   echo "===***=== [4] Profile generation ===***==="
   NAME_MP="IV_MP"
-  python $SCRIPT_PY_CELLPROFILER -i $IMAGES_WORKSPACE -o $PATH_CSV --name_csv $NAME_MP --illum --masks
+  python $SCRIPT_PY_CELLPROFILER -i $IMAGES_WORKSPACE -o $PATH_CSV --name_csv $NAME_MP --illum --masks --channel_dict "$CHANNEL_DICT" --filename_regex "$FILENAME_REGEX"
 
   CSV_COUNT=$(find "$PATH_CPPIPE" -maxdepth 1 -name "*.csv" | wc -l)
   echo "[INFO] Amount of CSV files to be processed: $CSV_COUNT in: $PATH_CPPIPE"
@@ -50,7 +52,7 @@ if run_section 4; then
      "$PATH_BATCH_PIPELINES/Batch_data_MP.h5"
   echo "[INFO] Batchfiles generated"
 
-  ejecutar_pipeline --pipeline "$PATH_BATCH_PIPELINES/Batch_data_MP.h5" --ilum 0 --out "$PATH_PROFILES" --metadata "$PATH_CSV/$NAME_MP.csv" --batch_size $BATCH_SIZE
+  ejecutar_pipeline --pipeline "$PATH_BATCH_PIPELINES/Batch_data_MP.h5" --illum 0 --out "$PATH_PROFILES" --metadata "$PATH_CSV/$NAME_MP.csv" --batch_size $BATCH_SIZE
 fi
 
 #### --- 5) Feature postprocessing [Aggregation, Normalization and Reduction] --- ####
@@ -104,7 +106,7 @@ fi
 
 if run_section 10; then
   echo "===***=== [10] Random Forest ===***==="
-  python $SCRYPT_PY_RANDOMFOREST \
+  python $SCRIPT_PY_RANDOMFOREST \
     -i "$PATH_FINAL_PROFILES" \
     -o "$PATH_RANDOMFOREST" \
     -c $COHORT

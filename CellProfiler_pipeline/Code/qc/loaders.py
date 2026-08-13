@@ -37,7 +37,7 @@ def collapse_sites_to_wells(site_qc: dict, AREA_COL, METRIC_COLS) -> dict:
     ignored per column; a well with no valid value for a column omits it.
 
     This is the single source of truth for per-well QC: load once at site level,
-    derive well level on demand instead of re-reading the TSV.
+    derive well level on demand instead of re-reading the source table.
     """
     result: dict = {}
     for plate, wells in site_qc.items():
@@ -69,13 +69,27 @@ def _isnan(x) -> bool:
     return x != x
 
 
+# ── Table reader ───────────────────────────────────────────────────────────────
+def _read_table(path, **kwargs) -> "pl.DataFrame":
+    """Read a measurements table, dispatching on extension.
+
+    Accepts both the consolidated parquet written by III_QC_aux.py and the raw
+    per-batch CellProfiler TSV (.txt). Extra kwargs (e.g. low_memory) only apply
+    to the CSV path — read_parquet does not accept them.
+    """
+    path = Path(path)
+    if path.suffix == ".parquet":
+        return pl.read_parquet(path)
+    return pl.read_csv(path, separator="\t", **kwargs)
+
+
 # ── Data loaders ───────────────────────────────────────────────────────────────
 def load_qc_tsv_sites(tsv_path, AREA_COL, METRIC_COLS) -> dict:
     """Per-site QC values, sin colapsar sites.
 
     Agrupa por [plate, well, field]. Es la fuente única de verdad: el nivel de
-    well se deriva bajo demanda con collapse_sites_to_wells(), evitando releer el
-    TSV y garantizando que ambos niveles no diverjan.
+    well se deriva bajo demanda con collapse_sites_to_wells(), evitando releer la
+    tabla y garantizando que ambos niveles no diverjan.
 
     Returns {plate: {well: {field: {col: value}}}}.
     """
@@ -86,7 +100,7 @@ def load_qc_tsv_sites(tsv_path, AREA_COL, METRIC_COLS) -> dict:
         print(f"[warn] QC file not found: {tsv_path}")
         return {}
 
-    df        = pl.read_csv(tsv_path, separator="\t")
+    df        = _read_table(tsv_path)
     plate_col = "Metadata_Plate" if "Metadata_Plate" in df.columns else None
     well_col  = "Metadata_Well"  if "Metadata_Well"  in df.columns else None
     field_col = "Metadata_Field" if "Metadata_Field" in df.columns else None
@@ -172,12 +186,12 @@ def load_platemap(platemap_path) -> dict:
     return result
 
 def _load_object_tsv(tsv_path: Path, channel_map: dict, label: str) -> "pl.DataFrame | None":
-    """Load one CellProfiler object TSV (Cells.txt or Nuclei.txt)."""
+    """Load one CellProfiler object table (Cells or Nuclei, .parquet or .txt)."""
     if not tsv_path.exists():
         print(f"[mfi] {label} not found: {tsv_path}")
         return None
 
-    df = pl.read_csv(tsv_path, separator="\t", low_memory=False)
+    df = _read_table(tsv_path, low_memory=False)
     print(f"[mfi] Loaded {len(df):,} rows from {tsv_path.name}  ({label})")
 
     if "Metadata_Well" not in df.columns:
@@ -205,7 +219,7 @@ def _load_object_tsv(tsv_path: Path, channel_map: dict, label: str) -> "pl.DataF
 def load_mfi_data(cells_path: "Path | None",
                   nuclei_path: "Path | None") -> "tuple[dict, dict]":
     """
-    Load Cells.txt and Nuclei.txt and return (source_dfs, channel_map).
+    Load the Cells and Nuclei tables and return (source_dfs, channel_map).
     source_dfs : { channel_label: DataFrame }
     channel_map: { channel_label: (col_name, hex_colour) }  ordered by MFI_CHANNEL_ORDER
     """
@@ -227,7 +241,7 @@ def load_mfi_data(cells_path: "Path | None",
     if nuclei_path is not None:
         df_nuclei = _load_object_tsv(nuclei_path, config.MFI_DATA['MFI_COLS_NUCLEI'], "Nuclei")
         if df_nuclei is not None:
-            print(f"[mfi] Nuclei.txt columns: {[c for c in df_nuclei.columns if 'Hoechst' in c or 'Intensity' in c][:10]}")
+            print(f"[mfi] Nuclei columns: {[c for c in df_nuclei.columns if 'Hoechst' in c or 'Intensity' in c][:10]}")
             for ch, (col, color) in config.MFI_DATA['MFI_COLS_NUCLEI'].items():
                 if col in df_nuclei.columns:
                     keep = (["Metadata_Plate", "Metadata_Well"]
@@ -244,14 +258,14 @@ def load_mfi_data(cells_path: "Path | None",
 
 def load_mfi_img(image_txt_path: "Path | None") -> "dict[str, dict[str, float]]":
     """
-    Load per-well median MFI from Image.txt.
+    Load per-well median MFI from the Image table.
     Returns { well: { channel: median_across_sites } }
     """
     if image_txt_path is None or not image_txt_path.exists():
-        print(f"[mfi_img] Image.txt not found: {image_txt_path}")
+        print(f"[mfi_img] Image table not found: {image_txt_path}")
         return {}
 
-    df = pl.read_csv(image_txt_path, separator="\t", low_memory=False)
+    df = _read_table(image_txt_path, low_memory=False)
     if "Metadata_Well" not in df.columns:
         return {}
 
@@ -280,7 +294,7 @@ def load_radius_data(cells_path: "Path | None",
                      nuclei_path: "Path | None",
                      plate_name: str) -> "dict[str, dict[str, float]]":
     """
-    Load AreaShape_MedianRadius from Cells.txt and Nuclei.txt.
+    Load AreaShape_MedianRadius from the Cells and Nuclei tables.
     Returns { 'Cells': { well: median_radius }, 'Nuclei': { well: median_radius } }
     """
     col = "AreaShape_MedianRadius"
@@ -294,7 +308,7 @@ def load_radius_data(cells_path: "Path | None",
     for label, path in [("Cells", cells_path), ("Nuclei", nuclei_path)]:
         if path is None or not path.exists():
             continue
-        df = pl.read_csv(path, separator="\t", low_memory=False)
+        df = _read_table(path, low_memory=False)
         if "Metadata_Well" not in df.columns or col not in df.columns:
             print(f"[radius] {col} not found in {path.name} — skipping.")
             continue

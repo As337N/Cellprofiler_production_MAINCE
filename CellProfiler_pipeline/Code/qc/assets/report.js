@@ -29,12 +29,12 @@ const METRIC_GROUPS = [
   { label: 'MedianIntensity', specs: MEDIANINT_SPECS },
 ];
  
-// ROWS: A at top (index 0) -> H at bottom (index 7)
-// Plotly heatmap y-axis goes bottom->top, so we reverse for display.
-const ROW_LABELS  = ['A','B','C','D','E','F','G','H'];
-const ROWS_PLOTLY = ['H','G','F','E','D','C','B','A'];  // reversed for Plotly
-const COLS = Array.from({length:12}, (_,i) => String(i+1).padStart(2,'0'));
-const PLATE_ROWS = 8, PLATE_COLS = 12;
+const N_ROWS = (window.__QC__ && window.__QC__.n_rows) || 8;
+const N_COLS = (window.__QC__ && window.__QC__.n_cols) || 12;
+const ROW_LABELS  = Array.from({length:N_ROWS}, (_,i) => String.fromCharCode(65+i));
+const ROWS_PLOTLY = [...ROW_LABELS].reverse();
+const COLS = Array.from({length:N_COLS}, (_,i) => String(i+1).padStart(2,'0'));
+const PLATE_ROWS = N_ROWS, PLATE_COLS = N_COLS;
  
 // MFI_COLORS and MFI_DATA/MFI_CHANNELS injected above from Python
 function _chColor(ch) {
@@ -1304,7 +1304,9 @@ function mfiRenderPlatemap(channel, plateName) {
   const color    = MFI_COLORS[channel]||'#8ab0d0';
   const wellCmpd = DATA[plateName]?.wells||{};
   grid.innerHTML = '';
- 
+  grid.style.gridTemplateColumns = `22px repeat(${N_COLS}, 42px)`;
+  grid.style.gridTemplateRows    = `22px repeat(${N_ROWS}, 42px)`;
+
   const wellMeds={};
   Object.entries(wellData).forEach(([w,vals]) => {
     const s=[...vals].sort((a,b)=>a-b);

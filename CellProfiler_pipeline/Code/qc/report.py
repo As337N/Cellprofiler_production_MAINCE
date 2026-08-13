@@ -95,7 +95,9 @@ def build_payload(cohort_name: str, plates_data: list[dict]) -> dict:
         pmap  = pd_["plate_map"] or {}
         adp   = pd_.get("engine_adaptive", {})
 
-        report_grid = _make_report_collage(pd_["collage_arr"], pqc, pmap)
+        report_grid = _make_report_collage(pd_["collage_arr"], pqc, pmap,
+                                            plate_rows=pd_.get("plate_rows", 8),
+                                            plate_cols=pd_.get("plate_cols", 12))
 
         well_flags = {}
         for well, m in pqc.items():
@@ -293,9 +295,13 @@ def build_payload(cohort_name: str, plates_data: list[dict]) -> dict:
     mfi_colors = {ch: _mfi_colors.get(ch, "#8ab0d0") for ch in _all_mfi_channels}
     mfi_img_payload = {pd_["name"]: pd_.get("mfi_img", {}) for pd_ in plates_data}
     radius_payload  = {pd_["name"]: pd_.get("radius_data", {}) for pd_ in plates_data}
+    n_rows = plates_data[0].get("plate_rows", 8)
+    n_cols = plates_data[0].get("plate_cols", 12)
 
     # ── Group everything into window.__QC__ ──────────────────────────────────
     return {
+        "n_rows":      n_rows,
+        "n_cols":      n_cols,
         "data":        payload,
         "countRanges": count_ranges,
         "mfi": {

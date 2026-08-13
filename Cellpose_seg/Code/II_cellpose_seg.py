@@ -11,19 +11,45 @@ from skimage.io import imread, imsave
 import numpy as np
 import torch
 import tifffile as tiff
+import os
+import shutil
+from cellpose import models
 
-MODEL_PATH = Path(__file__).parent / "sam-model" / "cpsam"
-if not MODEL_PATH.exists():
-    raise FileNotFoundError(f"cpsam weights not found at {MODEL_PATH}")
+MODEL_DIR = Path(__file__).parent / "sam-model"
+MODEL_PATH = MODEL_DIR / "cpsam"
+
+
+def ensure_cpsam_weights() -> Path:
+    """Devuelve la ruta a los pesos cpsam, descargándolos si no están."""
+    if MODEL_PATH.exists():
+        return MODEL_PATH
+
+    print(f"[INFO] Pesos cpsam no encontrados en {MODEL_PATH}, descargando…")
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Cellpose descarga a CELLPOSE_LOCAL_MODELS_PATH o ~/.cellpose/models
+    os.environ.setdefault("CELLPOSE_LOCAL_MODELS_PATH", str(MODEL_DIR))
+    models.CellposeModel(gpu=False)   # fuerza la descarga
+
+    cache = Path(os.environ["CELLPOSE_LOCAL_MODELS_PATH"]) / "cpsam"
+    if cache.exists() and cache != MODEL_PATH:
+        shutil.copy2(cache, MODEL_PATH)
+
+    if not MODEL_PATH.exists():
+        raise FileNotFoundError(
+            f"La descarga no dejó los pesos en {MODEL_PATH}. "
+            f"Revisa la salida a internet del contenedor o monta los pesos manualmente."
+        )
+    return MODEL_PATH
 
 # Harmony / JUMP: r09c22f02p01-ch4sk1fk1fl1.tiff
-DEFAULT_CHANNEL_REGEX = (
+"""DEFAULT_CHANNEL_REGEX = (
     r"^r(?P<Row>\d{2})c(?P<Column>\d{2})f(?P<Field>\d{2})p(?P<Plane>\d{2})"
     r"-ch(?P<Channel>\d)(?:sk\d+fk\d+fl\d+)?\.tiff?$"
-)
+)"""
 
 # Dataset custom: ..._002004.tif  ->  r"00200(?P<Channel>\d)\.tiff?$"
-# DEFAULT_CHANNEL_REGEX = r"00200(?P<Channel>\d)\.tiff?$"
+DEFAULT_CHANNEL_REGEX = r"00200(?P<Channel>\d)\.tiff?$"
 
 def apply_plate_illumination_correction(
     image_paths: list[Path],
@@ -125,7 +151,7 @@ def save_masks(masks, paths, output_dir, max_workers=None):
 
 class CellposeRnaSeg():
     def __init__(self, input_path, output_path, rna_channel, batch_size, regex, channel_regex):
-        self.model = models.CellposeModel(gpu=True, pretrained_model=str(MODEL_PATH))
+        self.model = models.CellposeModel(gpu=True, pretrained_model=str(ensure_cpsam_weights()))
         self.input_path = input_path
         self.output_path = output_path
         self.plate_regex = re.compile(regex)

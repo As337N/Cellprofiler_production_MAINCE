@@ -141,7 +141,7 @@ create_output_dirs() {
 #  Resource detection → prints MAX_JOBS to stdout
 # ============================================================
 calculate_max_jobs() {
-  local ram_per_batch="${CP_RAM_PER_BATCH:-4000}"   # MiB per worker
+  local ram_per_batch="${CP_RAM_PER_BATCH:-8000}"   # MiB per worker
 
   local nproc mem_free max_by_ram max_jobs
   nproc=$(nproc)
@@ -179,38 +179,49 @@ count_image_sets() {
 # ============================================================
 #  Launch batches in parallel, respecting MAX_JOBS
 # ============================================================
+# launch_batches — versión con control de errores
 launch_batches() {
-  local batch_data="$1"
-  local out_root="$2"
-  local total_sets="$3"
-  local batch_size="$4"
-  local max_jobs="$5"
+  local batch_data="$1" out_root="$2" total_sets="$3" batch_size="$4" max_jobs="$5"
+  local start=1 end outdir tag rc=0
+  local -A PIDS
+  local -a TAGS=()
 
-  local start=1 end outdir
   while [ "$start" -le "$total_sets" ]; do
     end=$(( start + batch_size - 1 ))
     [ "$end" -gt "$total_sets" ] && end="$total_sets"
-
-    outdir="$out_root/batch_${start}_${end}"
+    tag="${start}_${end}"
+    outdir="$out_root/batch_${tag}"
     mkdir -p "$outdir"
+    rm -f "$outdir/rc"
 
-    # Wait if MAX_JOBS are already running (real count, no manual counter)
-    while [ "$(jobs -r | wc -l)" -ge "$max_jobs" ]; do
-      wait -n
+    while [ "${#PIDS[@]}" -ge "$max_jobs" ]; do
+      wait -n 2>/dev/null || true
+      for pid in "${!PIDS[@]}"; do
+        kill -0 "$pid" 2>/dev/null || unset 'PIDS[$pid]'
+      done
     done
 
-    echo "[INFO] Launching batch: $start → $end"
-    cellprofiler -c -r \
-      -p "$batch_data" \
-      -f "$start" \
-      -l "$end" \
-      -o "$outdir" &
-
+    (
+      cellprofiler -c -r -p "$batch_data" -f "$start" -l "$end" -o "$outdir" \
+        > "$outdir/cp.log" 2>&1
+      echo $? > "$outdir/rc"
+    ) &
+    PIDS[$!]="$tag"
+    TAGS+=( "$tag" )
     start=$(( end + 1 ))
   done
 
   wait
-  echo "[INFO] All batch processing done"
+
+  for tag in "${TAGS[@]}"; do
+    outdir="$out_root/batch_${tag}"
+    if [ "$(cat "$outdir/rc" 2>/dev/null)" != "0" ]; then
+      echo "[ERROR] Batch ${tag} falló (revisar ${outdir}/cp.log)" >&2
+      rc=1
+    fi
+  done
+
+  return $rc
 }
 
 # ============================================================

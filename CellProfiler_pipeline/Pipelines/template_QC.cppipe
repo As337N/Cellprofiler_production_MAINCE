@@ -114,7 +114,7 @@ MeasureImageQuality:[module_num:5|svn_version:'Unknown'|variable_revision_number
 IdentifyPrimaryObjects:[module_num:6|svn_version:'Unknown'|variable_revision_number:15|show_window:False|notes:['Identifies ALL nuclei in image though we will only take measurements on those NOT touching the border of the image (filtered at a later step)']|batch_state:array(b'', dtype='|S1')|enabled:True|wants_pause:False]
     Select the input image:Hoechst
     Name the primary objects to be identified:Raw_nuclei
-    Typical diameter of objects, in pixel units (Min,Max):25,50
+    Typical diameter of objects, in pixel units (Min,Max):25,40
     Discard objects outside the diameter range?:Yes
     Discard objects touching the border of the image?:Yes
     Method to distinguish clumped objects:Shape

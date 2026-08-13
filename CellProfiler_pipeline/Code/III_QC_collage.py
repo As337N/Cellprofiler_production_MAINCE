@@ -1227,31 +1227,41 @@ class Collage:
         self.engine       = ThresholdEngine(n_sigma=n_sigma)
         self.output_path.mkdir(parents=True, exist_ok=True)
 
-        # Auto-detect QC TSV — load once at SITE level, derive well level from it.
+        _md = self.input_dir.resolve().parent / "Measurements"
+        if not _md.is_dir():
+            _md = self.input_dir / "Measurements"
+        self._measurements_dir = _md
+
+        #print(f"[dbg] input_dir={self.input_dir}  existe={self.input_dir.is_dir()}", flush=True)
+        #print(f"[dbg] tiffs en input_dir: {len(list(self.input_dir.glob('*.tiff')))}", flush=True)
+        #print(f"[dbg] measurements_dir={self._measurements_dir}  existe={_md.is_dir()}", flush=True)
+        #for _t in ("Image", "Cells", "Nuclei"):
+        #    print(f"[dbg]   {_t} -> {self._table(_t)}", flush=True)
+
+        # Auto-detect QC source — load once at SITE level, derive well level from it.
         self.qc_sites = qc.loaders.load_qc_tsv_sites(
             qc_tsv, qc.config.AREA_COL, qc.config.METRIC_COLS)
         if not self.qc_sites:
-            _p = self.input_dir / "Measurements" / "Image.txt"
-            if _p.exists():
+            _p = self._table("Image")
+            if _p is not None:
                 print(f"[qc] Auto-detected: {_p}")
                 self.qc_sites = qc.loaders.load_qc_tsv_sites(
                     _p, qc.config.AREA_COL, qc.config.METRIC_COLS)
             if not self.qc_sites:
-                print(f"[warn] No QC measurements found. Searched: {_p}")
-                print(f"[warn] Use --qc to specify the path explicitly.")
-        # Per-well QC is derived from the site-level source of truth.
+                print(f"[warn] No QC measurements found in {_md}")
+                print("[warn] Use --qc to specify the path explicitly.")
+
         self.qc = qc.loaders.collapse_sites_to_wells(
             self.qc_sites, qc.config.AREA_COL, qc.config.METRIC_COLS)
-        
 
-        # Auto-detect Cells.txt / Nuclei.txt for MFI
-        _md = self.input_dir / "Measurements"
-        self._measurements_dir = _md
         self._source_dfs, self._channel_map = qc.loaders.load_mfi_data(
-            cells_path  = _md / "Cells.txt"  if (_md / "Cells.txt").exists()  else None,
-            nuclei_path = _md / "Nuclei.txt" if (_md / "Nuclei.txt").exists() else None
+            cells_path  = self._table("Cells"),
+            nuclei_path = self._table("Nuclei"),
         )
-        self._mfi_img = qc.loaders.load_mfi_img(_md / "Image.txt" if (_md / "Image.txt").exists() else None)
+        self._mfi_img = qc.loaders.load_mfi_img(self._table("Image"))
+        #print(f"[dbg] qc_sites plates={list(self.qc_sites)}", flush=True)
+        #print(f"[dbg] qc wells={ {p: len(w) for p, w in self.qc.items()} }", flush=True)
+        #print(f"[dbg] channel_map={list(self._channel_map)}", flush=True)
 
         # Auto-detect platemap — explicit path or first platemap_*.csv in input dir
         self.platemap = qc.loaders.load_platemap(platemap)
@@ -1263,12 +1273,21 @@ class Collage:
 
         # Process plates and accumulate HTML data
         self._html_plates: list[dict] = []
-        for plate_name, files in sorted(self._group_by_plate().items()):
+        _plates = self._group_by_plate()
+        #print(f"[dbg] plates={ {k: len(v) for k, v in _plates.items()} }", flush=True)
+        for plate_name, files in sorted(_plates.items()):
             print(f"\n[plate] {plate_name}")
             wells    = self._group_well_imgs(files)
+            #print(f"[dbg]   wells={len(wells)} claves={sorted(wells)[:5]}", flush=True)
             montages = self._build_montages_parallel(wells)
+            #print(f"[dbg]   montages={len(montages)}", flush=True)
             self._render_plate(plate_name, montages)
+        #print(f"[dbg] html_plates={len(self._html_plates)}", flush=True)
 
+        if not self._html_plates:
+            raise SystemExit(
+                f"[ERROR] No se procesó ninguna placa desde {self.input_dir}"
+            )
         # Generate HTML after all plates are processed.
         # Deferred import (breaks the qc.report <-> III_QC_collage circular import):
         # by now this module is fully initialized, so qc.report can safely pull
@@ -1283,6 +1302,14 @@ class Collage:
             web_scale    = self.web_scale,
         )
 
+    def _table(self, name: str) -> "Path | None":
+        """Ruta de una tabla de medidas: prefiere .parquet, cae a .txt."""
+        for ext in (".parquet", ".txt"):
+            p = self._measurements_dir / f"{name}{ext}"
+            if p.exists():
+                return p
+        return None
+
     def _group_by_plate(self) -> dict:
         plates = defaultdict(list)
         for f in self.input_dir.glob("*.tiff"):
@@ -1293,9 +1320,18 @@ class Collage:
 
     def _group_well_imgs(self, files: list) -> dict:
         wells = defaultdict(dict)
+        skipped = 0
         for f in files:
-            r, c, s = parse_name(f.name)
+            try:
+                r, c, s = parse_name(f.name)
+            except ValueError as e:
+                skipped += 1
+                if skipped <= 5:
+                    print(f"[warn] {e}", flush=True)
+                continue
             wells[(r, c)][s] = f
+        if skipped:
+            print(f"[warn] {skipped} ficheros sin parsear en este grupo", flush=True)
         return wells
 
     def _build_montages_parallel(self, wells: dict) -> dict:
@@ -1365,6 +1401,7 @@ class Collage:
         return {}
 
     def _render_plate(self, plate_name: str, montages: dict) -> None:
+        #print(f"[dbg] _render_plate {plate_name}: montages={len(montages)}", flush=True)
         if not montages:
             print(f"  No images for {plate_name}, skipping.")
             return
@@ -1445,6 +1482,8 @@ class Collage:
 
         self._html_plates.append({
             "name":          plate_name,
+            "plate_rows":    self.plate_rows,
+            "plate_cols":    self.plate_cols,
             "collage_arr":   collage,
             "overview_arr":  overview_arr,
             "overview_cw":   ov_cw,
@@ -1457,8 +1496,8 @@ class Collage:
             "mfi_data":      _aggregate_mfi_per_well(self._source_dfs, self._channel_map, plate_name) if self._channel_map else {},
             "mfi_img":  self._mfi_img,
             "radius_data":   qc.loaders.load_radius_data(
-                                 cells_path  = self._measurements_dir / "Cells.txt"  if (self._measurements_dir / "Cells.txt").exists()  else None,
-                                 nuclei_path = self._measurements_dir / "Nuclei.txt" if (self._measurements_dir / "Nuclei.txt").exists() else None,
+                                 cells_path  = self._table("Cells"),
+                                 nuclei_path = self._table("Nuclei"),
                                  plate_name  = plate_name,
                              ),
             "pass_rate":     100 * n_pass / n_wells if n_wells else 0,
@@ -1468,10 +1507,23 @@ class Collage:
         })
 
 
+# Harmony / JUMP: r01c01f01p01-ch3sk1fk1fl1_P25.tiff
+"""IMAGE_REGEX = re.compile(
+    r"^r(?P<Row>\d+)c(?P<Column>\d+)f(?P<Field>\d+)p(?P<Plane>\d+)"
+    r"-ch(?P<Channel>\d+)"
+)"""
+# Cohorte anterior: 001001-1-001002004_P11.tiff
+IMAGE_REGEX = re.compile(r"^(?P<Row>\d{3})(?P<Column>\d{3})-(?P<Field>\d+)-")
+
+
 def parse_name(fname: str) -> tuple:
-    name     = fname.replace(".tiff", "")
-    rc, site, _ = name.split("-")
-    return int(rc[:3]), int(rc[3:6]), int(site)
+    """Devuelve (row, column, site) a partir del nombre del fichero."""
+    m = IMAGE_REGEX.match(fname)
+    if m:
+        return (int(m.group("Row")),
+                int(m.group("Column")),
+                int(m.group("Field")))
+    raise ValueError(f"No se pudo parsear el nombre de imagen: {fname!r}")
 
 # ── CLI ────────────────────────────────────────────────────────────────────────
 

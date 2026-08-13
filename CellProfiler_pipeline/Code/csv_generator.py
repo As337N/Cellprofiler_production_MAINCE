@@ -8,6 +8,7 @@ from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 import polars as pl
 from tqdm import tqdm
+import os, json
 
 logging.basicConfig(
     level=logging.INFO,
@@ -15,27 +16,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-"""CHANNELS: Dict[int, str] = { #Custom
-    1: "Mito",
-    2: "Golgi",
-    3: "Brightfield",
-    4: "Syto",
-    5: "ER",
-    6: "Hoechst",
-}
-"""
-CHANNELS: Dict[int, str] = { #JUMP-MoA
-    1: "Mito",
-    2: "Golgi",
-    3: "Syto",
-    4: "ER",
-    5: "Hoechst",
-    6: "Brightfield",
-}
-
-
-#FILENAME_REGEX = re.compile(r"^\d(?P<Row>\d{2})\d(?P<Column>\d{2})-(?P<Field>\d)-\d{3}(?P<Plane>\d{3})(?P<Channel>\d{3})\.tif")
-FILENAME_REGEX = re.compile(r"^r(?P<Row>\d{2})c(?P<Column>\d{2})f(?P<Field>\d{2})p(?P<Plane>\d{2})-ch(?P<Channel>\d)(?:sk\d+fk\d+fl\d+)?\.tiff?$")
 PLATE_REGEX = re.compile(r"_P(?P<Plate>\d{2})_")
 
 
@@ -63,6 +43,8 @@ def _parse_single_file(
     path: Path,
     illum: bool,
     masks: bool,
+    compiled_regex: re.Pattern,
+    channels: Dict[int, str],
     output: Path | None,) -> dict | None:
     """
         Parse metadata from a single image file.
@@ -83,14 +65,11 @@ def _parse_single_file(
         dict | None
             Parsed metadata row, or None if the file does not match criteria.
     """
-    match = FILENAME_REGEX.match(path.name)
+    match = compiled_regex.match(path.name)
     if not match:
         return None
 
     meta = match.groupdict()
-
-    #if int(meta["Plane"]) != 2:
-    #    return None
 
     plate_match = PLATE_REGEX.search(str(path))
     if not plate_match:
@@ -106,11 +85,11 @@ def _parse_single_file(
         "Metadata_Well": get_well(meta["Row"], meta["Column"]),
         "Metadata_Field": int(meta["Field"]),
         "Metadata_Channel": ch_num,
-        "Metadata_Channel_name": CHANNELS.get(ch_num, str(ch_num)),
+        "Metadata_Channel_name": channels.get(ch_num, str(ch_num)),
     }
 
     if illum and output is not None:
-        row["FileName_Illum"] = f"Illum_{CHANNELS.get(ch_num, ch_num)}.npy"
+        row["FileName_Illum"] = f"Illum_{channels.get(ch_num, ch_num)}.npy"
         row["PathName_Illum"] = str(output.parents[0] / "Illum_files")
 
     if masks and output is not None:
@@ -121,6 +100,8 @@ def _parse_single_file(
 
 def parse_image_dataset(
     root: Union[str, Path],
+    channels: dict,
+    compiled_regex: re.Pattern,
     illum: bool = False,
     masks: bool = False,
     output: Union[str, Path, None] = None,
@@ -153,7 +134,6 @@ def parse_image_dataset(
     """
     root = Path(root)
     output = Path(output) if output is not None else None
-    print(f"[DEBUG 02-04-2026] plates2process: {plates2process}")
     files = [
         path
         for plate in root.iterdir()
@@ -166,7 +146,7 @@ def parse_image_dataset(
     logger.info(f"Found {len(files)} image files")
 
     rows: List[dict] = []
-    worker = partial(_parse_single_file, illum=illum, masks=masks, output=output)
+    worker = partial(_parse_single_file, illum=illum, masks=masks, output=output, compiled_regex=compiled_regex, channels=channels)
 
     with ProcessPoolExecutor(max_workers=max_workers) as ex:
         for i in tqdm(range(0, len(files), chunk_size), desc="Parsing images"):
@@ -255,73 +235,16 @@ def pivot_df(df: pl.DataFrame, illum: bool = False, masks: bool = False) -> pl.D
 
     return df_final.select(ordered_cols)
 
-def split_and_save_by_groups(
-    df: pl.DataFrame,
-    col: str,
-    k: int,
-    out_dir: Union[str, Path],
-    max_workers: int | None = None,) -> List[pl.DataFrame]:
-    """
-        Split a DataFrame into k chunks by unique group values and save them
-        using multiprocessing.
-
-        Parameters
-        ----------
-        df : pl.DataFrame
-            Input DataFrame.
-        col : str
-            Column used for grouping.
-        k : int
-            Number of output chunks.
-        out_dir : str | Path
-            Output directory.
-        max_workers : int | None, default None
-            Number of worker processes.
-
-        Returns
-        -------
-        list[pl.DataFrame]
-            List of output DataFrames.
-    """
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    groups = df.select(pl.col(col).unique()).to_series().to_list()
-    random.shuffle(groups)
-
-    chunk_size = (len(groups) + k - 1) // k
-    group_chunks = [groups[i:i + chunk_size] for i in range(0, len(groups), chunk_size)]
-
-    def _write(idx_chunk):
-        idx, chunk = idx_chunk
-        subdf = df.filter(pl.col(col).is_in(chunk))
-        filepath = out_dir / f"{idx:03d}.csv"
-        subdf.write_csv(filepath)
-        return subdf
-
-    dfs_out: List[pl.DataFrame] = []
-
-    with ProcessPoolExecutor(max_workers=max_workers) as ex:
-        for subdf in tqdm(ex.map(_write, enumerate(group_chunks)), total=len(group_chunks), desc="Writing CSVs"):
-            dfs_out.append(subdf)
-
-    while len(dfs_out) < k:
-        empty_df = pl.DataFrame(schema=df.schema)
-        filepath = out_dir / f"{len(dfs_out):03d}.parquet"
-        empty_df.write_parquet(filepath)
-        dfs_out.append(empty_df)
-
-    return dfs_out
-
-
 def prepare_CSVs(
     path: Union[str, Path],
     output: Union[str, Path],
     name_csv: str,
+    channels: dict,
+    compiled_regex: re.Pattern,
     illum: bool = False,
     masks: bool = False,
     max_workers: int | None = None,
-    plates2process: list | None = None) -> None:
+    plates2process: list | None = None,) -> None:
     """
         Run the full metadata extraction pipeline and save final CSV output.
 
@@ -346,7 +269,9 @@ def prepare_CSVs(
         masks=masks,
         output=output,
         max_workers=max_workers,
-        plates2process=plates2process
+        plates2process=plates2process,
+        channels=channels,
+        compiled_regex=compiled_regex
     )
 
     #print("[DEBUG] columnas reales:", df.columns)
@@ -370,8 +295,15 @@ if __name__ == "__main__":
     parser.add_argument("--masks", action="store_true", help="Include RNA mask metadata")
     parser.add_argument("--workers", type=int, default=None, help="Number of worker processes")
     parser.add_argument("--plates2process", nargs='*', help="List of plates to be processed")
+    parser.add_argument("--channel_dict", required=True, help='JSON Name→Number, e.g. {"Mito":"1",...}')
+    parser.add_argument("--filename_regex", required=True, help="Regex with the following groups: Row/Column/Field/Plane/Channel")
 
     args = parser.parse_args()
+
+    print(f"[DEBUG] channel_dict repr: {repr(args.channel_dict)}")
+
+    channels = {int(v): k for k, v in json.loads(args.channel_dict).items()}
+    compiled_regex = re.compile(args.filename_regex)
 
     prepare_CSVs(
         path=args.input,
@@ -380,5 +312,7 @@ if __name__ == "__main__":
         illum=args.illum,
         masks=args.masks,
         max_workers=args.workers,
-        plates2process=args.plates2process
+        plates2process=args.plates2process,
+        channels=channels,
+        compiled_regex=compiled_regex
     )
