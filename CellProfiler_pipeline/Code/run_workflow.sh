@@ -7,7 +7,7 @@ source /config/variables.env
 set +a
 source /workspace/Code/bash_functions.sh
 
-SECTIONS=(2 3) #2-9
+SECTIONS=(3) #2-9
 run_section() { [[ " ${SECTIONS[*]} " == *" $1 "* ]]; }
 
 # ============================================================
