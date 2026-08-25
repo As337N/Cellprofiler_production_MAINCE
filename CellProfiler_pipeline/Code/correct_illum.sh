@@ -13,7 +13,7 @@ echo "[DEBUG 12.08.2026] CHANNEL_DICT=[$CHANNEL_DICT]"
 
 BATCH_SIZE=5000 
 
-SECTIONS=(1) #1
+SECTIONS=() #1
 run_section() { [[ " ${SECTIONS[*]} " == *" $1 "* ]]; }
 
 #### --- 1) Calculate illumination correction files --- ####
