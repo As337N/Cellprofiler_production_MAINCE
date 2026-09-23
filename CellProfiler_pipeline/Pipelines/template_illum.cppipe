@@ -12,8 +12,8 @@ LoadData:[module_num:1|svn_version:'Unknown'|variable_revision_number:6|show_win
     Base image location:None|
     Process just a range of rows?:No
     Rows to process:1,100000
-    Group images by metadata?:No
-    Select metadata tags for grouping:
+    Group images by metadata?:Yes
+    Select metadata tags for grouping:Well,Field,Plate
     Rescale intensities?:Yes
 
 Resize:[module_num:2|svn_version:'Unknown'|variable_revision_number:5|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
@@ -221,7 +221,7 @@ SaveImages:[module_num:10|svn_version:'Unknown'|variable_revision_number:16|show
     Select the image to save:UpsampledHoechst
     Select method for constructing file names:Single name
     Select image name for file prefix:None
-    Enter single file name:Illum_Hoechst
+    Enter single file name:P\g<Plate>_Illum_Hoechst
     Number of digits:4
     Append a suffix to the image file name?:No
     Text to append to the image name:
@@ -241,7 +241,7 @@ SaveImages:[module_num:11|svn_version:'Unknown'|variable_revision_number:16|show
     Select the image to save:UpsampledER
     Select method for constructing file names:Single name
     Select image name for file prefix:None
-    Enter single file name:Illum_ER
+    Enter single file name:P\g<Plate>_Illum_ER
     Number of digits:4
     Append a suffix to the image file name?:No
     Text to append to the image name:
@@ -261,7 +261,7 @@ SaveImages:[module_num:12|svn_version:'Unknown'|variable_revision_number:16|show
     Select the image to save:UpsampledGolgi
     Select method for constructing file names:Single name
     Select image name for file prefix:None
-    Enter single file name:Illum_Golgi
+    Enter single file name:P\g<Plate>_Illum_Golgi
     Number of digits:4
     Append a suffix to the image file name?:No
     Text to append to the image name:
@@ -281,7 +281,7 @@ SaveImages:[module_num:13|svn_version:'Unknown'|variable_revision_number:16|show
     Select the image to save:UpsampledSyto
     Select method for constructing file names:Single name
     Select image name for file prefix:None
-    Enter single file name:Illum_Syto
+    Enter single file name:P\g<Plate>_Illum_Syto
     Number of digits:4
     Append a suffix to the image file name?:No
     Text to append to the image name:
@@ -301,7 +301,7 @@ SaveImages:[module_num:14|svn_version:'Unknown'|variable_revision_number:16|show
     Select the image to save:UpsampledMito
     Select method for constructing file names:Single name
     Select image name for file prefix:None
-    Enter single file name:Illum_Mito
+    Enter single file name:P\g<Plate>_Illum_Mito
     Number of digits:4
     Append a suffix to the image file name?:No
     Text to append to the image name:
@@ -321,7 +321,7 @@ SaveImages:[module_num:15|svn_version:'Unknown'|variable_revision_number:16|show
     Select the image to save:UpsampledBrightfield
     Select method for constructing file names:Single name
     Select image name for file prefix:None
-    Enter single file name:Illum_Brightfield
+    Enter single file name:P\g<Plate>_Illum_Brightfield
     Number of digits:4
     Append a suffix to the image file name?:No
     Text to append to the image name:

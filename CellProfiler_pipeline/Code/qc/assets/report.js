@@ -18,14 +18,102 @@ const PLATES         = Object.keys(DATA);
 
 const SLOPE_SPECS    = Q.specs.slope;
 const PCT_MAX_SPECS  = Q.specs.pctMax;
-const PCT_MIN_SPECS  = Q.specs.pctMin;
+const PCT_MIN_SPECS  = Q.specs.pctMin;   // Intensity_Percentile_10 (reemplaza PctMinimal)
 const MEDIANINT_SPECS = Q.specs.medianInt;
 const MAD_SCORES     = Q.madScores;
 const RED_COUNTS     = Q.redCounts;
+// Column-name prefixes whose heatmaps show MAD z-scores in the tooltip.
+// Comes from config.ROBUST_METRICS via the payload — single source of truth.
+const ROBUST_PREFIXES = Q.robustMetrics || ['ImageQuality_MedianIntensity_'];
+
+// ── Color resolver ÚNICO (espejo de qc/stats/colors.py ColorResolver) ────────
+// Una sola regla de color para métricas QC, compartida por platemaps, Plate
+// Browser, paneles de well/sitio y bordes de verdict. Antes había tres copias
+// divergentes (specColor continuo sobre valor crudo) que se desincronizaban del
+// platemap (bandas de |z| para métricas robustas). Esta es la autoridad única.
+//
+//   · robustas (Slope, MedInt)  → color por |z_cohorte| en bandas discretas.
+//   · PercentMaximal            → color por valor crudo contra cortes absolutos.
+//   · Intensity_Percentile_10   → color por ratio value/mediana_cohorte (low_ratio):
+//                                  piso de intensidad bajo = fondo negro = rojo.
+//
+// La especificación (modo, cortes, colores, refs de cohorte) viene de Q.colorSpec,
+// generada en Python, así front y back aplican EXACTAMENTE la misma regla.
+const COLOR_SPEC = Q.colorSpec || {
+  robustPrefixes: ROBUST_PREFIXES,
+  zband: { greenMax: 1.0, amberMax: 3.0 },
+  absolute: { 'ImageQuality_PercentMaximal_': { lo: 0.1, hi: 1.0 } },
+  absoluteLow: { 'Intensity_Percentile_10_': { fail: 0.015, warn: 0.02 } },
+  colors: { green: '#4bd760', amber: '#ffbe00', red: '#ff4444' },
+};
+const CLR = COLOR_SPEC.colors;
+const ABSOLUTE_LOW = COLOR_SPEC.absoluteLow || {};
+
+function _absoluteLowCuts(col) {
+  for (const prefix of Object.keys(ABSOLUTE_LOW)) {
+    if (col.startsWith(prefix)) return ABSOLUTE_LOW[prefix];
+  }
+  return null;
+}
+function _colorMode(col) {
+  if (COLOR_SPEC.robustPrefixes.some(p => col.startsWith(p))) return 'zband';
+  if (_absoluteLowCuts(col)) return 'absolute_low';
+  return 'absolute';
+}
+function _absoluteCuts(col) {
+  for (const prefix of Object.keys(COLOR_SPEC.absolute)) {
+    if (col.startsWith(prefix)) return COLOR_SPEC.absolute[prefix];
+  }
+  return null;
+}
+// Cohort z (z_co) de un well para una columna robusta; null si no hay.
+function _zco(col, plateName, well) {
+  const sc = (MAD_SCORES[col] || {})[plateName]?.[well];
+  return sc && sc.z_co != null ? sc.z_co : null;
+}
+// Color de UN valor.
+//   zband        → por |z_co| (ignora value).
+//   absolute_low → BAJO = malo: rojo <fail, ambar fail..warn, verde >warn.
+//   absolute     → ALTO = malo: verde <lo, ambar lo..hi, rojo >hi.
+function colorForValue(col, value, zco) {
+  const mode = _colorMode(col);
+  if (mode === 'zband') {
+    if (zco == null) return null;
+    const az = Math.abs(zco);
+    if (az <= COLOR_SPEC.zband.greenMax) return CLR.green;
+    if (az <= COLOR_SPEC.zband.amberMax) return CLR.amber;
+    return CLR.red;
+  }
+  if (mode === 'absolute_low') {
+    if (value == null || (typeof value === 'number' && isNaN(value))) return null;
+    const cuts = _absoluteLowCuts(col);
+    if (!cuts) return null;
+    if (value < cuts.fail) return CLR.red;
+    if (value <= cuts.warn) return CLR.amber;
+    return CLR.green;
+  }
+  if (value == null || (typeof value === 'number' && isNaN(value))) return null;
+  const cuts = _absoluteCuts(col);
+  if (!cuts) return null;
+  if (value < cuts.lo) return CLR.green;
+  if (value <= cuts.hi) return CLR.amber;
+  return CLR.red;
+}
+// Resuelve el color de un spec para un well concreto (usa z_co del cohorte).
+function resolveColor(spec, value, plateName, well) {
+  const zco = _colorMode(spec.col) === 'zband' ? _zco(spec.col, plateName, well) : null;
+  return colorForValue(spec.col, value, zco);
+}
+const COLOR_ORDER = [CLR.red, CLR.amber, CLR.green];
+function worstColorOf(colors) {
+  const present = new Set(colors.filter(Boolean));
+  for (const c of COLOR_ORDER) if (present.has(c)) return c;
+  return null;
+}
 const METRIC_GROUPS = [
   { label: 'PowerLogLogSlope',        specs: SLOPE_SPECS  },
   { label: 'PercentMaximal',   specs: PCT_MAX_SPECS  },
-  { label: 'PercentMinimal',   specs: PCT_MIN_SPECS  },
+  { label: 'Percentile10',    specs: PCT_MIN_SPECS  },
   { label: 'MedianIntensity', specs: MEDIANINT_SPECS },
 ];
  
@@ -210,6 +298,7 @@ PLATES.forEach((p, i) =>
 let currentPlate = null;
 let selectedWell = null;
 let selectedSite = null;
+let pcaSelected  = null;   // {plate, well} del pozo seleccionado en el PCA (punto 5)
  
 function renderPlate(idx) {
   const name    = PLATES[idx];
@@ -237,29 +326,13 @@ function renderPlate(idx) {
   renderMFI();
 }
  
-// Evalúa el color semántico de un valor según su colorscale (igual que renderWellInfo)
-function specColor(v, spec) {
-  if (v == null) return null;
-  const t = Math.max(0, Math.min(1, (v - spec.cmin) / (spec.cmax - spec.cmin)));
-  const cs = spec.cs;
-  for (let i = 0; i < cs.length - 1; i++) {
-    if (t >= cs[i][0] && t <= cs[i+1][0]) {
-      if (cs[i][1] === cs[i+1][1]) return cs[i][1];
-      if (cs[i][0] === cs[i+1][0]) return cs[i+1][1];
-      return cs[i][1];
-    }
-  }
-  return cs[cs.length-1][1];
+// specColor / worstColor quedan como envoltorios finos del resolver único, para
+// no duplicar la regla. specColor necesita plateName+well porque las métricas
+// robustas se colorean por z_co (no por valor crudo).
+function specColor(v, spec, plateName, well) {
+  return resolveColor(spec, v, plateName, well);
 }
-
-// Prioridad de colores: rojo > amarillo > verde > null
-const COLOR_PRIORITY = ['#ff4444','#ffbe00','#4bd760'];
-function worstColor(colors) {
-  for (const c of COLOR_PRIORITY) {
-    if (colors.includes(c)) return c;
-  }
-  return null;
-}
+function worstColor(colors) { return worstColorOf(colors); }
 
 function buildOverlaySVG(plateName) {
   const pd  = DATA[plateName];
@@ -278,9 +351,9 @@ function buildOverlaySVG(plateName) {
       const m    = pd.wells[well] || {};
       const x0   = ci * cw, y0 = ri * ch;
 
-      // Calcular el peor color entre todas las métricas del pozo
-      const colors = ALL_METRIC_SPECS
-        .map(spec => specColor(m[spec.col], spec))
+      // Peor color entre las métricas ACTIVAS (según los toggles de criterios).
+      const colors = verdictSpecs()
+        .map(spec => specColor(m[spec.col], spec, plateName, well))
         .filter(Boolean);
       const border = worstColor(colors);
 
@@ -390,34 +463,47 @@ function selectWell(plateName, well) {
   renderWellInfo(plateName, well);
   renderWellMontage(plateName, well);
   renderSiteTables(plateName, well);
+  // Punto 5: marcar el pozo seleccionado también en el PCA (vincular outliers).
+  pcaHighlightWell(plateName, well);
+}
+
+// Resalta un pozo concreto en el PCA sin re-renderizar todo el gráfico: añade/
+// reemplaza una traza-marcador en su coordenada (pc1,pc2). null lo limpia.
+function pcaHighlightWell(plateName, well) {
+  pcaSelected = (plateName && well) ? { plate: plateName, well } : null;
+  if (window.Plotly) renderPCA();
 }
  
 // ── Well info panel ───────────────────────────────────────────────────────────
-const ALL_METRIC_SPECS = [...SLOPE_SPECS, ...PCT_MAX_SPECS, ...PCT_MIN_SPECS, ...MEDIANINT_SPECS];
+const ALL_METRIC_SPECS = [...SLOPE_SPECS, ...PCT_MAX_SPECS,
+                          ...PCT_MIN_SPECS, ...MEDIANINT_SPECS];
+
+// ── Quality-criteria toggles (Plate Browser) ────────────────────────────────
+// Which metric families count toward a well's overall colour verdict. All on by
+// default. Disabling one removes it from the verdict so other error sources
+// become visible. This ONLY affects the verdict colour (overview + montage); the
+// per-metric detail tables still list every metric.
+// Nota (punto 4): el criterio "pctmin" es ahora Intensity_Percentile_10 por canal
+// (piso de intensidad de la imagen), que reemplaza por completo a PercentMinimal.
+// Se colorea por ratio vs la mediana de cohorte del canal (bajo = fondo negro).
+const VERDICT_FAMILIES = { slope: SLOPE_SPECS, pctmax: PCT_MAX_SPECS,
+                           pctmin: PCT_MIN_SPECS, medint: MEDIANINT_SPECS };
+const activeCriteria = new Set(Object.keys(VERDICT_FAMILIES));  // all active
+
+// Specs used to compute a well/site verdict, honouring the active toggles.
+function verdictSpecs() {
+  const out = [];
+  for (const key of Object.keys(VERDICT_FAMILIES)) {
+    if (activeCriteria.has(key)) out.push(...VERDICT_FAMILIES[key]);
+  }
+  return out;
+}
  
 function renderWellInfo(plateName, well) {
   const pd   = DATA[plateName];
   const m    = pd.wells[well] || {};
   const cmpd = m.compound || '—';
-
-  // Evalúa el color de un valor según la colorscale del spec (igual que el heatmap)
-  // Interpola la colorscale para obtener el color semántico: verde/amarillo/rojo
-  function specColor(v, spec) {
-    if (v == null) return '';
-    const t = Math.max(0, Math.min(1, (v - spec.cmin) / (spec.cmax - spec.cmin)));
-    const cs = spec.cs;
-    // Buscar el segmento de la colorscale donde cae t
-    for (let i = 0; i < cs.length - 1; i++) {
-      if (t >= cs[i][0] && t <= cs[i+1][0]) {
-        // Si el par de colores es igual, devolver ese color directamente
-        if (cs[i][1] === cs[i+1][1]) return cs[i][1];
-        // Si el par forma un escalón (mismo t), es la transición de un segmento al siguiente
-        if (cs[i][0] === cs[i+1][0]) return cs[i+1][1];
-        return cs[i][1];
-      }
-    }
-    return cs[cs.length-1][1];
-  }
+  const worst = m._worst || {};   // {col: field responsable del peor sitio}
 
   let html = `<h3>${well}</h3>
     <div class="well-compound">${cmpd}</div>`;
@@ -435,14 +521,41 @@ function renderWellInfo(plateName, well) {
   ALL_METRIC_SPECS.forEach(spec => {
     const v = m[spec.col];
     if (v == null) return;
-    const color = specColor(v, spec);
-    html += `<div class="metric-row">
-      <span class="metric-label">${spec.title}</span>
-      <span class="metric-val" style="color:${color}">${fmt3(v)}</span>
-    </div>`;
+    html += metricRowHTML(spec, v, plateName, well, worst[spec.col]);
   });
 
   document.getElementById('well-info').innerHTML = html;
+}
+
+// Fila de métrica compartida por los paneles de well y de sitio.
+//   · robustas   → valor + z_pl y z_co (los dos MAD-scores que deciden el color).
+//   · percentiles→ valor + sitio responsable del peor valor (si no es verde).
+// worstField: sitio responsable (solo aplica a percentiles a nivel WELL; en el
+// panel de sitio se pasa null porque el valor ya es el del sitio mostrado).
+function metricRowHTML(spec, v, plateName, well, worstField) {
+  const color = resolveColor(spec, v, plateName, well) || 'var(--muted)';
+  let extra = '';
+  if (_colorMode(spec.col) === 'zband') {
+    const sc = (MAD_SCORES[spec.col] || {})[plateName]?.[well];
+    if (sc && (sc.z_pl != null || sc.z_co != null)) {
+      const zpl = sc.z_pl != null ? `${sc.z_pl >= 0 ? '+' : ''}${sc.z_pl}` : '—';
+      const zco = sc.z_co != null ? `${sc.z_co >= 0 ? '+' : ''}${sc.z_co}` : '—';
+      extra = `<span class="metric-z" title="MAD z-score vs placa y vs cohorte">`
+            + `<span class="metric-z-line">z<sub>pl</sub> ${zpl}</span>`
+            + `<span class="metric-z-line">z<sub>co</sub> ${zco}</span></span>`;
+    }
+  } else if (worstField != null && color !== CLR.green) {
+    // Sitio culpable del peor valor, para dirigir la búsqueda de outliers.
+    extra = `<span class="metric-site" title="Sitio responsable del peor valor">`
+          + `site ${worstField}</span>`;
+  }
+  return `<div class="metric-row">
+      <span class="metric-label">${spec.title}</span>
+      <span class="metric-val-group">
+        <span class="metric-val" style="color:${color}">${fmt3(v)}</span>
+        ${extra}
+      </span>
+    </div>`;
 }
  
 function renderWellMontage(plateName, well) {
@@ -477,12 +590,14 @@ function renderWellMontage(plateName, well) {
     const gc = (s - 1) % nGrid;
     const hasData = Object.prototype.hasOwnProperty.call(siteData, String(s));
 
-    // Peor color entre todas las métricas del sitio (rojo > amarillo > verde)
+    // Peor color entre las métricas ACTIVAS del sitio (según los toggles).
     let border = null;
     if (hasData) {
       const m = siteData[String(s)];
-      const colors = ALL_METRIC_SPECS
-        .map(spec => specColor(m[spec.col], spec))
+      // Percentiles: color por el valor DEL SITIO (unidad de detección).
+      // Robustas: no hay z por sitio; heredan el z_co del well.
+      const colors = verdictSpecs()
+        .map(spec => specColor(m[spec.col], spec, plateName, well))
         .filter(Boolean);
       border = worstColor(colors);
     }
@@ -519,26 +634,13 @@ function clearSiteInfo() {
   const el = document.getElementById('site-info');
   if (el) el.innerHTML =
     '<p class="no-well">Click a site tile in the montage to inspect it.</p>';
+  const panel = document.getElementById('site-crop-panel');
+  if (panel) panel.style.display = 'none';
 }
 
 function renderSiteInfo(plateName, well, site) {
   const pd = DATA[plateName];
   const m  = ((pd.site_data || {})[well] || {})[String(site)] || {};
-
-  // Same colour logic as the well-info panel (interpolates the spec colorscale).
-  function siteSpecColor(v, spec) {
-    if (v == null) return '';
-    const t = Math.max(0, Math.min(1, (v - spec.cmin) / (spec.cmax - spec.cmin)));
-    const cs = spec.cs;
-    for (let i = 0; i < cs.length - 1; i++) {
-      if (t >= cs[i][0] && t <= cs[i+1][0]) {
-        if (cs[i][1] === cs[i+1][1]) return cs[i][1];
-        if (cs[i][0] === cs[i+1][0]) return cs[i+1][1];
-        return cs[i][1];
-      }
-    }
-    return cs[cs.length-1][1];
-  }
 
   let html = `<h3>${well} · site ${site}</h3>
     <div class="well-compound">${(pd.wells[well]||{}).compound || '—'}</div>`;
@@ -557,14 +659,53 @@ function renderSiteInfo(plateName, well, site) {
   ALL_METRIC_SPECS.forEach(spec => {
     const v = m[spec.col];
     if (v == null) return;
-    const color = siteSpecColor(v, spec);
-    html += `<div class="metric-row">
-      <span class="metric-label">${spec.title}</span>
-      <span class="metric-val" style="color:${color}">${fmt3(v)}</span>
-    </div>`;
+    // A nivel de sitio el valor mostrado ya es el del sitio; el color de las
+    // robustas hereda el z_co del well (no hay z por sitio). Sin "site N" porque
+    // este panel ya ES un sitio concreto.
+    html += metricRowHTML(spec, v, plateName, well, null);
   });
 
   document.getElementById('site-info').innerHTML = html;
+  _drawSiteCrop(plateName, well, site);
+}
+
+// Crop the selected site out of the well montage (a 3×3 grid of sites) and draw
+// it enlarged in its own panel (between the montage and the plate overview), so
+// segmentation can be judged by eye. Frontend-only: reuses the montage b64
+// already loaded — no extra payload weight (Option A). Hides the panel if the
+// montage isn't available for this well.
+function _drawSiteCrop(plateName, well, site) {
+  const panel  = document.getElementById('site-crop-panel');
+  const canvas = document.getElementById('site-crop');
+  const label  = document.getElementById('site-crop-label');
+  if (!panel || !canvas) return;
+  const pd  = DATA[plateName];
+  const b64 = (pd.flagged_b64 || {})[well];
+  if (!b64) { panel.style.display = 'none'; return; }
+
+  if (label) label.textContent = `Selected site — ${well} · site ${site}`;
+
+  const nGrid = 3;                        // montage is a padded 3×3 grid
+  const gr = Math.floor((site - 1) / nGrid);
+  const gc = (site - 1) % nGrid;
+
+  const img = new Image();
+  img.onload = () => {
+    const cellW = img.naturalWidth  / nGrid;
+    const cellH = img.naturalHeight / nGrid;
+    // Draw the crop enlarged (up to 3× the cell, capped at 420px wide).
+    const target = Math.min(3 * cellW, 420);
+    const scale  = target / cellW;
+    canvas.width  = Math.round(cellW * scale);
+    canvas.height = Math.round(cellH * scale);
+    panel.style.display = 'block';
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = false;   // crisp pixels for segmentation review
+    ctx.drawImage(img, gc * cellW, gr * cellH, cellW, cellH,
+                  0, 0, canvas.width, canvas.height);
+  };
+  img.onerror = () => { panel.style.display = 'none'; };
+  img.src = 'data:image/jpeg;base64,' + b64;
 }
 
 // ── Site-level metric tables (QC Metrics / Cell Counts) ───────────────────────
@@ -590,7 +731,7 @@ const SITE_IDS = Array.from({length: N_SITES}, (_, i) => i + 1);
 const QC_ROW_DEFS = [
   { label: 'PowerLogLogSlope', specs: SLOPE_SPECS   },
   { label: 'PercentMaximal',   specs: PCT_MAX_SPECS },
-  { label: 'PercentMinimal',   specs: PCT_MIN_SPECS },
+  { label: 'Percentile10',    specs: PCT_MIN_SPECS },
   { label: 'MedianIntensity',  specs: MEDIANINT_SPECS },
 ];
 
@@ -740,22 +881,53 @@ function isFiltered() {
   return hideAllMode || activeCompounds.size > 0;
 }
  
+function isRobustSpec(spec) {
+  return ROBUST_PREFIXES.some(p => spec.col.startsWith(p));
+}
+
+// Colorscale discreta de 3 bandas (0=verde, 1=ámbar, 2=rojo) para Plotly, con el
+// índice de banda como valor z. Reemplaza tanto MAD_BAND_CS como las escalas
+// continuas por-valor (_PCT_MAX_CS/_PCT_MIN_CS): TODO el platemap se colorea con
+// la MISMA regla que las listas (resolveColor), sin posibilidad de desincronía.
+const BAND_INDEX = { [CLR.green]: 0, [CLR.amber]: 1, [CLR.red]: 2 };
+const BAND_CS = [
+  [0.0,     CLR.green], [1/3,     CLR.green],
+  [1/3,     CLR.amber], [2/3,     CLR.amber],
+  [2/3,     CLR.red],   [1.0,     CLR.red],
+];
+
 function makeHeatmap(plateData, spec) {
-  const z    = wellMatrix(plateData, spec.col);
   const plateName = Object.keys(DATA).find(p => DATA[p] === plateData) || '';
+  const robust = isRobustSpec(spec);
+
+  // z = índice de banda del color resuelto (misma regla que listas y verdicts).
+  const z = ROWS_PLOTLY.map(r => COLS.map(c => {
+    const w    = r + c;
+    const well = plateData.wells[w];
+    if (!well) return null;
+    if (!compoundVisible(well.compound || '')) return null;
+    const color = resolveColor(spec, well[spec.col], plateName, w);
+    return color == null ? null : BAND_INDEX[color];
+  }));
+
   const text = ROWS_PLOTLY.map(r => COLS.map(c => {
     const w    = r + c;
-    const v    = plateData.wells[w]?.[spec.col];
-    const cmpd = plateData.wells[w]?.compound || '';
+    const well = plateData.wells[w] || {};
+    const v    = well[spec.col];
+    const cmpd = well.compound || '';
     const vis  = compoundVisible(cmpd);
     if (!vis) return `<b>${w}</b><br>${cmpd}<br>(hidden)`;
-    const isMedianInt = spec.col.startsWith('ImageQuality_MedianIntensity_');
-    const sc   = isMedianInt ? (MAD_SCORES[spec.col]||{})[plateName]?.[w] : null;
-    const zpl  = sc ? (sc.z_pl>=0?'+':'') + sc.z_pl + '× MAD (plate)'  : null;
-    const zco  = sc ? (sc.z_co>=0?'+':'') + sc.z_co + '× MAD (cohort)' : null;
-    const extraLine = (zpl && zco)
-      ? `Plate MAD-score: ${zpl}<br>Cohort MAD-score: ${zco}`
-      : '';
+    let extraLine = '';
+    if (robust) {
+      const sc  = (MAD_SCORES[spec.col]||{})[plateName]?.[w];
+      const zpl = sc ? (sc.z_pl>=0?'+':'') + sc.z_pl + '× MAD (plate)'  : null;
+      const zco = sc ? (sc.z_co>=0?'+':'') + sc.z_co + '× MAD (cohort)' : null;
+      if (zpl && zco) extraLine = `Plate MAD-score: ${zpl}<br>Cohort MAD-score: ${zco}`;
+    } else {
+      // Percentiles: indicar el sitio responsable del peor valor (well = peor sitio).
+      const wf = (well._worst || {})[spec.col];
+      if (wf != null) extraLine = `Peor sitio: <b>site ${wf}</b>`;
+    }
     const cmpdColor = cmpd === 'DMSO' ? '#90c870' : cmpd ? '#a8c8ff' : 'var(--muted)';
     return `<b style="font-size:12px">${w}</b> <span style="color:${cmpdColor}">${cmpd||'—'}</span><br>`+
            `${spec.title}: <b>${v!=null?v.toFixed(4):'N/A'}</b><br>`+
@@ -763,8 +935,9 @@ function makeHeatmap(plateData, spec) {
   }));
   return {
     type:'heatmap', z, text, hoverinfo:'text',
-    x:COLS, y:ROWS_PLOTLY, colorscale: spec.cs,
-    zmin: spec.cmin, zmax: spec.cmax,
+    x:COLS, y:ROWS_PLOTLY,
+    colorscale: BAND_CS,
+    zmin: 0, zmax: 2,
     showscale: false,
     xgap:4, ygap:4,
   };
@@ -1493,8 +1666,11 @@ function renderMFI() {
           <div class="mfi-plot-box" id="mfi-box-col-${ch}"></div>
         </div>
         <div class="mfi-platemap-col">
-          <div class="mfi-platemap-title">Platemap — median MFI</div>
-          <div class="mfi-platemap-grid" id="mfi-grid-${ch}"></div>
+          <div class="mfi-platemap-block">
+            <div class="mfi-platemap-title">Platemap — median MFI</div>
+            <div class="mfi-platemap-grid" id="mfi-grid-${ch}"></div>
+          </div>
+          <div class="mfi-drift-block">${_channelDriftHTML(plateName, ch)}</div>
         </div>
       </div>`;
     container.appendChild(sec);
@@ -1502,6 +1678,91 @@ function renderMFI() {
     setTimeout(()=>mfiRenderBoxplot(`mfi-box-col-${ch}`,plateName,ch,'col'),0);
     setTimeout(()=>mfiRenderPlatemap(ch,plateName),0);
   });
+}
+
+// ─── Positional MFI drift tables (per channel) ───────────────────────────────
+// For each channel, the % drift of every row (A-H) and column (1-12) relative to
+// two references: the current plate's median MFI, and the whole cohort's median
+// MFI (Q.mfi.cohortMedian, computed in Python). drift% = (group median − ref)/ref
+// × 100. Cells are coloured by |drift| on a continuous green→amber→red gradient
+// (no hard threshold). Rows/columns with no data render blank.
+const MFI_COHORT_MEDIAN = (Q.mfi && Q.mfi.cohortMedian) || {};
+
+function _mfiGroupMedian(vals) {
+  const s = vals.filter(v => v != null && !isNaN(v)).sort((a, b) => a - b);
+  return s.length ? mfiQuantile(s, 0.5) : null;
+}
+
+// Continuous colour for a |drift| percentage: 0% green → ~15% amber → ≥30% red.
+function _driftColor(driftPct) {
+  if (driftPct == null) return 'transparent';
+  const a = Math.min(30, Math.abs(driftPct)) / 30;   // 0..1, saturating at 30%
+  // Interpolate green(75,215,95) → amber(255,190,0) → red(255,68,68).
+  let r, g, b;
+  if (a < 0.5) {
+    const t = a / 0.5;
+    r = Math.round(75 + (255 - 75) * t);
+    g = Math.round(215 + (190 - 215) * t);
+    b = Math.round(95 + (0 - 95) * t);
+  } else {
+    const t = (a - 0.5) / 0.5;
+    r = Math.round(255 + (255 - 255) * t);
+    g = Math.round(190 + (68 - 190) * t);
+    b = Math.round(0 + (68 - 0) * t);
+  }
+  return `rgba(${r},${g},${b},0.85)`;
+}
+
+function _driftTableHTML(title, labels, driftByLabel) {
+  let cells = labels.map(lab => {
+    const d = driftByLabel[lab];
+    const txt = d == null ? '—' : `${d >= 0 ? '+' : ''}${d.toFixed(1)}`;
+    const bg  = _driftColor(d);
+    const fg  = d == null ? 'var(--muted)' : '#0a0c16';
+    return `<td style="background:${bg};color:${fg};" class="drift-cell">` +
+           `<span class="drift-lab">${lab}</span>${txt}</td>`;
+  }).join('');
+  return `<div class="drift-block"><div class="drift-subtitle">${title}</div>` +
+         `<table class="drift-table"><tr>${cells}</tr></table></div>`;
+}
+
+// HTML del drift posicional de UN canal, para colocarlo a la derecha de su
+// platemap (antes se acumulaba al final de la sección; el punto 3 lo mueve al
+// hueco libre junto a cada platemap, por placa y canal).
+function _channelDriftHTML(plateName, ch) {
+  const wellData = (MFI_DATA[plateName] || {})[ch] || {};
+  const rowMed = {}, colMed = {};
+  ROW_LABELS.forEach(r => {
+    rowMed[r] = _mfiGroupMedian(COLS.flatMap(c => wellData[r + c] || []));
+  });
+  COLS.forEach(c => {
+    colMed[c] = _mfiGroupMedian(ROW_LABELS.flatMap(r => wellData[r + c] || []));
+  });
+  const plateRef = _mfiGroupMedian(
+    ROW_LABELS.flatMap(r => COLS.flatMap(c => wellData[r + c] || [])));
+  const cohortRef = MFI_COHORT_MEDIAN[ch] ?? null;
+
+  const drift = (med, ref) =>
+    (med == null || ref == null || ref === 0) ? null : ((med - ref) / ref) * 100;
+
+  const rowVsPlate = {}, colVsPlate = {}, rowVsCohort = {}, colVsCohort = {};
+  ROW_LABELS.forEach(r => { rowVsPlate[r]  = drift(rowMed[r], plateRef);
+                            rowVsCohort[r] = drift(rowMed[r], cohortRef); });
+  COLS.forEach(c => { colVsPlate[c]  = drift(colMed[c], plateRef);
+                      colVsCohort[c] = drift(colMed[c], cohortRef); });
+
+  const haveCohort = cohortRef != null;
+  let html = `<div class="drift-title">Positional drift`
+           + `<span class="drift-note"> — % vs plate${haveCohort ? ' &amp; cohort' : ''} median</span></div>`;
+  html += `<div class="drift-group"><div class="drift-group-label">Rows</div>`
+        + _driftTableHTML('vs plate',  ROW_LABELS, rowVsPlate);
+  if (haveCohort) html += _driftTableHTML('vs cohort', ROW_LABELS, rowVsCohort);
+  html += `</div>`;
+  html += `<div class="drift-group"><div class="drift-group-label">Columns</div>`
+        + _driftTableHTML('vs plate',  COLS, colVsPlate);
+  if (haveCohort) html += _driftTableHTML('vs cohort', COLS, colVsCohort);
+  html += `</div>`;
+  return html;
 }
 
 // ── 6. Flagged wells ──────────────────────────────────────────────────────────
@@ -1541,6 +1802,9 @@ function applyGlobalFilter() {
   renderMetrics(currentPlate);
   renderCounts(currentPlate);
   renderMFI();
+  // El PCA no se filtra (mantiene todos los pozos); solo actualiza el resaltado
+  // de los compuestos activos para identificar patrones (punto 5).
+  if (window.Plotly) renderPCA();
   // Los gráficos se recrean en setTimeout(…,0); re-aplicar el resaltado del well
   // seleccionado una vez que las celdas/heatmaps existan de nuevo.
   if (selectedWell) setTimeout(() => {
@@ -2157,4 +2421,317 @@ renderPlate(0);
     paintCanvas(true); updateZoomLabel();
     if (S.histRegion) { recomputeHist(); drawHistogram(); }
   };
+})();
+
+// ─── MFI CSV export (whole cohort, per site) ─────────────────────────────────
+// One row per (plate, well, ImageNumber), with <channel>_obj and <channel>_img
+// columns aligned by real ImageNumber. Sources: Q.mfi.sites (object MFI) and
+// Q.mfi.imgSites (whole-image MFI), both keyed by ImageNumber in Python.
+function buildMfiCsv() {
+  const sites    = (Q.mfi && Q.mfi.sites)    || {};
+  const imgSites = (Q.mfi && Q.mfi.imgSites) || {};
+  const channels = MFI_CHANNELS.slice();
+
+  const header = ['plate', 'well', 'site_index']
+    .concat(channels.map(c => `${c}_obj`))
+    .concat(channels.map(c => `${c}_img`));
+
+  const rows = [header];
+
+  Object.keys(sites).sort().forEach(plate => {
+    const plateObj = sites[plate] || {};
+    const plateImg = imgSites[plate] || {};
+
+    // Collect the full set of (well, ImageNumber) pairs seen in either source.
+    const wells = new Set(Object.keys(plateObj));
+    Object.keys(plateImg).forEach(w => wells.add(w));
+
+    Array.from(wells).sort().forEach(well => {
+      const objByCh = plateObj[well] || {};        // { channel: { img: val } }
+      const imgByImg = plateImg[well] || {};        // { img: { channel: val } }
+
+      // Union of ImageNumbers across channels (object side) and the image side.
+      const imgSet = new Set();
+      channels.forEach(ch => {
+        Object.keys(objByCh[ch] || {}).forEach(n => imgSet.add(n));
+      });
+      Object.keys(imgByImg).forEach(n => imgSet.add(n));
+
+      Array.from(imgSet)
+        .sort((a, b) => Number(a) - Number(b))
+        .forEach(img => {
+          const row = [plate, well, img];
+          // object MFI per channel
+          channels.forEach(ch => {
+            const v = (objByCh[ch] || {})[img];
+            row.push(v == null ? '' : v);
+          });
+          // image MFI per channel
+          channels.forEach(ch => {
+            const v = (imgByImg[img] || {})[ch];
+            row.push(v == null ? '' : v);
+          });
+          rows.push(row);
+        });
+    });
+  });
+
+  return rows.map(r => r.join(',')).join('\n');
+}
+
+function downloadMfiCsv() {
+  const csv  = buildMfiCsv();
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  const cohort = (document.title || 'cohort').replace(/\s+/g, '_');
+  a.href = url;
+  a.download = `${cohort}_MFI_per_site.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+(function wireMfiCsvButton() {
+  const btn = document.getElementById('mfi-csv-btn');
+  if (btn) btn.onclick = downloadMfiCsv;
+})();
+
+
+// ─── Collapsible sections ────────────────────────────────────────────────────
+// Clicking a section's <h2> toggles a `collapsed` class on its `.section`.
+// Delegated listener so sections added later work automatically. Clicks on
+// controls inside the heading (e.g. the MFI CSV button) are ignored so they
+// don't also collapse the section. Plotly charts are told to resize on expand,
+// since they mis-measure while hidden.
+(function wireCollapsibleSections() {
+  document.querySelectorAll('.section > h2').forEach(h2 => {
+    h2.addEventListener('click', ev => {
+      // Ignore clicks that originate on a button/link/input inside the heading.
+      if (ev.target.closest('button, a, input, select')) return;
+      const section = h2.parentElement;
+      const wasCollapsed = section.classList.contains('collapsed');
+      section.classList.toggle('collapsed');
+      // On expand, nudge any Plotly plots inside to re-measure.
+      if (wasCollapsed && window.Plotly) {
+        section.querySelectorAll('.js-plotly-plot').forEach(gd => {
+          try { window.Plotly.Plots.resize(gd); } catch (e) { /* noop */ }
+        });
+      }
+    });
+  });
+})();
+
+
+// ─── Quality-criteria toggles: wiring ────────────────────────────────────────
+// When a criterion checkbox changes, update the active set and re-render the
+// verdict colours (overview + current well's montage). The per-metric detail
+// tables and per-family red-count columns are intentionally left untouched.
+(function wireCriteriaToggles() {
+  document.querySelectorAll('.criterion-cb').forEach(cb => {
+    cb.addEventListener('change', () => {
+      if (cb.checked) activeCriteria.add(cb.value);
+      else            activeCriteria.delete(cb.value);
+
+      // Re-colour the overview for the current plate.
+      if (typeof currentPlate !== 'undefined' && currentPlate) {
+        buildOverlaySVG(currentPlate);
+        // Keep the selected well highlighted after the SVG is rebuilt.
+        if (selectedWell) {
+          const rect = document.getElementById(`sv-${selectedWell}`);
+          if (rect) rect.classList.add('selected');
+          // Re-colour the montage site tiles for the selected well.
+          renderWellMontage(currentPlate, selectedWell);
+        }
+      }
+    });
+  });
+})();
+
+
+// ─── Plate PCA (deviant-plate detection) ─────────────────────────────────────
+// One PCA fitted on all wells (computed in Python). Wells are small background
+// points coloured by plate; each plate is a large labelled centroid. A plate
+// whose centroid sits far from the others is a candidate outlier. Data comes
+// pre-computed in Q.pca (empty when there weren't enough wells/plates).
+const PCA = Q.pca || {};
+
+// Paleta estable por compuesto (hash → hue) para el resaltado en el PCA.
+function _cmpdColor(cmpd) {
+  let h = 0;
+  for (let i = 0; i < cmpd.length; i++) h = (h * 31 + cmpd.charCodeAt(i)) % 360;
+  return `hsl(${h}, 85%, 62%)`;
+}
+
+function _pcaPlateColor(plateName, i, total) {
+  // Evenly spaced hues so plates are visually separable.
+  const hue = Math.round((360 * i) / Math.max(1, total));
+  return `hsl(${hue}, 70%, 60%)`;
+}
+
+function renderPCA() {
+  const section = document.getElementById('pca-section');
+  const note = document.getElementById('pca-note');
+  if (!section) return;
+
+  // Not enough data → hide the whole section.
+  if (!PCA.plates || !PCA.plates.length) {
+    section.style.display = 'none';
+    return;
+  }
+
+  const plates = PCA.plates;
+  const wells  = PCA.wells || [];
+  const expl   = PCA.explained || [0, 0];
+  const showWells = document.getElementById('pca-show-wells');
+  const withWells = !showWells || showWells.checked;
+
+  // Compuestos resaltados = los activos en la toolbar (si hay). No filtran el
+  // PCA (se ven todos los pozos); solo se destacan para identificar patrones.
+  const highlightCmpds = activeCompounds;   // Set global de la toolbar
+  const anyHighlight = highlightCmpds.size > 0;
+
+  const cmpdOf = (w) => (DATA[w.plate]?.wells?.[w.well] || {}).compound || '';
+
+  note.textContent =
+    `PCA over ${PCA.n_features} standardised well features. ` +
+    `PC1 ${expl[0]}% · PC2 ${expl[1]}% of variance. ` +
+    `Plates far from the cluster are candidate outliers.` +
+    (anyHighlight ? `  Highlighting ${highlightCmpds.size} selected compound(s).` : '');
+
+  const plateNames = plates.map(p => p.plate);
+  const colorOf = {};
+  plateNames.forEach((p, i) => { colorOf[p] = _pcaPlateColor(p, i, plateNames.length); });
+
+  const traces = [];
+
+  // Background wells, one trace per plate. Cuando hay compuestos resaltados, los
+  // pozos NO resaltados se atenúan más (para que el patrón salte), pero NO se
+  // ocultan — el usuario pidió conservar el resto de pozos visibles.
+  if (withWells) {
+    plateNames.forEach(pname => {
+      const pts = wells.filter(w => w.plate === pname);
+      if (!pts.length) return;
+      const opac = pts.map(w => anyHighlight
+        ? (highlightCmpds.has(cmpdOf(w)) ? 0.0 : 0.10)  // resaltados van en su capa
+        : 0.35);
+      traces.push({
+        x: pts.map(w => w.pc1), y: pts.map(w => w.pc2),
+        mode: 'markers', type: 'scattergl', name: pname,
+        legendgroup: pname, showlegend: false,
+        customdata: pts.map(w => [w.plate, w.well]),
+        marker: { size: 5, color: colorOf[pname], opacity: anyHighlight ? 0.10 : 0.35 },
+        hovertext: pts.map(w => {
+          const cmpd = cmpdOf(w);
+          return cmpd ? `${w.plate} · ${w.well}<br>${cmpd}`
+                      : `${w.plate} · ${w.well}`;
+        }),
+        hoverinfo: 'text',
+      });
+    });
+  }
+
+  // Capa de compuestos resaltados: una traza por compuesto (color propio), opaca
+  // y encima del fondo. Permite ver el patrón espacial de cada compuesto.
+  if (anyHighlight && withWells) {
+    [...highlightCmpds].sort().forEach(cmpd => {
+      const pts = wells.filter(w => cmpdOf(w) === cmpd);
+      if (!pts.length) return;
+      traces.push({
+        x: pts.map(w => w.pc1), y: pts.map(w => w.pc2),
+        mode: 'markers', type: 'scattergl', name: cmpd,
+        showlegend: false,
+        customdata: pts.map(w => [w.plate, w.well]),
+        marker: { size: 8, color: _cmpdColor(cmpd), opacity: 0.95,
+                  line: { color: '#0a0c16', width: 0.5 } },
+        hovertext: pts.map(w => `${w.plate} · ${w.well}<br>${cmpd}`),
+        hoverinfo: 'text',
+      });
+    });
+  }
+
+  // Plate centroids, labelled, sized slightly by deviation.
+  traces.push({
+    x: plates.map(p => p.pc1), y: plates.map(p => p.pc2),
+    mode: 'markers+text', type: 'scatter', name: 'Plate centroids',
+    text: plateNames, textposition: 'top center',
+    textfont: { color: '#d0e0ff', size: 11 },
+    marker: {
+      size: plates.map(p => 14 + Math.min(16, (p.deviation || 0) * 2)),
+      color: plateNames.map(p => colorOf[p]),
+      line: { color: '#ffffff', width: 1.5 },
+    },
+    hovertext: plates.map(p =>
+      `${p.plate}<br>wells: ${p.n_wells}<br>deviation: ${p.deviation}`),
+    hoverinfo: 'text',
+  });
+
+  // Pozo seleccionado: diamante blanco grande encima de todo, para vincular el
+  // pozo del Plate Browser con su posición en el PCA (punto 5).
+  if (pcaSelected) {
+    const sel = wells.find(w => w.plate === pcaSelected.plate && w.well === pcaSelected.well);
+    if (sel) {
+      const cmpd = cmpdOf(sel);
+      traces.push({
+        x: [sel.pc1], y: [sel.pc2], mode: 'markers', type: 'scatter',
+        name: 'Selected well', showlegend: false,
+        customdata: [[sel.plate, sel.well]],
+        marker: { symbol: 'diamond', size: 16, color: 'rgba(255,255,255,0.15)',
+                  line: { color: '#ffffff', width: 2.5 } },
+        hovertext: [`${sel.plate} · ${sel.well}${cmpd ? '<br>' + cmpd : ''}<br>(selected)`],
+        hoverinfo: 'text',
+      });
+    }
+  }
+
+  const layout = {
+    paper_bgcolor: '#090b14', plot_bgcolor: '#090b14',
+    font: { color: '#c0d0f0', family: 'monospace', size: 12 },
+    xaxis: { title: `PC1 (${expl[0]}%)`, gridcolor: '#1a2440', zerolinecolor: '#2a3550' },
+    yaxis: { title: `PC2 (${expl[1]}%)`, gridcolor: '#1a2440', zerolinecolor: '#2a3550' },
+    margin: { l: 60, r: 20, t: 20, b: 50 },
+    hovermode: 'closest',
+    showlegend: false,
+  };
+
+  const gd = document.getElementById('pca-plot');
+  Plotly.react(gd, traces, layout, { responsive: true, displayModeBar: false });
+
+  // Clic en un punto-pozo del PCA → saltar a su placa y seleccionar el pozo en
+  // todo el reporte (platemaps, grids MFI, paneles). Solo puntos con customdata
+  // [plate, well] (los centroides de placa no la llevan, así que se ignoran).
+  if (gd && !gd._pcaClickWired) {
+    gd._pcaClickWired = true;
+    gd.on('plotly_click', ev => {
+      const pt = ev.points && ev.points[0];
+      const cd = pt && pt.customdata;
+      if (!cd || cd.length < 2) return;
+      selectWellFromPCA(cd[0], cd[1]);
+    });
+  }
+}
+
+// Selección iniciada desde el PCA: cambia a la placa del punto (si difiere) y
+// selecciona el pozo, que a su vez lo resalta en todos los platemaps y grids.
+function selectWellFromPCA(plate, well) {
+  const idx = PLATES.indexOf(plate);
+  if (idx < 0) return;
+  if (plate !== currentPlate) {
+    renderPlate(idx);          // cambia de placa (resetea selección/overview)
+    // renderMetrics/renderMFI recrean SVG y heatmaps en setTimeout(…,0); esos
+    // handlers se encolan ANTES que este, así que un timeout posterior corre
+    // después de que las celdas existen y highlightWellEverywhere las encuentra.
+    setTimeout(() => selectWell(plate, well), 30);
+  } else {
+    selectWell(plate, well);   // misma placa: las celdas ya existen
+  }
+}
+
+(function wirePCA() {
+  const cb = document.getElementById('pca-show-wells');
+  if (cb) cb.addEventListener('change', renderPCA);
+  // Render once on load (after Plotly is available).
+  if (window.Plotly) renderPCA();
+  else window.addEventListener('load', renderPCA);
 })();

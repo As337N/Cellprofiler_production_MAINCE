@@ -132,6 +132,19 @@
   .metric-val.fail-abs  { color: var(--fail); }
   .metric-val.fail-adp  { color: var(--warn); }
   .metric-val.pass      { color: var(--pass); }
+  /* Grupo valor + anotación (z-scores o sitio responsable) alineado a la derecha. */
+  .metric-val-group { display: inline-flex; align-items: center; gap: 7px;
+                       justify-content: flex-end; }
+  .metric-z    { color: var(--muted); font-family: monospace; font-size: 0.6rem;
+                  display: inline-flex; flex-direction: column; align-items: flex-end;
+                  line-height: 1.25; white-space: nowrap; }
+  .metric-z-line { display: block; }
+  .metric-site { color: #8ab0e0; font-size: 0.66rem; white-space: nowrap;
+                  background: #142038; border: 1px solid var(--border);
+                  border-radius: 8px; padding: 0 6px; }
+  .browser-legend { color: var(--muted); font-size: 0.74rem; line-height: 1.5;
+                     background: var(--panel); border: 1px solid var(--border);
+                     border-radius: 8px; padding: 8px 14px; margin: 0 0 10px; }
   .fail-tag { font-size: 0.68rem; padding: 1px 5px; border-radius: 8px; margin-left: 4px; }
   .fail-tag.abs { background: #3a0f0f; color: var(--fail); }
   .fail-tag.adp { background: #3a2e00; color: var(--warn); }
@@ -207,9 +220,9 @@
                          border-bottom: 1px solid var(--border); }
   .mfi-ch-dot { width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0; }
   .mfi-channel-header h3 { font-size: 0.85rem; color: #a8c8ff; margin: 0; font-weight: 700; letter-spacing: 0.03em; }
-  /* Two-column: left=boxplots, right=platemap */
-  .mfi-body { display: grid; grid-template-columns: 30% 70%; align-items: start;
-               min-width: 860px; }
+  /* Two-column: left=boxplots, right=platemap + positional drift */
+  .mfi-body { display: grid; grid-template-columns: 26% 74%; align-items: start;
+               min-width: 1100px; }
   .mfi-boxplot-col { display: flex; flex-direction: column;
                     border-right: 1px solid var(--border); background: #090b14;
                     min-height: 413px; }
@@ -217,11 +230,29 @@
                            border-left: 1px solid var(--border); background: #090b14; }
   .mfi-plot-box { width: 100%; height: 200px; }
   .mfi-plot-divider { height: 1px; background: var(--border); }
-  .mfi-platemap-col { padding: 14px 18px; display: flex; flex-direction: column;
-                       align-items: flex-start; justify-content: center;
-                       background: var(--bg); }
+  .mfi-platemap-col { padding: 14px 18px; display: flex; flex-direction: row;
+                       align-items: flex-start; justify-content: flex-start; gap: 22px;
+                       background: var(--bg); flex-wrap: wrap; }
+  .mfi-platemap-block { display: flex; flex-direction: column; align-items: flex-start; }
+  .mfi-drift-block { display: flex; flex-direction: column; gap: 10px; flex: 1;
+                      min-width: 300px; }
   .mfi-platemap-title { font-size: 0.72rem; color: var(--muted);
                           margin-bottom: 10px; letter-spacing: 0.03em; }
+  /* Positional drift, colocado a la derecha del platemap (punto 3). */
+  .drift-title { font-size: 0.72rem; color: #a8c8ff; font-weight: 700;
+                  letter-spacing: 0.03em; }
+  .drift-title .drift-note { color: var(--muted); font-weight: 400; }
+  .drift-group { display: flex; flex-direction: column; gap: 3px; }
+  .drift-group-label { font-size: 0.66rem; color: var(--muted); font-weight: 600;
+                        text-transform: uppercase; letter-spacing: 0.04em; }
+  .drift-block { display: flex; align-items: center; gap: 8px; }
+  .drift-subtitle { font-size: 0.62rem; color: var(--muted); min-width: 52px;
+                     text-align: right; font-family: monospace; }
+  .drift-table { border-collapse: collapse; }
+  .drift-cell { text-align: center; font-size: 0.62rem; font-family: monospace;
+                 border: 1px solid #0a0c16; padding: 2px 3px; line-height: 1.15;
+                 min-width: 23px; }
+  .drift-cell .drift-lab { display: block; font-size: 0.55rem; opacity: 0.75; }
   /* Platemap grid: 1 label col + 12 well cols × 1 label row + 8 well rows */
   .mfi-platemap-grid { display: grid;
                       gap: 4px; }
@@ -356,3 +387,31 @@
   .iv-hist-toggle { font-size: 0.72rem; color: var(--muted); display: flex; align-items: center; gap: 4px; cursor: pointer; }
   .iv-meta-tag { font-size: 0.68rem; padding: 1px 7px; border-radius: 8px; margin-left: 6px; }
   .iv-meta-tag.off-list { background: #3a2e00; color: var(--warn); }
+  /* Collapsible sections */
+  .section > h2 { cursor: pointer; user-select: none; }
+  .section > h2::before { content: "\25BE"; display: inline-block; margin-right: 8px;
+    font-size: 0.8em; color: #6a8ac0; transition: transform 0.15s ease; }
+  .section.collapsed > h2::before { transform: rotate(-90deg); }
+  .section.collapsed > *:not(h2) { display: none; }
+
+  /* Quality-criteria toggles */
+  .criteria-toggles { display: inline-flex; align-items: center; gap: 10px;
+    margin-left: 18px; padding-left: 18px; border-left: 1px solid #2a3550; }
+  .criteria-toggles .criteria-label { font-size: 0.75rem; color: #8ab0e0;
+    text-transform: uppercase; letter-spacing: 0.05em; }
+  .criteria-toggles label { display: inline-flex; align-items: center; gap: 4px;
+    font-size: 0.82rem; color: #c5d5f0; cursor: pointer; user-select: none; }
+  .criteria-toggles input[type="checkbox"] { cursor: pointer; margin: 0; }
+
+  /* PCA section */
+  .section-note { font-size: 0.8rem; color: #8090b0; margin: 4px 0 10px; }
+  .pca-controls { margin-bottom: 8px; }
+  .pca-controls label { font-size: 0.82rem; color: #c5d5f0; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 5px; }
+
+  /* Single-site crop panel (segmentation review) — between montage and overview */
+  .site-crop-panel { margin: 14px 0; padding: 12px; border: 1px solid #1e2840;
+    border-radius: 6px; background: #0a0c16; }
+  .site-crop { display: block; margin-top: 6px; max-width: 100%;
+    border: 1px solid #2a3550; border-radius: 4px; background: #05060c;
+    image-rendering: pixelated; }

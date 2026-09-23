@@ -33,6 +33,19 @@
     <input type="range" id="plate-slider" min="0" step="1" value="0">
     <span class="plate-name-display" id="plate-name-display"></span>
     <select id="plate-select"></select>
+    <div class="criteria-toggles" id="criteria-toggles" title="Metrics counted toward each well's overall colour verdict">
+      <span class="criteria-label">Verdict criteria:</span>
+      <label><input type="checkbox" class="criterion-cb" value="slope" checked> Slope</label>
+      <label><input type="checkbox" class="criterion-cb" value="pctmax" checked> PctMax</label>
+      <label><input type="checkbox" class="criterion-cb" value="pctmin" checked> IntFloor</label>
+      <label><input type="checkbox" class="criterion-cb" value="medint" checked> MedInt</label>
+    </div>
+  </div>
+  <div class="browser-legend">
+    Each well's colour is its <b>worst site</b>: robust metrics (Slope, MedInt) by cohort
+    MAD-score bands, percentile metrics (PctMax, PctMin) by their worst-site value. In the
+    detail panels, robust rows show both MAD-scores (z<sub>pl</sub>, z<sub>co</sub>) and
+    percentile rows point to the responsible <b>site</b>.
   </div>
  
   <!-- Well detail row: info panel (left) + montage (center) + site info (right) -->
@@ -48,6 +61,12 @@
     </div>
   </div>
  
+  <!-- Selected-site crop (segmentation review) -->
+  <div class="site-crop-panel" id="site-crop-panel" style="display:none;">
+    <div class="section-label" id="site-crop-label">Selected site</div>
+    <canvas id="site-crop" class="site-crop" title="Cropped from the well montage"></canvas>
+  </div>
+
   <!-- Overview: microscopy thumbnails, clickable via SVG overlay -->
   <div class="overview-wrap" id="overview-wrap">
     <img id="overview-img" src="" alt="Plate overview">
@@ -68,35 +87,48 @@
     <hr class="audit-sep">
     <div class="audit-row">
       <b style="color:#a8c8f0;">PowerLogLogSlope</b>: log-log slope of the pixel intensity
-      power spectrum. A value near <b>−2</b> indicates a well-focused, artifact-free image
-      consistent with natural scene statistics.
-      <span style="color:#4bd760;">■ green</span> [−2.5, −1.5] &nbsp;·&nbsp;
-      <span style="color:#ffbe00;">■ yellow</span> [−2.7, −2.5] or [−1.5, −1.3] &nbsp;·&nbsp;
-      <span style="color:#ff4444;">■ red</span> outside [−2.7, −1.3].<br>
-      <span style="color:var(--muted);font-size:0.78rem;">
-        Reference: Field, D. J. (1987). Relations between the statistics of natural images and the response properties of cortical cells. <i>Journal of the Optical Society of America A</i>, 4(12), 2379.
-      </span>
+      power spectrum (a focus proxy). Coloured by <b style="color:#c8d8f0;">cohort MAD-score</b>
+      in discrete bands: <span style="color:#4bd760;">■</span> |z| ≤ 1 ·
+      <span style="color:#ffbe00;">■</span> 1–3 · <span style="color:#ff4444;">■</span> &gt; 3.
+      Both the plate and cohort MAD-scores are shown next to the value in the Plate Browser.
+      The same rule colours the platemaps, the well/site panels and the verdict borders —
+      one colour engine, no mismatches.
     </div>
     <hr class="audit-sep">
     <div class="audit-row">
       <b style="color:#a8c8f0;">PercentMaximal</b>: fraction of pixels at maximum intensity
-      (saturated). High values indicate overexposure.
+      (saturated). High values indicate overexposure or debris.
       <span style="color:#4bd760;">■ green</span> &lt; 0.1% &nbsp;·&nbsp;
       <span style="color:#ffbe00;">■ yellow</span> 0.1–1% &nbsp;·&nbsp;
       <span style="color:#ff4444;">■ red</span> &gt; 1%.
+      <br><span style="font-size:0.8rem;color:var(--muted);">
+      Aggregated to the well by its <b style="color:#c8d8f0;">worst site</b> (not the mean),
+      so a single debris-laden field is not diluted across the well. The responsible site
+      is shown next to the value in the Plate Browser and in the platemap tooltip.</span>
     </div>
     <div class="audit-row" style="margin-top:4px;">
-      <b style="color:#a8c8f0;">PercentMinimal</b>: fraction of pixels at zero intensity
-      (underexposed or clipped). High values indicate insufficient signal.
-      <span style="color:#4bd760;">■ green</span> &lt; 1% &nbsp;·&nbsp;
-      <span style="color:#ffbe00;">■ yellow</span> 1–5% &nbsp;·&nbsp;
-      <span style="color:#ff4444;">■ red</span> &gt; 5%.
+      <b style="color:#a8c8f0;">Percentile10 — intensity floor</b> (IntFloor) — replaces
+      PercentMinimal entirely. Per channel, the <b>10th-percentile image intensity</b>
+      (Intensity_Percentile_10_&lt;channel&gt;, from the Image table): the value below which
+      only 10% of the field's pixels lie. When a field is mostly black background (low cell
+      density), this floor collapses toward the minimum. PercentMinimal — the fraction of
+      pixels exactly at zero — could not distinguish this from a channel's normal dark
+      baseline; the intensity floor can.
+      <br>Coloured by <b>absolute thresholds</b> on the raw floor value (low = dark
+      field dominated by background):
+      <span style="color:#ff4444;">■ red</span> &lt; 0.015 (fail) &nbsp;·&nbsp;
+      <span style="color:#ffbe00;">■ yellow</span> 0.015–0.02 (warning) &nbsp;·&nbsp;
+      <span style="color:#4bd760;">■ green</span> &gt; 0.02.
+      <br><span style="font-size:0.8rem;color:var(--muted);">
+      Aggregated to the well by its <b style="color:#c8d8f0;">worst site</b> (here the site
+      with the <i>lowest</i> floor), with the responsible site reported alongside the value.
+      A well fails (red verdict) if any channel's worst site drops below 0.015.</span>
     </div>
     <hr class="audit-sep">
     <div class="audit-row">
-        <b style="color:#a8c8f0;">MedianIntensity</b>: median pixel intensity across the image.
-        Used to detect global brightness differences across wells or plates.
-        Colorscale is cohort-normalized (low = red, high = green) — compare within cohort.<br>
+        <b style="color:#a8c8f0;">MedianIntensity</b>: Median pixel intensity across the image.
+        Used to detect global brightness differences across wells or plates. Coloured by the
+        cohort MAD-score in the same discrete |z| bands as PowerLogLogSlope.<br>
         <span style="font-size:0.8rem;margin-top:4px;display:inline-block;">
             <b style="color:#c8d8f0;">MAD-score</b> shown in tooltip: deviation from plate/cohort median,
             expressed in units of MAD (Median Absolute Deviation).
@@ -104,26 +136,12 @@
             <b style="color:#c8d8f0;">Plate MAD-score</b>: (well − plate_median) / plate_MAD
             &nbsp;·&nbsp;
             <b style="color:#c8d8f0;">Cohort MAD-score</b>: (well − cohort_median) / cohort_MAD.<br>
-            <span style="color:#4bd760;">■</span> |score| ≤ 1× typical &nbsp;·&nbsp;
-            <span style="color:#ffbe00;">■</span> 1–3× moderate deviation &nbsp;·&nbsp;
-            <span style="color:#ff4444;">■</span> &gt; 3× strong outlier.
+            <span style="color:#4bd760;">■</span> ≤ 1× MAD, typical &nbsp;·&nbsp;
+            <span style="color:#ffbe00;">■</span> 1–3× MAD, moderate deviation &nbsp;·&nbsp;
+            <span style="color:#ff4444;">■</span> &gt; 3× MAD, strong outlier.
             &nbsp;·&nbsp;
             <span style="color:var(--muted);">
         </span>
-    </div>
-    <hr class="audit-sep">
-    <div class="audit-row" style="color:var(--muted);font-size:0.78rem;">
-      Note: <b style="color:#c8d8f0;">Brightfield</b> channel uses transmitted light and has
-      different intensity characteristics than fluorescence channels — thresholds and colorscales
-      may not apply directly. Use as qualitative reference only.
-    </div>
-    <hr class="audit-sep">
-    <div class="audit-row">
-      <span class="audit-label">Thresholds</span>
-      PowerLogLogSlope <span class="thresh-val">[−2.7, −1.3]</span>
-      &nbsp;·&nbsp; PctMax <span class="thresh-val">&lt; 1%</span>
-      &nbsp;·&nbsp; PctMin <span class="thresh-val">&lt; 5%</span>
-      &nbsp;·&nbsp; Adaptive: median ± 3σ MAD per plate
     </div>
   </div>
   <!-- Site-level metrics table (por well seleccionado) -->
@@ -167,7 +185,7 @@
     <div class="audit-row">
       <span class="audit-label">Ratio</span>
       <span class="thresh">Count_Cells / Count_Nuclei</span>
-      &nbsp;
+      &nbsp;—
       <span style="color:#4bd760;font-size:0.78rem;">■ 1.00</span>
       <span style="color:#ffbe00;font-size:0.78rem;">■ 0.99–0.95</span>
       <span style="color:#ff4444;font-size:0.78rem;">■ &lt;0.95</span>
@@ -179,6 +197,13 @@
       &nbsp;—
       <span style="color:#ffffff;font-size:0.78rem;">■ 0</span>
       <span style="color:#cc1111;font-size:0.78rem;">■ ≥100</span>
+    </div>
+      <div class="audit-row">
+      <span class="audit-label">Median Radius Cells/Nuclei</span>
+      <span class="thresh">MedianRadius_*</span>
+      <span class="audit-source">← Image.txt</span>
+      &nbsp;— The median distance of any pixel in the object to the closest pixel outside of the object (Cells/Nuclei).
+      
     </div>
   </div>
   <!-- Site-level counts table (por well seleccionado) -->
@@ -197,7 +222,11 @@
  
 <!-- 5. MFI (Median Fluorescence Intensity) -->
 <div class="section">
-  <h2>Median Fluorescence Intensity (MFI)</h2>
+  <h2 style="display:flex; align-items:center; justify-content:space-between;">
+    <span>Median Fluorescence Intensity (MFI)</span>
+    <button id="mfi-csv-btn" class="iv-mini-btn" title="Download per-site MFI (object + image) for the whole cohort as CSV"
+            style="font-size:0.7em; font-weight:normal;">⤓ Download MFI CSV</button>
+  </h2>
   <div class="feature-audit">
     <div class="audit-row">
       <span class="audit-label">Hoechst</span>
@@ -211,46 +240,52 @@
     </div>
     <hr class="audit-sep">
     <div class="audit-row">
-        Per-image median of all objects → one value per site per well &nbsp;·&nbsp;
-        Boxplots show the distribution of those per-site values across rows and columns.
-        </div>
-        <div class="audit-row" style="margin-top:4px;">
-        <b style="color:#a8c8f0;">Δ = MFI<sub>obj</sub> − MFI<sub>img</sub></b>:
-        difference between the median MFI of segmented objects and the whole-image median
-        (ImageQuality_MedianIntensity, Image.txt).
-        </div>
-        <div class="audit-row" style="margin-top:4px;">
-        <b style="color:#a8c8f0;">SNR proxy = Δ / MFI<sub>img</sub></b>:
-        Signal to Noise Ration (SNR), it is the fold-change of object intensity over background — how much brighter the segmented
-        objects are relative to the image background.
-        <span style="color:#4bd760;">■ ≥ 0.5×</span> acceptable &nbsp;·&nbsp;
-        <span style="color:#ffbe00;">■ 0.2–0.5×</span> weak signal, check segmentation &nbsp;·&nbsp;
-        <span style="color:#ff4444;">■ &lt; 0.2×</span> signal indistinguishable from background.
-        Note: thresholds are empirical — compare against DMSO controls within the same experiment
-        for a more robust interpretation.
+      For each site, the per-object median intensities are reduced to a single median
+      → one value per site per well. &nbsp;·&nbsp;
+      Boxplots show the distribution of those per-site values across rows and columns.
+    </div>
+    <div class="audit-row" style="margin-top:4px;">
+      <b style="color:#a8c8f0;">Δ = MFI<sub>obj</sub> − MFI<sub>img</sub></b>:
+      difference between the plate-level median of the per-site object medians and the
+      whole-image median (ImageQuality_MedianIntensity, Image.txt), which includes
+      background pixels.
+    </div>
+    <div class="audit-row" style="margin-top:4px;">
+      <b style="color:#a8c8f0;">SNR proxy = Δ / MFI<sub>img</sub></b>:
+      signal-to-noise ratio (SNR), the fold-change of object intensity over background —
+      how much brighter the segmented objects are relative to the image background.
+      <span style="color:#4bd760;">■ ≥ 0.5×</span> acceptable &nbsp;·&nbsp;
+      <span style="color:#ffbe00;">■ 0.2–0.5×</span> weak signal, check segmentation &nbsp;·&nbsp;
+      <span style="color:#ff4444;">■ &lt; 0.2×</span> signal indistinguishable from background.
+      Note: thresholds are empirical — compare against DMSO controls within the same
+      experiment for a more robust interpretation.
     </div>
     <hr class="audit-sep">
     <div class="audit-row" style="margin-top:4px;">
       <b style="color:#a8c8f0;">η² (eta-squared)</b> — one-way ANOVA measuring what fraction
-      of total MFI variance is explained by plate position (row or column).
-      A high η² indicates a <b style="display:inline;">positional effect</b>: the location 
-      of a well on the plate predicts its fluorescence intensity,
-      which should not happen in a well-controlled experiment.
+      of total MFI variance is explained by plate position (row or column). Each channel's
+      score is the worst of its row and column η². A high η² indicates a
+      <b style="display:inline;">positional effect</b>: the location of a well on the plate
+      predicts its fluorescence intensity, which should not happen in a well-controlled
+      experiment.
     </div>
     <div class="audit-row" style="margin-top:4px;">
-        <b style="color:#c8d8f0;">Hoechst</b> is used as the <b>technical baseline</b>:
-        its η² reflects unavoidable instrumental noise (pipetting, incubator gradients, illumination).
-        All other channels are evaluated <i>relative</i> to this baseline
-        (ratio &lt; 2× = green · 2–4× = yellow · ≥ 4× = red).
-        An additional <b>absolute ceiling of η² ≥ 0.20</b> applies regardless of baseline.
+      <b style="color:#c8d8f0;">Hoechst</b> is used as the <b>technical baseline</b>:
+      its η² reflects unavoidable instrumental noise (pipetting, incubator gradients,
+      illumination). All other channels are evaluated <i>relative</i> to this baseline,
+      combining the ratio with an absolute η² floor: <span style="color:#4bd760;">green</span>
+      if ratio &lt; 2× <i>or</i> η² &lt; 0.06 · <span style="color:#ffbe00;">yellow</span>
+      if ratio &lt; 4× <i>or</i> η² &lt; 0.14 · <span style="color:#ff4444;">red</span> otherwise.
+      An additional <b>absolute ceiling of η² ≥ 0.20</b> forces red regardless of baseline.
     </div>
     <div class="audit-row" style="margin-top:4px;">
-        For Hoechst itself, absolute thresholds from <b style="color:#a8c8f0;">Cohen (1988)</b>
-        are applied (η² &lt; 0.01 negligible · 0.01–0.06 small · 0.06–0.14 medium · ≥ 0.14 large).
-        <span style="color:var(--muted);font-size:0.78rem;">
-            Reference: Cohen, J. (1988). <i>Statistical Power Analysis for the Behavioral Sciences</i>
-            (2nd ed., Ch. 8). Lawrence Erlbaum Associates.
-        </span>
+      For Hoechst itself, absolute thresholds from <b style="color:#a8c8f0;">Cohen (1988)</b>
+      are applied (η² &lt; 0.01 negligible · 0.01–0.06 small · 0.06–0.14 medium · ≥ 0.14 large);
+      small and medium share the yellow band.
+      <span style="color:var(--muted);font-size:0.78rem;">
+        Reference: Cohen, J. (1988). <i>Statistical Power Analysis for the Behavioral Sciences</i>
+        (2nd ed., Ch. 8). Lawrence Erlbaum Associates.
+      </span>
     </div>
     <hr class="audit-sep">
     <div class="audit-row" style="color:var(--muted);font-size:0.78rem;">
@@ -259,12 +294,56 @@
       <span style="color:#ff4444;">■</span> red: significant positional effect — review pipetting order,
       incubator gradients, or illumination uniformity
     </div>
+    <hr class="audit-sep">
+    <div class="audit-row">
+      <b style="color:#a8c8f0;">Positional drift</b> (shown to the right of each platemap):
+      the % deviation of every row and column median MFI from the plate median and,
+      where available, the cohort median. drift% = (group median − reference) / reference × 100,
+      coloured on a continuous scale (0% green → 30%+ red by |drift|). Complements η²:
+      η² quantifies <i>whether</i> a positional effect exists; the drift tables show
+      <i>which</i> rows or columns carry it and in which direction.
+    </div>
   </div>
   <div id="mfi-content"></div>
   <div id="mfi-tooltip"></div>
 </div>
 
-<!-- 6. IMAGE VIEWER (optional layer — activates when a CSV + TIFFs are loaded) -->
+<!-- 6. PCA (deviant-plate detection) -->
+<div class="section" id="pca-section">
+  <h2>Plate PCA <span class="iv-optional">deviant-plate detection</span></h2>
+  <div class="feature-audit">
+    <div class="audit-row">
+      Principal component analysis over every numeric well feature (focus slope, median
+      intensity, focus score, % maximal / minimal, and object counts, across all channels),
+      standardised to z-scores so features on different scales contribute comparably.
+    </div>
+    <div class="audit-row" style="margin-top:4px;">
+      The PCA is fitted on all wells and projected onto the first two components. Each
+      <b style="color:#c8d8f0;">well</b> is a small point; each <b style="color:#c8d8f0;">plate</b>
+      is the centroid of its wells. A plate whose centroid sits far from the cluster is a
+      candidate outlier — a systematic shift affecting the whole plate (illumination,
+      incubation, staining batch). Hover a point for its plate, well and compound; the
+      <b>deviation</b> score is the distance of a plate's centroid from the cohort centre
+      in PC space.
+    </div>
+    <div class="audit-row" style="margin-top:4px; color:var(--muted); font-size:0.78rem;">
+      This is a qualitative screen, not a verdict: the first two components capture only
+      part of the total variance (see the PC1 / PC2 percentages below), so a plate can drift
+      along axes not shown. A flagged well or plate also warrants care — it may reflect a
+      genuine phenotypic response to the perturbation rather than a technical artefact.
+      The section is hidden when there are fewer than 3 plates or 6 wells, where a PCA is not
+      meaningful.
+    </div>
+  </div>
+  <p class="section-note" id="pca-note"></p>
+  <div class="pca-controls" id="pca-controls">
+    <label><input type="checkbox" id="pca-show-wells" checked> Show individual wells</label>
+  </div>
+  <div id="pca-plot" style="width:100%; height:520px;"></div>
+</div>
+
+
+<!-- 7. IMAGE VIEWER (optional layer — activates when a CSV + TIFFs are loaded) -->
 <div class="section" id="imgviewer-section">
   <h2>Image Viewer <span class="iv-optional">optional</span></h2>
   <div class="feature-audit">

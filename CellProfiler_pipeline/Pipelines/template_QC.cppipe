@@ -173,41 +173,42 @@ FilterObjects:[module_num:8|svn_version:'Unknown'|variable_revision_number:10|sh
     Maximum value:1500
     Allow fuzzy feature matching?:No
 
-ConvertImageToObjects:[module_num:9|svn_version:'Unknown'|variable_revision_number:1|show_window:False|notes:['We load Cellpose masks as objects (Cells_cellpose)']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
-    Select the input image:RNA_mask
-    Name the output object:Cellls_cellpose
-    Convert to boolean image:No
-    Preserve original labels:No
-    Background label:0
-    Connectivity:0
+IdentifySecondaryObjects:[module_num:9|svn_version:'Unknown'|variable_revision_number:10|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+    Select the input objects:Raw_nuclei
+    Name the objects to be identified:Complete_cells
+    Select the method to identify the secondary objects:Propagation
+    Select the input image:RNA
+    Number of pixels by which to expand the primary objects:10
+    Regularization factor:0.05
+    Discard secondary objects touching the border of the image?:Yes
+    Discard the associated primary objects?:Yes
+    Name the new primary objects:FilteredNuclei
+    Fill holes in identified objects?:Yes
+    Threshold setting version:12
+    Threshold strategy:Global
+    Thresholding method:Otsu
+    Threshold smoothing scale:0.0
+    Threshold correction factor:0.9
+    Lower and upper bounds on threshold:0.005,0.6
+    Manual threshold:0.0
+    Select the measurement to threshold with:None
+    Two-class or three-class thresholding?:Three classes
+    Log transform before thresholding?:Yes
+    Assign pixels in the middle intensity class to the foreground or the background?:Foreground
+    Size of adaptive window:50
+    Lower outlier fraction:0.05
+    Upper outlier fraction:0.05
+    Averaging method:Mean
+    Variance method:Standard deviation
+    # of deviations:2.0
+    Thresholding method:Minimum Cross-Entropy
 
-FilterObjects:[module_num:10|svn_version:'Unknown'|variable_revision_number:10|show_window:False|notes:['The objects that are touching the borders are filtered.']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
-    Select the objects to filter:Cellls_cellpose
-    Name the output objects:Complete_cells
-    Select the filtering mode:Image or mask border
-    Select the filtering method:Limits
-    Select the objects that contain the filtered objects:None
-    Select the location of the rules or classifier file:Elsewhere...|
-    Rules or classifier file name:rules.txt
-    Class number:1
-    Measurement count:1
-    Additional object count:0
-    Assign overlapping child to:Both parents
-    Keep removed objects as a separate set?:No
-    Name the objects removed by the filter:RemovedObjects
-    Select the measurement to filter by:AreaShape_Area
-    Filter using a minimum measurement value?:Yes
-    Minimum value:0.0
-    Filter using a maximum measurement value?:Yes
-    Maximum value:1.0
-    Allow fuzzy feature matching?:No
-
-MeasureObjectSizeShape:[module_num:11|svn_version:'Unknown'|variable_revision_number:3|show_window:False|notes:['We measure the size of the cells']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+MeasureObjectSizeShape:[module_num:10|svn_version:'Unknown'|variable_revision_number:3|show_window:False|notes:['We measure the size of the cells']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select object sets to measure:Complete_cells
     Calculate the Zernike features?:No
     Calculate the advanced features?:No
 
-FilterObjects:[module_num:12|svn_version:'Unknown'|variable_revision_number:10|show_window:False|notes:['We filter the cells that are to smal']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+FilterObjects:[module_num:11|svn_version:'Unknown'|variable_revision_number:10|show_window:False|notes:['We filter the cells that are to smal']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select the objects to filter:Complete_cells
     Name the output objects:Filtered_cells
     Select the filtering mode:Measurements
@@ -228,7 +229,7 @@ FilterObjects:[module_num:12|svn_version:'Unknown'|variable_revision_number:10|s
     Maximum value:70
     Allow fuzzy feature matching?:No
 
-MaskObjects:[module_num:13|svn_version:'Unknown'|variable_revision_number:3|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+MaskObjects:[module_num:12|svn_version:'Unknown'|variable_revision_number:3|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select objects to be masked:Filtered_nuclei
     Name the masked objects:masked_nuclei
     Mask using a region defined by other objects or by binary image?:Objects
@@ -239,7 +240,7 @@ MaskObjects:[module_num:13|svn_version:'Unknown'|variable_revision_number:3|show
     Numbering of resulting objects:Renumber
     Invert the mask?:No
 
-RelateObjects:[module_num:14|svn_version:'Unknown'|variable_revision_number:5|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:True]
+RelateObjects:[module_num:13|svn_version:'Unknown'|variable_revision_number:5|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:True]
     Parent objects:Filtered_cells
     Child objects:masked_nuclei
     Calculate child-parent distances?:None
@@ -249,7 +250,7 @@ RelateObjects:[module_num:14|svn_version:'Unknown'|variable_revision_number:5|sh
     Name the output object:Prefinal_nuclei
     Parent name:None
 
-FilterObjects:[module_num:15|svn_version:'Unknown'|variable_revision_number:10|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+FilterObjects:[module_num:14|svn_version:'Unknown'|variable_revision_number:10|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select the objects to filter:Filtered_cells
     Name the output objects:Final_cells
     Select the filtering mode:Measurements
@@ -270,7 +271,7 @@ FilterObjects:[module_num:15|svn_version:'Unknown'|variable_revision_number:10|s
     Maximum value:1.0
     Allow fuzzy feature matching?:No
 
-RelateObjects:[module_num:16|svn_version:'Unknown'|variable_revision_number:5|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+RelateObjects:[module_num:15|svn_version:'Unknown'|variable_revision_number:5|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Parent objects:Final_cells
     Child objects:masked_nuclei
     Calculate child-parent distances?:None
@@ -280,7 +281,7 @@ RelateObjects:[module_num:16|svn_version:'Unknown'|variable_revision_number:5|sh
     Name the output object:Nuclei
     Parent name:None
 
-RelateObjects:[module_num:17|svn_version:'Unknown'|variable_revision_number:5|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+RelateObjects:[module_num:16|svn_version:'Unknown'|variable_revision_number:5|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Parent objects:Nuclei
     Child objects:Final_cells
     Calculate child-parent distances?:None
@@ -290,7 +291,7 @@ RelateObjects:[module_num:17|svn_version:'Unknown'|variable_revision_number:5|sh
     Name the output object:Cells
     Parent name:None
 
-RescaleIntensity:[module_num:18|svn_version:'Unknown'|variable_revision_number:3|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+RescaleIntensity:[module_num:17|svn_version:'Unknown'|variable_revision_number:3|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select the input image:Syto
     Name the output image:RNA_escaled
     Rescaling method:Stretch each image to use the full intensity range
@@ -304,17 +305,25 @@ RescaleIntensity:[module_num:18|svn_version:'Unknown'|variable_revision_number:3
     Divisor value:0.6
     Divisor measurement:None
 
+OverlayObjects:[module_num:18|svn_version:'Unknown'|variable_revision_number:1|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+    Input:RNA_escaled
+    Name the output image:Overlay_cells
+    Objects:Cells
+    Opacity:0.3
+
 OverlayOutlines:[module_num:19|svn_version:'Unknown'|variable_revision_number:4|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Display outlines on a blank image?:No
-    Select image on which to display outlines:RNA_escaled
-    Name the output image:Cell_segmentation
+    Select image on which to display outlines:Overlay_cells
+    Name the output image:Overlay_cells_nuclei
     Outline display mode:Color
     Select method to determine brightness of outlines:Max of image
-    How to outline:Outer
+    How to outline:Thick
     Select outline color:green
     Select objects to display:Nuclei
-    Select outline color:red
+    Select outline color:cyan
     Select objects to display:Cells
+    Select outline color:red
+    Select objects to display:Illum_artifacts
 
 MeasureImageIntensity:[module_num:20|svn_version:'Unknown'|variable_revision_number:4|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select images to measure:Hoechst, Syto
@@ -325,7 +334,7 @@ MeasureImageIntensity:[module_num:20|svn_version:'Unknown'|variable_revision_num
 
 SaveImages:[module_num:21|svn_version:'Unknown'|variable_revision_number:16|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select the type of image to save:Image
-    Select the image to save:Cell_segmentation
+    Select the image to save:Overlay_cells_nuclei
     Select method for constructing file names:From image filename
     Select image name for file prefix:Syto
     Enter single file name:OrigBlue

@@ -13,9 +13,9 @@ echo "[DEBUG 12.08.2026] CHANNEL_DICT=[$CHANNEL_DICT]"
 
 BATCH_SIZE=5000 
 
-SECTIONS=() #1
+SECTIONS=(1) #1
 run_section() { [[ " ${SECTIONS[*]} " == *" $1 "* ]]; }
-
+create_output_dirs $OUTPUT $IMAGES_WORKSPACE
 #### --- 1) Calculate illumination correction files --- ####
 if run_section 1; then
    echo "===***=== Generating Illumination correction files ===***==="

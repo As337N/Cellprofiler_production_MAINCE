@@ -33,7 +33,6 @@ FILENAME_REGEX='$FILENAME_REGEX'
 SCRIPT_PY_CELLPROFILER=/workspace/Code/csv_generator.py
 SCRIPT_PY_CELLPOSE=/workspace/Code/II_cellpose_seg.py
 SCRIPT_PY_AGGREGATE_QC_OUTPUT=/workspace/Code/III_QC_aux.py
-SCRIPT_PY_COLLAGE=/workspace/Code/III_QC_collage.py
 SCRIPT_PY_FEAT_PROCESS=/workspace/Code/V_feat_processing.py
 SCRIPT_PY_CLUSTERING=/workspace/Code/VI_Clustering.py
 SCRIPT_PY_REPRODUCIBILITY=/workspace/Code/VII_Reproducibility.py

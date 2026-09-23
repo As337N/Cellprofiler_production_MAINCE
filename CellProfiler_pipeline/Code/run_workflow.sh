@@ -7,7 +7,7 @@ source /config/variables.env
 set +a
 source /workspace/Code/bash_functions.sh
 
-SECTIONS=(3) #2-9
+SECTIONS=(2 3) #2-9
 run_section() { [[ " ${SECTIONS[*]} " == *" $1 "* ]]; }
 
 # ============================================================
@@ -34,7 +34,10 @@ fi
 if run_section 3; then
   echo "===***=== [3] Generate QC report ===***==="
   python $SCRIPT_PY_AGGREGATE_QC_OUTPUT --input "$PATH_QC_IMAGES"
-  python $SCRIPT_PY_COLLAGE -i $PATH_QC_IMAGES -o $PATH_QC_COLLAGES --platemap /workspace_images/platemap_${COHORT}.csv --cohort $COHORT --rows 16 --cols 24
+  cd ./Code
+  python -m qc.cli -i "$PATH_QC_IMAGES" -o "$PATH_QC_COLLAGES" \
+    --platemap "/workspace_images/platemap_${COHORT}.csv" --no-pdf
+  cd -
   echo "[INFO] QC report generated in ${PATH_QC_COLLAGES}"
 fi
 

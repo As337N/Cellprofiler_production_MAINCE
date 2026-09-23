@@ -86,14 +86,19 @@ def _parse_single_file(
         "Metadata_Field": int(meta["Field"]),
         "Metadata_Channel": ch_num,
         "Metadata_Channel_name": channels.get(ch_num, str(ch_num)),
+        "Metadata_Plane": int(meta["Plane"]),
     }
 
     if illum and output is not None:
-        row["FileName_Illum"] = f"Illum_{channels.get(ch_num, ch_num)}.npy"
+        row["FileName_Illum"] = f"P{plate_meta['Plate']}_Illum_{channels.get(ch_num, ch_num)}.npy"
         row["PathName_Illum"] = str(output.parents[0] / "Illum_files")
 
     if masks and output is not None:
-        row["Image_FileName_RNA_mask"] = None
+        is_syto = channels.get(ch_num) == "Syto"
+        is_z2 = int(meta["Plane"]) == 2
+        row["Image_FileName_RNA_mask"] = (
+            re.sub(r"\.tiff?$", ".png", path.name) if (is_syto and is_z2) else None
+        )
         row["Image_PathName_RNA_mask"] = str(output.parents[0] / "Cellpose_seg" / f"P_{plate_meta['Plate']}")
     return row
 
@@ -156,7 +161,7 @@ def parse_image_dataset(
                     rows.append(result)
 
     logger.info(f"Parsed {len(rows)} valid image records")
-    return pl.DataFrame(rows)
+    return pl.DataFrame(rows, infer_schema_length=None)
 
 
 def _aux_pivot(df: pl.DataFrame, values_col: str, idx: list[str], channel_names: list[str]) -> pl.DataFrame:
@@ -211,7 +216,7 @@ def pivot_df(df: pl.DataFrame, illum: bool = False, masks: bool = False) -> pl.D
         df_masks = (
             df
             .group_by(idx)
-            .agg([pl.first("Image_FileName_RNA_mask").alias("Image_FileName_RNA_mask"),
+            .agg([pl.col("Image_FileName_RNA_mask").drop_nulls().first().alias("Image_FileName_RNA_mask"),
                   pl.first("Image_PathName_RNA_mask").alias("Image_PathName_RNA_mask")]))
 
         df_final = df_final.join(df_masks, on=idx, how="left")
@@ -244,7 +249,8 @@ def prepare_CSVs(
     illum: bool = False,
     masks: bool = False,
     max_workers: int | None = None,
-    plates2process: list | None = None,) -> None:
+    plates2process: list | None = None,
+    zplane: int = 2,) -> None: #TODO: 1 en JUMP-MoA, 2 en MAINCE
     """
         Run the full metadata extraction pipeline and save final CSV output.
 
@@ -274,7 +280,7 @@ def prepare_CSVs(
         compiled_regex=compiled_regex
     )
 
-    #print("[DEBUG] columnas reales:", df.columns)
+    df = df.filter(pl.col("Metadata_Plane") == zplane)
 
     logger.info("Pivoting metadata table")
     df_wide = pivot_df(df, illum=illum, masks=masks)

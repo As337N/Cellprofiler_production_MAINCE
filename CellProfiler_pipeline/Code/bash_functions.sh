@@ -7,7 +7,7 @@ detectar_max_jobs() {
   mem_gb=$((mem_kb / 1024 / 1024))
 
   # 8 GB por CP job → seguro para BBBC047
-  jobs_by_mem=$((mem_gb / 8))
+  jobs_by_mem=$((mem_gb / 6))
   if [ "$jobs_by_mem" -lt 1 ]; then
     jobs_by_mem=1
   fi
@@ -85,6 +85,7 @@ create_output_dirs() {
         | sort -u
     )
 
+    echo "[INFO] Creating output dirs..."
     for PLATE in "${PLATES[@]}"; do
 
         PATH_CELLPOSE_SEG="$OUTPUT/CellProfiler_files/Cellpose_seg"

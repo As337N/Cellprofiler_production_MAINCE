@@ -10,12 +10,13 @@ from skimage.io import imsave
 import numpy as np
 import torch
 import tifffile as tiff
+import json
 
-
-MODEL_PATH = Path(__file__).parent / "sam-model" / "cpsam"
+MODEL_PATH = Path(__file__).parent / "sam-model" / "cpsam_v2"
 if not MODEL_PATH.exists():
     raise FileNotFoundError(f"cpsam weights not found at {MODEL_PATH}")
 
+# TODO: Eliminar este código
 # Harmony / JUMP: r09c22f02p01-ch4sk1fk1fl1.tiff
 """DEFAULT_CHANNEL_REGEX = (
     r"^r(?P<Row>\d{2})c(?P<Column>\d{2})f(?P<Field>\d{2})p(?P<Plane>\d{2})"
@@ -23,7 +24,7 @@ if not MODEL_PATH.exists():
 )"""
 
 # Dataset custom: ..._002004.tif  ->  r"00200(?P<Channel>\d)\.tiff?$"
-DEFAULT_CHANNEL_REGEX = r"00200(?P<Channel>\d)\.tiff?$"
+#DEFAULT_CHANNEL_REGEX = r"00200(?P<Channel>\d)\.tiff?$"
 
 
 class PreparePlate():
@@ -36,6 +37,7 @@ class PreparePlate():
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         illum = np.load(self.illumination_npy)
+        illum /= illum.mean()
         illum_t = torch.from_numpy(illum).float().to(device)
 
         corrected_images = []
@@ -55,12 +57,9 @@ class PreparePlate():
 
             eps = 1e-6
             corrected = imgs_t / (illum_t + eps)
+            corrected = torch.clamp(corrected, min=0.0) 
 
-            img_max = imgs_t.amax(dim=(1, 2), keepdim=True)
-            corrected = torch.clamp(corrected, min=0.0)
-            corrected = torch.minimum(corrected, img_max)
-
-            corrected_images.extend(corrected.cpu().numpy().astype(imgs_np.dtype))
+            corrected_images.extend(corrected.cpu().numpy())
 
         return corrected_images
 
@@ -103,7 +102,7 @@ class CellPose():
 
 
 class CellSegmentation():
-    def __init__(self, input_path, output_path, rna_channel, batch_size, regex, channel_regex, max_workers):
+    def __init__(self, input_path, output_path, channel_dict, rna_channel, batch_size, regex, channel_regex, max_workers):
         self.input_path = input_path
         self.output_path = output_path
         self.plate_regex = re.compile(regex)
@@ -112,6 +111,7 @@ class CellSegmentation():
             raise ValueError(
                 f"--channel-regex debe contener un grupo nombrado 'Channel': {channel_regex}"
             )
+        self.channel_dict = {int(v): k for k, v in json.loads(args.channel_dict).items()}
         self.rna_channel = rna_channel
         self.batch_size = batch_size
         self.name_image_directories = "untreated_data"
@@ -131,13 +131,13 @@ class CellSegmentation():
         path_masks.mkdir(parents=True, exist_ok=True)
         return plate, path_masks
 
-    def run(self, illumination_npy: Path):
+    def run(self):
         cellpose_seg = CellPose(
             path_model=MODEL_PATH,
             max_workers=self.max_workers,
             batch_size=self.batch_size,
         )
-
+        
         for p in self.input_path.iterdir():
             if not p.is_dir():
                 continue
@@ -148,6 +148,7 @@ class CellSegmentation():
                 continue
 
             plate, path_masks = self._mk_plate_dir(path_images)
+            illumination_npy=Path(f"/output/CellProfiler_files/Illum_files/P{plate}_Illum_{self.channel_dict[self.rna_channel]}.npy")
 
             img_paths = sorted(f for f in path_images.iterdir() if self._is_rna_image(f))
 
@@ -179,13 +180,13 @@ def parse_args():
     )
     parser.add_argument("input_path", type=Path)
     parser.add_argument("output_path", type=Path)
+    parser.add_argument("--channel_dict", required=True, help='JSON Name→Number, e.g. {"Mito":"1",...}')
     parser.add_argument("--rna_channel", type=int, default=4)
     parser.add_argument("--batch-size", type=int, default=12)
     parser.add_argument("--regex", type=str, default=r"_P(?P<Plate>\d{2})_")
     parser.add_argument(
         "--channel-regex",
         type=str,
-        default=DEFAULT_CHANNEL_REGEX,
         help="Regex con un grupo nombrado 'Channel' que capture el índice de canal.",
     )
     return parser.parse_args()
@@ -200,13 +201,14 @@ if __name__ == "__main__":
     segmentation = CellSegmentation(
         input_path=args.input_path,
         output_path=args.output_path,
+        channel_dict=args.channel_dict,
         regex=args.regex,
         channel_regex=args.channel_regex,
         rna_channel=args.rna_channel,
         batch_size=args.batch_size,
         max_workers=2,
     )
-    segmentation.run(illumination_npy=Path("/output/CellProfiler_files/Illum_files/Illum_Syto.npy"))
+    segmentation.run()
 
     elapsed = time.perf_counter() - start_time
     print(f"Total execution time for cellpose segmentation: {elapsed/3600:.2f} hours")
