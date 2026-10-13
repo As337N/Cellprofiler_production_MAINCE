@@ -13,7 +13,7 @@ is what breaks the III_QC_collage <-> report circular import.
 Payload keys (unchanged, frontend contract):
     n_rows, n_cols, data, countRanges,
     mfi{data,channels,colors,img}, radius,
-    specs{slope,pctMax,pctMin,medianInt},
+    specs{slope,debris,low_density,medianInt},
     madScores, redCounts, robustMetrics
 """
 from __future__ import annotations
@@ -48,8 +48,7 @@ def _cohort_range(col: str, plates_data: list, fallback_lo, fallback_hi,
 
 
 def build_payload(cohort_name: str, plates_data: list[dict],
-                  profile: profiles.DatasetProfile,
-                  p10_cohort_refs: dict | None = None) -> dict:
+                  profile: profiles.DatasetProfile,) -> dict:
     """Assemble window.__QC__ from precomputed render + stats results.
 
     Parameters
@@ -77,11 +76,12 @@ def build_payload(cohort_name: str, plates_data: list[dict],
         [c for cols in metric_cols.values() for c in cols] +
         list(profiles.COUNT_COLS.values()) + [profiles.AREA_COL] +
         [f"ImageQuality_PercentMaximal_{ch}" for ch in channels] +
-        [f"Intensity_Percentile_10_{ch}" for ch in channels]   # reemplaza PctMinimal
+        ["Ratio_P10/P90"]
     )
 
     # ── Per-plate payload (collages, flags, per-well metrics) ────────────────
     data: dict = {}
+    
     for pd_ in plates_data:
         pname = pd_["name"]
         pqc = pd_["plate_qc"]
@@ -92,6 +92,7 @@ def build_payload(cohort_name: str, plates_data: list[dict],
             pd_["collage_arr"], pqc, pmap,
             plate_rows=pd_.get("plate_rows", profile.plate_rows),
             plate_cols=pd_.get("plate_cols", profile.plate_cols),
+            robust_verdict=pd_.get("robust_verdict", {}),
         )
 
         well_flags = _compute_well_flags(pqc, adp, metric_cols, col_to_channel)
@@ -143,23 +144,17 @@ def build_payload(cohort_name: str, plates_data: list[dict],
     # ── Red well counts — from stats.scores ──────────────────────────────────
     robust_red = {m: S.red_wells_zscore(m, channels, calc_mad_scores, plates_data)
                   for m in profiles.ROBUST_METRICS}
-    from qc.stats.colors import ABSOLUTE_CUTS_LOW
-    p10_fail = ABSOLUTE_CUTS_LOW["Intensity_Percentile_10_"][0]  # fail < 0.015
-    # Un well es rojo en "pctmin" si algún canal tiene Percentile_10 por debajo del
-    # corte de fail absoluto. El peor sitio (mínimo) ya está en plate_qc.
-    p10_red_thresholds = {
-        f"Intensity_Percentile_10_{ch}": (p10_fail, None) for ch in channels
-    }
+    from qc.stats.colors import ABSOLUTE_CUTS
+    r_p10_90_fail = ABSOLUTE_CUTS["Ratio_P10/P90"][1]  
+    r_p10_90_red_thresholds = {"Ratio_P10/P90": (None, r_p10_90_fail)}
     red_counts = {
         "slope":  robust_red["PowerLogLogSlope"],
         "medint": robust_red["MedianIntensity"],
-        "pctmax": S.red_wells_absolute(
+        "debris": S.red_wells_absolute(
             plates_data, [f"ImageQuality_PercentMaximal_{ch}" for ch in channels],
             {f"ImageQuality_PercentMaximal_{ch}": (None, 1.0) for ch in channels}),
-        # "pctmin" (piso de intensidad): well rojo si el peor sitio de algún canal
-        # cae por debajo del corte de fail de Intensity_Percentile_10 (<0.015).
-        "pctmin": S.red_wells_absolute(
-            plates_data, list(p10_red_thresholds.keys()), p10_red_thresholds),
+        "low_density": S.red_wells_absolute(
+            plates_data, list(r_p10_90_red_thresholds.keys()), r_p10_90_red_thresholds),
     }
 
     # ── Heatmap colour specs — robust ones from stats.scores.median_colorscale
@@ -181,11 +176,7 @@ def build_payload(cohort_name: str, plates_data: list[dict],
                       "cmin": 0, "cmax": 2.0, "cs": _PCT_MAX_CS}
                      for ch in channels
                      for col in [f"ImageQuality_PercentMaximal_{ch}"]]
-    # Intensity_Percentile_10 por canal reemplaza a PctMinimal (piso de intensidad
-    # de la imagen). No lleva cs/cmin/cmax: se colorea por ratio vs mediana de
-    # cohorte (modo low_ratio en colors.py), con la referencia en colorSpec.refs.
-    p10_specs = [{"col": f"Intensity_Percentile_10_{ch}", "title": f"Percentile10 — {ch}"}
-                 for ch in channels]
+    r_p10_p90_specs = [{"col": "Ratio_P10/P90", "title": "Low density — P10/P90"}]
 
     count_ranges = {
         col: list(_cohort_range(col, plates_data, 0, None))
@@ -246,8 +237,8 @@ def build_payload(cohort_name: str, plates_data: list[dict],
         "radius": radius_payload,
         "specs": {
             "slope": slope_specs,
-            "pctMax": pct_max_specs,
-            "pctMin": p10_specs,
+            "debris": pct_max_specs,
+            "low_density": r_p10_p90_specs,
             "medianInt": medianint_specs,
         },
         "madScores": calc_mad_scores,
@@ -278,6 +269,8 @@ def _compute_well_flags(pqc: dict, adp: dict, metric_cols: dict,
                     continue
                 if mk == "FocusScore":
                     lo, hi = profiles.THRESHOLDS_LOCAL_FOCUS.get(ch, (None, None))
+                else:
+                    lo, hi = profiles.THRESHOLDS.get(mk, (None, None))
                 abs_fail = (lo is not None and v < lo) or (hi is not None and v > hi)
                 adp_col = adp.get(mk, {}).get(col)
                 adp_fail = False

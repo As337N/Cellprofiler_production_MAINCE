@@ -11,7 +11,7 @@ por columna:
 
 Cambio de diseño (peor-sitio para percentages)
 ----------------------------------------------
-PercentMaximal e Intensity_Percentile_10 son detectores de ANOMALÍA PUNTUAL: un
+PercentMaximal e Ratio_P10/P90 son detectores de ANOMALÍA PUNTUAL: un
 solo sitio con debris (p. ej. Hoechst = 1.89) o dominado por fondo negro señala un
 problema real de imagen. Promediar sitios diluía ese pico y lo escondía. La unidad
 de detección es el SITIO, así que el well se resume por su PEOR sitio, no por la
@@ -21,7 +21,7 @@ para dirigir la búsqueda de outliers.
 
 "Peor" depende de la dirección del fallo de la métrica:
   · PercentMaximal          -> el MAXIMO (más píxeles saturados = peor).
-  · Intensity_Percentile_10 -> el MINIMO (piso de intensidad más bajo = fondo
+  · Ratio_P10/P90           -> el MAXIMO (ratio cercano a uno indica fondo
                                negro predominante = peor).
 La dirección se declara en PCT_WORST_DIRECTION.
 
@@ -36,11 +36,11 @@ from qc import profiles
 # Direccion de "peor" para las métricas de percentil. +1 -> peor es el máximo;
 # -1 -> peor es el mínimo.
 #   PercentMaximal: peor = máximo (más saturación).
-#   Intensity_Percentile_10: peor = MÍNIMO (piso de intensidad más bajo = fondo
+#   Ratio_P10/P90: peor = MÍNIMO (piso de intensidad más bajo = fondo
 #     negro predominante). Reemplaza a PercentMinimal.
 PCT_WORST_DIRECTION = {
     "ImageQuality_PercentMaximal_": +1,
-    "Intensity_Percentile_10_": -1,
+    "Ratio_P10/P90": +1,
 }
 
 
@@ -53,7 +53,7 @@ def _pct_direction(col: str) -> int:
 
 def _is_pct(col: str) -> bool:
     return (col.startswith("ImageQuality_PercentMaximal_") or
-            col.startswith("Intensity_Percentile_10_"))
+            col.startswith("Ratio_P10/P90"))
 
 
 def classify_columns(cols, profile: profiles.DatasetProfile):

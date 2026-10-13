@@ -33,19 +33,46 @@ class ThresholdEngine:
         self.profile = profile
         self.n_sigma = n_sigma
         self._adaptive: dict[str, dict[str, tuple]] = {}   # {metric: {col: (lo, hi)}}
+        # Veredicto por-pozo del peor sitio para métricas robustas (Slope, MedInt),
+        # precomputado con z por sitio (placa/cohorte) en site_flags. La regla
+        # absoluta THRESHOLDS[Slope/MedInt] queda OBSOLETA y ya no se usa para
+        # estas dos métricas: el z por sitio es la única fuente de verdad.
+        self._robust_verdict: dict = {}     # {well: {metric: bool_fail}}
+
+    # Métricas robustas cuyo veredicto viene del z por sitio (no del absoluto).
+    _ROBUST = set(profiles.ROBUST_METRICS)
+
+    def set_robust_verdict(self, well_verdict: dict) -> None:
+        """Carga el veredicto por-pozo (peor sitio) de la placa actual.
+
+        well_verdict: {well: {metric: bool_fail}} de site_flags.well_robust_verdict
+        para esta placa. Llamar tras fit(), antes de renderizar la placa.
+        """
+        self._robust_verdict = well_verdict or {}
+
+    def well_robust_passes(self, well: str, metric_key: str) -> bool | None:
+        """True (pass) / False (fail) / None (sin veredicto) para una métrica
+        robusta en un pozo, según el peor sitio. Fuente única para Slope/MedInt.
+        """
+        wv = self._robust_verdict.get(well)
+        if wv is None or metric_key not in wv:
+            return None
+        return not wv[metric_key]
 
     def fit(self, plate_qc: dict) -> None:
-        """Bandas adaptativas por placa. Antes: doble loop numpy; ahora Polars.
+        """Bandas adaptativas por placa (solo para métricas NO robustas).
 
-        Para cada métrica×columna: median ± n_sigma·MAD sobre los wells de la
-        placa, descartando columnas con <5 valores (guard idéntico al original).
+        Slope/MedInt ya no usan la banda adaptativa por placa: su veredicto es el
+        z por sitio (placa+cohorte). Se siguen ajustando otras métricas (p. ej.
+        FocusScore) que conservan el mecanismo absoluto+adaptativo.
         """
         self._adaptive = {}
         metric_cols = self.profile.metric_cols()
 
-        # DataFrame long [col, value] con todos los valores de esta placa.
         for mk, cols in metric_cols.items():
             self._adaptive[mk] = {}
+            if mk in self._ROBUST:
+                continue                       # robustas: veredicto por z de sitio
             for col in cols:
                 vals = [m[col] for m in plate_qc.values()
                         if col in m and m[col] is not None
@@ -59,8 +86,17 @@ class ThresholdEngine:
                                            median + self.n_sigma * mad)
 
     def passes(self, value, metric_key: str, channel: str = "") -> bool | None:
-        """True (pass) / False (fail) / None (no data). Lógica idéntica al original."""
+        """True (pass) / False (fail) / None (no data).
+
+        Para métricas robustas (Slope, MedInt) esta ruta ya NO decide: su veredicto
+        es por pozo/peor-sitio (well_robust_passes). Aquí solo se evalúan las
+        métricas no robustas por su borde absoluto (+adaptativo), p. ej. FocusScore.
+        """
         if value is None or (isinstance(value, float) and np.isnan(value)):
+            return None
+
+        if metric_key in self._ROBUST:
+            # Sin pozo no hay veredicto por sitio; no marcar desde el valor suelto.
             return None
 
         if metric_key == "FocusScore":

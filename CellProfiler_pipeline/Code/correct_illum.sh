@@ -13,7 +13,7 @@ echo "[DEBUG 12.08.2026] CHANNEL_DICT=[$CHANNEL_DICT]"
 
 BATCH_SIZE=5000 
 
-SECTIONS=(1) #1
+#SECTIONS=(1) #1
 run_section() { [[ " ${SECTIONS[*]} " == *" $1 "* ]]; }
 create_output_dirs $OUTPUT $IMAGES_WORKSPACE
 #### --- 1) Calculate illumination correction files --- ####
@@ -26,7 +26,7 @@ if run_section 1; then
    echo "PATH_CSV=$PATH_CSV"
    echo "NAME_ILLUM=$NAME_ILLUM"
 
-   python $SCRIPT_PY_CELLPROFILER -i $IMAGES_WORKSPACE -o $PATH_CSV --name_csv $NAME_ILLUM --channel_dict $CHANNEL_DICT --filename_regex $FILENAME_REGEX
+   python $SCRIPT_PY_CELLPROFILER -i $IMAGES_WORKSPACE -o $PATH_CSV --name_csv $NAME_ILLUM --channel_dict $CHANNEL_DICT --filename_regex $FILENAME_REGEX --zplane "$ZPLANE"
 
    generar_batchfiles "$PATH_CSV/$NAME_ILLUM.csv" "$TEMPLATE_CPPIPE_ILLUM" "$PATH_CPPIPE" "$PATH_BATCH_PIPELINES" "$PATH_ILLUM_FILES" 0
    mv $PATH_BATCH_PIPELINES/Batch_data.h5 \

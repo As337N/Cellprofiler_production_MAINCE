@@ -1,8 +1,9 @@
 """
 qc/pipeline.py — QCPipeline: end-to-end orchestrator.
 
-Each stage is an explicit, ordered method so the pipeline can be driven from a notebook or 
-test without argparse, and each stage is independently inspectable.
+Replaces the monolithic Collage.__init__. Each stage is an explicit, ordered
+method so the pipeline can be driven from a notebook or test without argparse,
+and each stage is independently inspectable.
 
 Flow
 ----
@@ -29,7 +30,7 @@ from qc.io.platemap import load_platemap
 from qc.io.readers import TableStore
 from qc.render.collage import (
     _aggregate_mfi_per_well, _aggregate_mfi_sites,
-    _well_passes_all, _well_passes_group,
+    _well_passes_all, _well_passes_group, _metric_well_fail,
     render_plate_collage,
 )
 from qc.render.montage import build_montages_parallel
@@ -49,7 +50,7 @@ class PipelineConfig:
     qc_tsv: Path | None = None
     platemap: Path | None = None
     sites_per_well: int = 9
-    scale: float = 0.5
+    scale: float = 0.3
     workers: int = 8
     band_height: int = 280
     font_size: int = 18
@@ -102,8 +103,25 @@ class QCPipeline:
         self.qc_sites = self.store.qc_sites()
         if not self.qc_sites:
             print(f"[warn] No QC measurements found in {measurements}")
+        # PercentMinimal se reemplaza por Intensity_Percentile_10 por canal (piso
+        # de intensidad de la imagen). Su color usa cortes ABSOLUTOS (fail <0.015,
+        # warn 0.015-0.02) definidos en colors.py — sin referencia de cohorte.
+        # Percentiles (PctMaximal, Percentile_10) se colapsan por PEOR sitio:
+        # PctMaximal por máximo, Percentile_10 por mínimo (piso más bajo = fondo).
         self.qc, self.qc_worst_sites = collapse_sites_to_wells_with_sources(
             self.qc_sites, self.profile)
+        # Veredicto robusto (Slope, MedInt) por pozo = peor sitio, con z robusto por
+        # sitio (doble guardia placa/cohorte, 3σ Slope / 5σ MedInt). Fuente ÚNICA
+        # para el color de estas métricas en collage/overview (reemplaza el umbral
+        # absoluto obsoleto). floored_note avisa si alguna placa usó piso de MAD.
+        from qc.stats.site_flags import (well_robust_verdict, robust_site_refs,
+                                         floored_note)
+        self._robust_refs = robust_site_refs(self.qc_sites, self.profile)
+        self.robust_verdict = well_robust_verdict(
+            self.qc_sites, self.profile, self._robust_refs)
+        self._robust_floored_note = floored_note(self._robust_refs)
+        if self._robust_floored_note:
+            print(f"[info] {self._robust_floored_note}")
 
         # MFI (single read of Cells/Nuclei), image-level MFI, radius (all plates).
         self._mfi_sources, self._channel_map = self.store.mfi_sources()
@@ -162,6 +180,9 @@ class QCPipeline:
                 # PDF is a convenience artifact; never let it break the HTML run.
                 print(f"[warn] PDF summary skipped: {e}")
 
+        # Parquet de sitios que fallan algún criterio de calidad (para descartar
+        # sitios en análisis posteriores). Solo filas fallidas; todas las
+        # mediciones + fail (bool) + failed_criteria (list[str]). Nunca rompe el run.
         try:
             from qc.stats.site_flags import write_flagged_sites_parquet
             fq_name = f"{self.cfg.cohort_name}_flagged_sites.parquet"
@@ -243,6 +264,10 @@ class QCPipeline:
 
         if plate_qc:
             self.engine.fit(plate_qc)
+        # Cargar el veredicto robusto por-pozo (peor sitio) de esta placa. El engine
+        # lo usa para Slope/MedInt en vez del umbral absoluto.
+        self.engine.set_robust_verdict(
+            (getattr(self, "robust_verdict", {}) or {}).get(plate_name, {}))
 
         collage = render_plate_collage(
             plate_name, montages, plate_qc, plate_map, self.engine,
@@ -250,14 +275,15 @@ class QCPipeline:
             band_height=self.cfg.band_height, font_size=self.cfg.font_size)
 
         n_wells = len(plate_qc)
-        n_pass = sum(1 for m in plate_qc.values()
-                     if _well_passes_all(m, self.engine))
-        n_illum = sum(1 for m in plate_qc.values()
-                      if _well_passes_group(m, list(profiles.ILLUM_METRICS), self.engine))
+        n_pass = sum(1 for wl, m in plate_qc.items()
+                     if _well_passes_all(m, self.engine, wl))
+        n_illum = sum(1 for wl, m in plate_qc.items()
+                      if _well_passes_group(m, list(profiles.ILLUM_METRICS), self.engine, wl))
 
         overview_arr, ov_cw, ov_ch = _make_overview_grid(
             montages, plate_qc, plate_map,
-            plate_rows=self.cfg.plate_rows, plate_cols=self.cfg.plate_cols)
+            plate_rows=self.cfg.plate_rows, plate_cols=self.cfg.plate_cols,
+            robust_verdict=(getattr(self, "robust_verdict", {}) or {}).get(plate_name, {}))
 
         # Flagged well thumbnails (absolute OR adaptive failure in any metric).
         flagged_b64 = {}
@@ -265,12 +291,12 @@ class QCPipeline:
         col_to_ch = self.profile.col_to_channel()
         for wl, m in plate_qc.items():
             flagged = any(
-                self.engine.passes(m.get(col), mk, col_to_ch.get(col, "")) is False
-                for mk, cols in metric_cols.items() for col in cols)
+                _metric_well_fail(wl, m, mk, self.engine)
+                for mk in metric_cols)
             if flagged:
                 r_idx = ord(wl[0]) - ord("A") + 1
                 c_idx = int(wl[1:])
-                b64 = _well_montage_b64(montages, (r_idx, c_idx), scale_factor=0.33)
+                b64 = _well_montage_b64(montages, (r_idx, c_idx), scale_factor=0.25)
                 if b64:
                     flagged_b64[wl] = b64
 
@@ -289,12 +315,16 @@ class QCPipeline:
             "plate_qc": plate_qc,
             "plate_qc_sites": plate_qc_sites,
             "plate_worst_sites": plate_worst_sites,
+            "robust_verdict": (getattr(self, "robust_verdict", {}) or {}).get(plate_name, {}),
             "plate_map": plate_map,
             "flagged_b64": flagged_b64,
             "engine_adaptive": self.engine._adaptive,
             "mfi_data": (_aggregate_mfi_per_well(self._mfi_sources, self._channel_map,
                                                  plate_name) if self._channel_map else {}),
             "mfi_img": self._mfi_img,
+            # Per-site MFI (object + image), keyed by real ImageNumber, for the
+            # cohort CSV export. Kept separate from mfi_data/mfi_img above, which
+            # the boxplots and SNR/Δ views consume unchanged.
             "mfi_sites": (_aggregate_mfi_sites(self._mfi_sources, self._channel_map,
                                                plate_name) if self._channel_map else {}),
             "mfi_img_sites": self._mfi_img_sites,

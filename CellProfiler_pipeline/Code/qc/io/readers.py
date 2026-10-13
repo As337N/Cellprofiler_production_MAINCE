@@ -235,7 +235,8 @@ class TableStore:
         pct_cols = list(dict.fromkeys(
             c for c in cols
             if c.startswith("ImageQuality_PercentMaximal_") or
-               c.startswith("Intensity_Percentile_10_")))
+               c == "Intensity_Percentile_10_Syto" or 
+               c == "Intensity_Percentile_90_Syto"))
         sum_cols = list(dict.fromkeys(
             c for c in cols if c.startswith("Count_") or c == profiles.AREA_COL))
 
@@ -248,10 +249,15 @@ class TableStore:
             print("[warn] No QC columns matched — nothing to aggregate.")
             return {}
 
+        RATIO_COL = "Ratio_P10/P90"
         all_cols = (metric_cols + pct_cols +
                     [c for c in sum_cols if c not in metric_cols and c not in pct_cols])
+        all_cols.append(RATIO_COL)
         agg = (lf.group_by(["Metadata_Plate", "Metadata_Well", "Metadata_Field"])
                  .agg(agg_exprs).collect())
+
+        agg = agg.with_columns((pl.col("Intensity_Percentile_10_Syto") / pl.col("Intensity_Percentile_90_Syto")).alias(RATIO_COL))
+        agg = agg.drop(["Intensity_Percentile_10_Syto", "Intensity_Percentile_90_Syto"])
 
         result: dict = {}
         for row in agg.iter_rows(named=True):
@@ -260,4 +266,5 @@ class TableStore:
             field = int(row["Metadata_Field"])
             (result.setdefault(plate, {}).setdefault(well, {})
                    [field]) = {c: row[c] for c in all_cols if c in row}
+
         return result

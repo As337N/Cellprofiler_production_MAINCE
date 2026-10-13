@@ -24,14 +24,18 @@ from PIL import Image, ImageDraw
 from qc import profiles
 from qc.render.montage import _font, _text_h, _make_tile, well_label
 from qc.stats.engine import ThresholdEngine
-from qc.stats.expressions import passes_absolute_scalar as _passes_absolute
 
 BORDER_METRIC = "PowerLogLogSlope"
 
 
 def _make_report_collage(collage_arr: np.ndarray, plate_qc: dict,
                          plate_map: dict, plate_rows: int = 8,
-                         plate_cols: int = 12) -> np.ndarray:
+                         plate_cols: int = 12,
+                         robust_verdict: dict | None = None) -> np.ndarray:
+    # robust_verdict: {well: {metric: bool_fail}} del peor sitio (Slope/MedInt),
+    # de site_flags.well_robust_verdict[plate]. El borde del tile refleja el peor
+    # sitio; si no se provee, el tile queda neutro (sin veredicto robusto).
+    robust_verdict = robust_verdict or {}
     CW, CH   = 120, 80
     W        = CW * plate_cols
     H        = CH * plate_rows
@@ -53,20 +57,18 @@ def _make_report_collage(collage_arr: np.ndarray, plate_qc: dict,
             x0, y0   = c * CW, r * CH
             x1, y1   = x0 + CW - 1, y0 + CH - 1
 
-            results = [
-                p for col in slope_cols
-                if (v := metrics.get(col)) is not None and not np.isnan(v)
-                and (p := _passes_absolute(v, BORDER_METRIC)) is not None
-            ]
-            n_pass = sum(results) if results else 0
-            if not results:
+            # Borde del tile = veredicto del PEOR sitio para Slope (BORDER_METRIC),
+            # vía z por sitio (placa/cohorte). Verde pasa, rojo falla; gris sin dato.
+            wv = robust_verdict.get(wl)
+            if not wv or BORDER_METRIC not in wv:
                 bg, border = (20, 22, 35), (40, 45, 70)
-            elif n_pass == len(results):
-                bg, border = (15, 42, 20), (55, 180, 70)
-            elif n_pass == 0:
+                slope_fail = None
+            elif wv[BORDER_METRIC]:
                 bg, border = (42, 12, 12), (200, 35, 35)
+                slope_fail = True
             else:
-                bg, border = (42, 32, 10), (220, 130, 0)
+                bg, border = (15, 42, 20), (55, 180, 70)
+                slope_fail = False
 
             draw.rectangle([x0, y0, x1, y1], fill=bg, outline=border, width=2)
             draw.text((x0 + 5, y0 + 4), wl, fill=(200, 220, 255), font=fwell)
@@ -83,7 +85,9 @@ def _make_report_collage(collage_arr: np.ndarray, plate_qc: dict,
 
             sv = metrics.get("ImageQuality_PowerLogLogSlope_Hoechst")
             if sv is not None and not (isinstance(sv, float) and np.isnan(sv)):
-                sc = (75, 215, 95) if -2.5 <= sv <= -1.0 else (255, 65, 65)
+                # Color del texto sl= según el veredicto robusto del pozo (no umbral fijo).
+                sc = (160, 175, 200) if slope_fail is None else \
+                     ((255, 65, 65) if slope_fail else (75, 215, 95))
                 draw.text((x0 + 5, y0 + 50), f"sl={sv:.2f}", fill=sc, font=fval)
 
     return np.array(img)
@@ -119,38 +123,38 @@ def _count_summary(metrics: dict) -> list[tuple[str, str]]:
     return rows
 
 def _slope_range(plate_qc: dict) -> tuple:
-    # Slope columns are discovered from the data (any BORDER_METRIC column),
-    # so this stays profile-independent — no engine needed here.
+    # Rango de la escala de Slope, tomado de los datos. El veredicto de Slope es
+    # z por sitio (no un umbral absoluto); aquí solo se necesita un rango para la
+    # escala, con un fallback neutro cuando no hay valores.
     prefix = f"ImageQuality_{BORDER_METRIC}_"
     vals = [v for m in plate_qc.values() for col, v in m.items()
             if col.startswith(prefix) and v is not None and not np.isnan(v)]
-    lo, hi = profiles.THRESHOLDS[BORDER_METRIC]
-    return (min(vals) if vals else lo, max(vals) if vals else hi)
+    return (min(vals), max(vals)) if vals else (-3.0, -1.0)
 
-def _slope_to_rgb(well_metrics: dict | None, engine: ThresholdEngine) -> tuple:
-    results = [
-        engine.passes(well_metrics.get(col) if well_metrics else None, BORDER_METRIC)
-        for col in engine.profile.metric_cols()[BORDER_METRIC]
-    ]
-    results = [r for r in results if r is not None]
-    if not results:
+def _slope_to_rgb(well: str, engine: ThresholdEngine) -> tuple:
+    """Color del tile por el veredicto robusto de Slope del pozo (peor sitio)."""
+    rv = engine.well_robust_passes(well, BORDER_METRIC)
+    if rv is None:
         return (45, 45, 55)
-    n = sum(results)
-    if n == len(results): return (55, 205, 80)
-    if n == 0:            return (215, 35, 35)
-    return (255, 145, 0)
+    return (55, 205, 80) if rv else (215, 35, 35)
 
-def _well_passes_all(metrics: dict, engine: ThresholdEngine) -> bool:
-    return all(
-        engine.passes(metrics.get(col), mk, engine.profile.col_to_channel().get(col, "")) is not False
-        for mk, cols in engine.profile.metric_cols().items() for col in cols
-    )
+def _metric_well_fail(well: str, metrics: dict, mk: str, engine: ThresholdEngine) -> bool:
+    """True si el pozo FALLA la métrica mk. Robustas (Slope/MedInt): veredicto por
+    peor sitio (well_robust_passes). No robustas: borde absoluto por valor."""
+    if mk in engine._ROBUST:
+        return engine.well_robust_passes(well, mk) is False
+    return any(
+        engine.passes(metrics.get(col), mk,
+                      engine.profile.col_to_channel().get(col, "")) is False
+        for col in engine.profile.metric_cols()[mk])
 
-def _well_passes_group(metrics: dict, group: list, engine: ThresholdEngine) -> bool:
-    return all(
-        engine.passes(metrics.get(col), mk, engine.profile.col_to_channel().get(col, "")) is not False
-        for mk in group for col in engine.profile.metric_cols()[mk]
-    )
+def _well_passes_all(metrics: dict, engine: ThresholdEngine, well: str = "") -> bool:
+    return not any(_metric_well_fail(well, metrics, mk, engine)
+                   for mk in engine.profile.metric_cols())
+
+def _well_passes_group(metrics: dict, group: list, engine: ThresholdEngine,
+                       well: str = "") -> bool:
+    return not any(_metric_well_fail(well, metrics, mk, engine) for mk in group)
 
 def _make_band(width: int, well_labels_in_row: list, plate_qc: dict,
                band_height: int, font_size: int, tile_width: int,
@@ -200,12 +204,18 @@ def _make_band(width: int, well_labels_in_row: list, plate_qc: dict,
         metrics = plate_qc.get(wlabel)
         x0, x1  = idx * tile_width, idx * tile_width + tile_width - 1
 
-        pass_vals = [
-            engine.passes(metrics.get(col) if metrics else None, mk,
-                          engine.profile.col_to_channel().get(col, ""))
-            for mk in ALL_METRICS for col in engine.profile.metric_cols()[mk]
-        ]
-        pass_vals = [p for p in pass_vals if p is not None]
+        pass_vals = []
+        for mk in ALL_METRICS:
+            if mk in engine._ROBUST:
+                rv = engine.well_robust_passes(wlabel, mk)
+                if rv is not None:
+                    pass_vals.append(rv)
+            else:
+                for col in engine.profile.metric_cols()[mk]:
+                    p = engine.passes(metrics.get(col) if metrics else None, mk,
+                                      engine.profile.col_to_channel().get(col, ""))
+                    if p is not None:
+                        pass_vals.append(p)
 
         if pass_vals:
             frac   = sum(pass_vals) / len(pass_vals)
@@ -247,7 +257,13 @@ def _make_band(width: int, well_labels_in_row: list, plate_qc: dict,
                     continue
                 ch    = engine.profile.col_to_channel().get(col, col)
                 short = ch
-                vc    = engine.val_color(v, mk, ch)
+                if mk in engine._ROBUST:
+                    rv = engine.well_robust_passes(wlabel, mk)
+                    vc = (profiles.COL_THRESHOLDS["COL_NODATA"] if rv is None else
+                          (profiles.COL_THRESHOLDS["COL_PASS"] if rv
+                           else profiles.COL_THRESHOLDS["COL_FAIL"]))
+                else:
+                    vc = engine.val_color(v, mk, ch)
                 txt   = f" {short}: {v:.3f}"
                 draw.text((x_left, y + 1), txt, fill=(0, 0, 0), font=fv)
                 draw.text((x_left, y),     txt, fill=vc,         font=fv)
@@ -302,8 +318,9 @@ def make_report_footer(width: int, plate_name: str, plate_qc: dict,
                         engine: ThresholdEngine, font_size: int = 16,
                         plate_map: dict | None = None) -> np.ndarray:
     n_wells   = len(plate_qc)
-    n_pass    = sum(1 for m in plate_qc.values() if _well_passes_all(m, engine))
-    n_illum_p = sum(1 for m in plate_qc.values() if _well_passes_group(m, profiles.ILLUM_METRICS, engine))
+    n_pass    = sum(1 for wl, m in plate_qc.items() if _well_passes_all(m, engine, wl))
+    n_illum_p = sum(1 for wl, m in plate_qc.items()
+                    if _well_passes_group(m, profiles.ILLUM_METRICS, engine, wl))
     pct       = lambda n: f"{100 * n / n_wells:.1f}%" if n_wells else "—"
 
     stats = {mk: {ch: [] for ch in list(engine.profile.channels)} for mk in engine.profile.metric_cols()}
@@ -317,13 +334,21 @@ def make_report_footer(width: int, plate_name: str, plate_qc: dict,
 
     failing = []
     for wl, m in sorted(plate_qc.items()):
-        reasons = [
-            f"{profiles.METRIC_LABELS.get(mk, mk)}/{profiles.CHANNEL_LABELS.get(ch_key, '?')}"
-            for mk, cols in engine.profile.metric_cols().items()
-            for col in cols
-            if (v := m.get(col)) is not None and not np.isnan(v)
-            and engine.passes(v, mk, ch_key := engine.profile.col_to_channel().get(col, "")) is False
-        ]
+        reasons = []
+        for mk, cols in engine.profile.metric_cols().items():
+            if mk in engine._ROBUST:
+                # Robustas: veredicto por peor sitio; una razón por métrica.
+                if engine.well_robust_passes(wl, mk) is False:
+                    reasons.append(profiles.METRIC_LABELS.get(mk, mk))
+            else:
+                for col in cols:
+                    v = m.get(col)
+                    ch_key = engine.profile.col_to_channel().get(col, "")
+                    if (v is not None and not np.isnan(v)
+                            and engine.passes(v, mk, ch_key) is False):
+                        reasons.append(
+                            f"{profiles.METRIC_LABELS.get(mk, mk)}/"
+                            f"{profiles.CHANNEL_LABELS.get(ch_key, '?')}")
         if reasons:
             failing.append((wl, reasons))
 
@@ -383,7 +408,22 @@ def make_report_footer(width: int, plate_name: str, plate_qc: dict,
                     tstr = (f"> {lo}" if hi is None else f"< {hi}" if lo is None
                             else f"{lo} to {hi}")
 
-                    if vals:
+                    if mk in engine._ROBUST:
+                        # Conteo por POZO (veredicto peor sitio), no por valor.
+                        verds = [engine.well_robust_passes(wl, mk)
+                                 for wl in plate_qc]
+                        verds = [x for x in verds if x is not None]
+                        tstr = f"|z|≤{ '3' if mk=='PowerLogLogSlope' else '5' } (site)"
+                        if verds:
+                            np_ = sum(verds)
+                            pp  = 100 * np_ / len(verds)
+                            pc  = profiles.COL_THRESHOLDS['COL_PASS'] if pp >= 80 else (profiles.COL_THRESHOLDS['COL_FAIL'] if pp < 50 else (255, 190, 0))
+                            stat_str = (f"{np_}/{len(verds)} ({pp:.0f}%)   "
+                                        f"μ={np.mean(vals):.3f}±{np.std(vals):.3f}"
+                                        if vals else f"{np_}/{len(verds)} ({pp:.0f}%)")
+                        else:
+                            pc, stat_str = profiles.COL_THRESHOLDS['COL_NODATA'], "—"
+                    elif vals:
                         np_ = sum(1 for v in vals if engine.passes(v, mk, ch))
                         pp  = 100 * np_ / len(vals)
                         pc  = profiles.COL_THRESHOLDS['COL_PASS'] if pp >= 80 else (profiles.COL_THRESHOLDS['COL_FAIL'] if pp < 50 else (255, 190, 0))
@@ -587,7 +627,7 @@ def render_plate_collage(plate_name: str, montages: dict, plate_qc: dict,
         row_labels = [well_label(r, c) for c in range(1, plate_cols + 1)]
         row_tiles = [
             _make_tile(montages.get((r, c), blank),
-                       _slope_to_rgb(plate_qc.get(well_label(r, c)), engine))
+                       _slope_to_rgb(well_label(r, c), engine))
             for c in range(1, plate_cols + 1)
         ]
         row_img = np.concatenate(row_tiles, axis=1)

@@ -49,28 +49,12 @@ ZBAND_AMBER_MAX = 3.0
 # PercentMaximal: verde <0.1, ambar 0.1-1, rojo >1.
 ABSOLUTE_CUTS = {
     "ImageQuality_PercentMaximal_": (0.1, 1.0),
-}
-
-# Cortes absolutos "BAJO = malo": el valor cae y eso empeora (piso de intensidad
-# deprimido = fondo negro predominante). Formato (fail, warn) sobre el valor crudo:
-#   verde  value >  warn
-#   ambar  fail <= value <= warn
-#   rojo   value <  fail
-# Intensity_Percentile_10: fail <0.015, warning 0.015-0.02, verde >0.02.
-ABSOLUTE_CUTS_LOW = {
-    "Intensity_Percentile_10_": (0.015, 0.02),
+    "Ratio_P10/P90": (0.4, 0.5),
 }
 
 
 def _absolute_prefix(col: str):
     for prefix in ABSOLUTE_CUTS:
-        if col.startswith(prefix):
-            return prefix
-    return None
-
-
-def _absolute_low_prefix(col: str):
-    for prefix in ABSOLUTE_CUTS_LOW:
         if col.startswith(prefix):
             return prefix
     return None
@@ -89,8 +73,6 @@ class ColorResolver:
     def mode(self, col: str) -> str:
         if any(col.startswith(p) for p in self.robust_prefixes):
             return "zband"
-        if _absolute_low_prefix(col) is not None:
-            return "absolute_low"
         return "absolute"
 
     # ── Color de un valor individual ─────────────────────────────────────────
@@ -99,7 +81,7 @@ class ColorResolver:
 
         zband        usa |z_co| (ignora value); None -> None.
         absolute_low usa value contra cortes BAJO=malo (fail, warn): verde >warn,
-                     ambar fail..warn, rojo <fail. Para Intensity_Percentile_10.
+                     ambar fail..warn, rojo <fail. Para Ratio_P10/P90.
         absolute     usa value contra cortes ALTO=malo (lo, hi).
         """
         mode = self.mode(col)
@@ -112,16 +94,6 @@ class ColorResolver:
             if az <= ZBAND_AMBER_MAX:
                 return AMBER
             return RED
-        if mode == "absolute_low":
-            if value is None or (isinstance(value, float) and value != value):
-                return None
-            prefix = _absolute_low_prefix(col)
-            fail, warn = ABSOLUTE_CUTS_LOW[prefix]
-            if value < fail:
-                return RED
-            if value <= warn:
-                return AMBER
-            return GREEN
         # absolute (ALTO = malo)
         if value is None or (isinstance(value, float) and value != value):
             return None
@@ -155,7 +127,5 @@ def color_spec_payload(robust_prefixes, cohort_refs=None) -> dict:
         "robustPrefixes": list(robust_prefixes),
         "zband": {"greenMax": ZBAND_GREEN_MAX, "amberMax": ZBAND_AMBER_MAX},
         "absolute": {p: {"lo": lo, "hi": hi} for p, (lo, hi) in ABSOLUTE_CUTS.items()},
-        "absoluteLow": {p: {"fail": fail, "warn": warn}
-                        for p, (fail, warn) in ABSOLUTE_CUTS_LOW.items()},
         "colors": {"green": GREEN, "amber": AMBER, "red": RED},
     }

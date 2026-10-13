@@ -19,7 +19,7 @@
   <table class="summary-table">
     <thead>
       <tr><th>Plate</th><th>Wells</th>
-          <th>PowerLogLogSlope</th><th>Percent Max</th><th>Percent Min</th><th>Median Intensity</th><th>Signal / Noise (SNR in MFI)</th><th>Positional Effects (ANOVA in MFI)</th>
+          <th>Blur</th><th>Debris</th><th>Low Cell Density</th><th>MedianIntensity</th><th>Signal / Noise (SNR in MFI)</th><th>Positional Effects (ANOVA in MFI)</th></tr>
     </thead>
     <tbody id="summary-tbody"></tbody>
   </table>
@@ -35,15 +35,15 @@
     <select id="plate-select"></select>
     <div class="criteria-toggles" id="criteria-toggles" title="Metrics counted toward each well's overall colour verdict">
       <span class="criteria-label">Verdict criteria:</span>
-      <label><input type="checkbox" class="criterion-cb" value="slope" checked> Slope</label>
-      <label><input type="checkbox" class="criterion-cb" value="pctmax" checked> PctMax</label>
-      <label><input type="checkbox" class="criterion-cb" value="pctmin" checked> IntFloor</label>
+      <label><input type="checkbox" class="criterion-cb" value="slope" checked> Blur</label>
+      <label><input type="checkbox" class="criterion-cb" value="debris" checked> Debris</label>
+      <label><input type="checkbox" class="criterion-cb" value="ldens" checked> Low density</label>
       <label><input type="checkbox" class="criterion-cb" value="medint" checked> MedInt</label>
     </div>
   </div>
   <div class="browser-legend">
-    Each well's colour is its <b>worst site</b>: robust metrics (Slope, MedInt) by cohort
-    MAD-score bands, percentile metrics (PctMax, PctMin) by their worst-site value. In the
+    Each well's colour is its <b>worst site</b>: robust metrics (Blur, MedianIntensity) by cohort
+    MAD-score bands, percentile metrics (Debris, Low Cell Density) by their worst-site value. In the
     detail panels, robust rows show both MAD-scores (z<sub>pl</sub>, z<sub>co</sub>) and
     percentile rows point to the responsible <b>site</b>.
   </div>
@@ -86,7 +86,7 @@
     </div>
     <hr class="audit-sep">
     <div class="audit-row">
-      <b style="color:#a8c8f0;">PowerLogLogSlope</b>: log-log slope of the pixel intensity
+      <b style="color:#a8c8f0;">Blur (PowerLogLogSlope)</b>: log-log slope of the pixel intensity
       power spectrum (a focus proxy). Coloured by <b style="color:#c8d8f0;">cohort MAD-score</b>
       in discrete bands: <span style="color:#4bd760;">■</span> |z| ≤ 1 ·
       <span style="color:#ffbe00;">■</span> 1–3 · <span style="color:#ff4444;">■</span> &gt; 3.
@@ -96,7 +96,7 @@
     </div>
     <hr class="audit-sep">
     <div class="audit-row">
-      <b style="color:#a8c8f0;">PercentMaximal</b>: fraction of pixels at maximum intensity
+      <b style="color:#a8c8f0;">Debris (PercentMaximal)</b>: Fraction of pixels at maximum intensity
       (saturated). High values indicate overexposure or debris.
       <span style="color:#4bd760;">■ green</span> &lt; 0.1% &nbsp;·&nbsp;
       <span style="color:#ffbe00;">■ yellow</span> 0.1–1% &nbsp;·&nbsp;
@@ -107,22 +107,18 @@
       is shown next to the value in the Plate Browser and in the platemap tooltip.</span>
     </div>
     <div class="audit-row" style="margin-top:4px;">
-      <b style="color:#a8c8f0;">Percentile10 — intensity floor</b> (IntFloor) — replaces
-      PercentMinimal entirely. Per channel, the <b>10th-percentile image intensity</b>
-      (Intensity_Percentile_10_&lt;channel&gt;, from the Image table): the value below which
-      only 10% of the field's pixels lie. When a field is mostly black background (low cell
-      density), this floor collapses toward the minimum. PercentMinimal — the fraction of
-      pixels exactly at zero — could not distinguish this from a channel's normal dark
-      baseline; the intensity floor can.
-      <br>Coloured by <b>absolute thresholds</b> on the raw floor value (low = dark
-      field dominated by background):
-      <span style="color:#ff4444;">■ red</span> &lt; 0.015 (fail) &nbsp;·&nbsp;
-      <span style="color:#ffbe00;">■ yellow</span> 0.015–0.02 (warning) &nbsp;·&nbsp;
-      <span style="color:#4bd760;">■ green</span> &gt; 0.02.
+      <b style="color:#a8c8f0;">Lowe Cell Density</b> (Ratio_P10/P90):
+      Ratio_P10/P90 corresponds to the ratio between <i>Intensity_Percentile_10_Syto</i> and 
+      <i>Intensity_Percentile_90_Syto</i>, that gets closer to 1 when the intensity in the syto channel 
+      of percentile 10 and 90 are closer. This indicates an immage with low cell density.
+      <br>Coloured by <b>absolute thresholds</b>:
+      <span style="color:#ff4444;">■ red</span> &gt; 0.5 (fail) &nbsp;·&nbsp;
+      <span style="color:#ffbe00;">■ yellow</span> 0.4-0.5 (warning) &nbsp;·&nbsp;
+      <span style="color:#4bd760;">■ green</span> &lt; 0.4.
       <br><span style="font-size:0.8rem;color:var(--muted);">
       Aggregated to the well by its <b style="color:#c8d8f0;">worst site</b> (here the site
       with the <i>lowest</i> floor), with the responsible site reported alongside the value.
-      A well fails (red verdict) if any channel's worst site drops below 0.015.</span>
+      A well fails (red verdict) if any channel's worst site drops above 0.5.</span>
     </div>
     <hr class="audit-sep">
     <div class="audit-row">
@@ -160,7 +156,6 @@
     <div class="tabs" id="metrics-tabs"></div>
     <div id="metrics-contents"></div>
   </div>
-</div>
  
 <!-- 4. CELL COUNTS -->
 <div class="section">

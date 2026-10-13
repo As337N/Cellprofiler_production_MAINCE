@@ -2,7 +2,7 @@
 // report.js — QC report client logic
 //
 // Data is injected by the Python builder as a single object on window.__QC__
-// (see qc/report.py). This preamble unpacks it into the module-level names the
+// (see qc/payload/builder.py). This preamble unpacks it into the module-level names the
 // rest of this file expects, so the logic below is untouched by the refactor.
 // ─────────────────────────────────────────────────────────────────────────────
 const Q = window.__QC__;
@@ -16,10 +16,10 @@ const MFI_IMG        = Q.mfi.img;
 const RADIUS_DATA    = Q.radius;
 const PLATES         = Object.keys(DATA);
 
-const SLOPE_SPECS    = Q.specs.slope;
-const PCT_MAX_SPECS  = Q.specs.pctMax;
-const PCT_MIN_SPECS  = Q.specs.pctMin;   // Intensity_Percentile_10 (reemplaza PctMinimal)
-const MEDIANINT_SPECS = Q.specs.medianInt;
+const SLOPE_SPECS     = Q.specs.slope       || [];
+const DEBRIS_SPECS    = Q.specs.debris      || [];
+const L_DENS_SPECS    = Q.specs.low_density || [];
+const MEDIANINT_SPECS = Q.specs.medianInt   || [];
 const MAD_SCORES     = Q.madScores;
 const RED_COUNTS     = Q.redCounts;
 // Column-name prefixes whose heatmaps show MAD z-scores in the tooltip.
@@ -34,30 +34,23 @@ const ROBUST_PREFIXES = Q.robustMetrics || ['ImageQuality_MedianIntensity_'];
 //
 //   · robustas (Slope, MedInt)  → color por |z_cohorte| en bandas discretas.
 //   · PercentMaximal            → color por valor crudo contra cortes absolutos.
-//   · Intensity_Percentile_10   → color por ratio value/mediana_cohorte (low_ratio):
-//                                  piso de intensidad bajo = fondo negro = rojo.
+//   · Ratio_P10/P90             → color por valor crudo contra cortes absolutos
+//                                  (ALTO = malo: p10 ≈ p90 → campo casi todo fondo).
 //
 // La especificación (modo, cortes, colores, refs de cohorte) viene de Q.colorSpec,
 // generada en Python, así front y back aplican EXACTAMENTE la misma regla.
+
 const COLOR_SPEC = Q.colorSpec || {
   robustPrefixes: ROBUST_PREFIXES,
   zband: { greenMax: 1.0, amberMax: 3.0 },
-  absolute: { 'ImageQuality_PercentMaximal_': { lo: 0.1, hi: 1.0 } },
-  absoluteLow: { 'Intensity_Percentile_10_': { fail: 0.015, warn: 0.02 } },
+  absolute: { 'ImageQuality_PercentMaximal_': { lo: 0.1, hi: 1.0 },
+              'Ratio_P10/P90': { lo: 0.4, hi: 0.5 }  },
   colors: { green: '#4bd760', amber: '#ffbe00', red: '#ff4444' },
 };
 const CLR = COLOR_SPEC.colors;
-const ABSOLUTE_LOW = COLOR_SPEC.absoluteLow || {};
 
-function _absoluteLowCuts(col) {
-  for (const prefix of Object.keys(ABSOLUTE_LOW)) {
-    if (col.startsWith(prefix)) return ABSOLUTE_LOW[prefix];
-  }
-  return null;
-}
 function _colorMode(col) {
   if (COLOR_SPEC.robustPrefixes.some(p => col.startsWith(p))) return 'zband';
-  if (_absoluteLowCuts(col)) return 'absolute_low';
   return 'absolute';
 }
 function _absoluteCuts(col) {
@@ -73,7 +66,6 @@ function _zco(col, plateName, well) {
 }
 // Color de UN valor.
 //   zband        → por |z_co| (ignora value).
-//   absolute_low → BAJO = malo: rojo <fail, ambar fail..warn, verde >warn.
 //   absolute     → ALTO = malo: verde <lo, ambar lo..hi, rojo >hi.
 function colorForValue(col, value, zco) {
   const mode = _colorMode(col);
@@ -83,14 +75,6 @@ function colorForValue(col, value, zco) {
     if (az <= COLOR_SPEC.zband.greenMax) return CLR.green;
     if (az <= COLOR_SPEC.zband.amberMax) return CLR.amber;
     return CLR.red;
-  }
-  if (mode === 'absolute_low') {
-    if (value == null || (typeof value === 'number' && isNaN(value))) return null;
-    const cuts = _absoluteLowCuts(col);
-    if (!cuts) return null;
-    if (value < cuts.fail) return CLR.red;
-    if (value <= cuts.warn) return CLR.amber;
-    return CLR.green;
   }
   if (value == null || (typeof value === 'number' && isNaN(value))) return null;
   const cuts = _absoluteCuts(col);
@@ -111,9 +95,9 @@ function worstColorOf(colors) {
   return null;
 }
 const METRIC_GROUPS = [
-  { label: 'PowerLogLogSlope',        specs: SLOPE_SPECS  },
-  { label: 'PercentMaximal',   specs: PCT_MAX_SPECS  },
-  { label: 'Percentile10',    specs: PCT_MIN_SPECS  },
+  { label: 'Blur (PowerLogLogSlope)',        specs: SLOPE_SPECS   },
+  { label: 'Debris (PercentMaximal)',   specs: DEBRIS_SPECS  }  ,
+  { label: 'Low density (Ratio_P10/P90)',    specs: L_DENS_SPECS    },
   { label: 'MedianIntensity', specs: MEDIANINT_SPECS },
 ];
  
@@ -265,13 +249,13 @@ function arrMedian(arr) {
             : `<span style="color:#4bd760;">0</span>`}
       </td>
       <td style="text-align:center;font-family:monospace;">
-        ${(RED_COUNTS.pctmax[p]||0) > 0
-            ? `<span style="color:#ff4444;font-weight:700;">${RED_COUNTS.pctmax[p]}</span>`
+        ${(RED_COUNTS.debris[p]||0) > 0
+            ? `<span style="color:#ff4444;font-weight:700;">${RED_COUNTS.debris[p]}</span>`
             : `<span style="color:#4bd760;">0</span>`}
       </td>
       <td style="text-align:center;font-family:monospace;">
-        ${(RED_COUNTS.pctmin[p]||0) > 0
-            ? `<span style="color:#ff4444;font-weight:700;">${RED_COUNTS.pctmin[p]}</span>`
+        ${(RED_COUNTS.low_density[p]||0) > 0
+            ? `<span style="color:#ff4444;font-weight:700;">${RED_COUNTS.low_density[p]}</span>`
             : `<span style="color:#4bd760;">0</span>`}
       </td>
       <td style="text-align:center;font-family:monospace;">
@@ -310,7 +294,7 @@ function renderPlate(idx) {
  
   const pd = DATA[name];
   document.getElementById('overview-img').src =
-    `data:image/jpeg;base64,${pd.overview_b64}`;
+    `data:image/webp;base64,${pd.overview_b64}`;
   buildOverlaySVG(name);
  
   document.getElementById('well-info').innerHTML =
@@ -474,20 +458,17 @@ function pcaHighlightWell(plateName, well) {
   if (window.Plotly) renderPCA();
 }
  
-// ── Well info panel ───────────────────────────────────────────────────────────
-const ALL_METRIC_SPECS = [...SLOPE_SPECS, ...PCT_MAX_SPECS,
-                          ...PCT_MIN_SPECS, ...MEDIANINT_SPECS];
+// ── Well info panel ────────────────────── ─────────────────────────────────────
+const ALL_METRIC_SPECS = [...SLOPE_SPECS, ...DEBRIS_SPECS,
+                          ...L_DENS_SPECS, ...MEDIANINT_SPECS];
 
 // ── Quality-criteria toggles (Plate Browser) ────────────────────────────────
 // Which metric families count toward a well's overall colour verdict. All on by
 // default. Disabling one removes it from the verdict so other error sources
 // become visible. This ONLY affects the verdict colour (overview + montage); the
 // per-metric detail tables still list every metric.
-// Nota (punto 4): el criterio "pctmin" es ahora Intensity_Percentile_10 por canal
-// (piso de intensidad de la imagen), que reemplaza por completo a PercentMinimal.
-// Se colorea por ratio vs la mediana de cohorte del canal (bajo = fondo negro).
-const VERDICT_FAMILIES = { slope: SLOPE_SPECS, pctmax: PCT_MAX_SPECS,
-                           pctmin: PCT_MIN_SPECS, medint: MEDIANINT_SPECS };
+const VERDICT_FAMILIES = { slope: SLOPE_SPECS, debris: DEBRIS_SPECS,
+                           ldens: L_DENS_SPECS, medint: MEDIANINT_SPECS };
 const activeCriteria = new Set(Object.keys(VERDICT_FAMILIES));  // all active
 
 // Specs used to compute a well/site verdict, honouring the active toggles.
@@ -579,7 +560,7 @@ function renderWellMontage(plateName, well) {
   const nGrid    = 3;  // ceil(sqrt(9)); montage is padded to a full 3×3
   el.innerHTML = `
     <div class="montage-wrap">
-      <img src="data:image/jpeg;base64,${b64}" alt="Well ${well} montage">
+      <img src="data:image/webp;base64,${b64}" alt="Well ${well} montage">
       <svg class="montage-overlay" viewBox="0 0 ${nGrid} ${nGrid}"
            preserveAspectRatio="none"></svg>
     </div>`;
@@ -705,7 +686,7 @@ function _drawSiteCrop(plateName, well, site) {
                   0, 0, canvas.width, canvas.height);
   };
   img.onerror = () => { panel.style.display = 'none'; };
-  img.src = 'data:image/jpeg;base64,' + b64;
+  img.src = 'data:image/webp;base64,' + b64;
 }
 
 // ── Site-level metric tables (QC Metrics / Cell Counts) ───────────────────────
@@ -730,8 +711,7 @@ const SITE_IDS = Array.from({length: N_SITES}, (_, i) => i + 1);
 // Filas de la tabla QC para un canal dado: [{label, specGroup}] → col por canal.
 const QC_ROW_DEFS = [
   { label: 'PowerLogLogSlope', specs: SLOPE_SPECS   },
-  { label: 'PercentMaximal',   specs: PCT_MAX_SPECS },
-  { label: 'Percentile10',    specs: PCT_MIN_SPECS },
+  { label: 'PercentMaximal',   specs: DEBRIS_SPECS },
   { label: 'MedianIntensity',  specs: MEDIANINT_SPECS },
 ];
 
@@ -822,9 +802,9 @@ function renderCountsSiteTable(plateName, well) {
   }
   wrap.style.display = 'block';
   document.getElementById('counts-site-table-title').textContent =
-    `Site-level counts — ${well}`;
+    `Site-level counts & density — ${well}`;
 
-  const header = ['Count', ...SITE_IDS.map(s => `Site ${s}`), 'Well'];
+  const header = ['Metric', ...SITE_IDS.map(s => `Site ${s}`), 'Well'];
   const COUNT_ROWS = [
     ['Cells',      'Count_Cells'],
     ['Nuclei',     'Count_Nuclei'],
@@ -836,6 +816,20 @@ function renderCountsSiteTable(plateName, well) {
     const cells = SITE_IDS.map(s => fmtCount(_siteVal(plateName, well, s, col)));
     cells.push(fmtCount(_wellVal(plateName, well, col)));  // suma por well (Python)
     return { label, cells };
+  });
+
+  // Low density: no es un conteo sino una métrica QC con regla de color propia.
+  // Decimales (no Math.round, que convertiría 0.34 en 0) y color del resolver
+  // único. Si la spec no llegó en el payload, la lista está vacía y no se añade.
+  L_DENS_SPECS.forEach(spec => {
+    const fmtMetric = v => {
+      if (v == null) return '<span class="site-na">—</span>';
+      const color = specColor(v, spec, plateName, well);
+      return `<span style="color:${color || 'var(--text)'}">${fmt3(v)}</span>`;
+    };
+    const cells = SITE_IDS.map(s => fmtMetric(_siteVal(plateName, well, s, spec.col)));
+    cells.push(fmtMetric(_wellVal(plateName, well, spec.col)));  // agregado por well (Python)
+    rows.push({ label: spec.title, cells });
   });
 
   document.getElementById('counts-site-table').innerHTML =

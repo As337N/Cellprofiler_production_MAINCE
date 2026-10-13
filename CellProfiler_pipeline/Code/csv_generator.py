@@ -246,11 +246,12 @@ def prepare_CSVs(
     name_csv: str,
     channels: dict,
     compiled_regex: re.Pattern,
+    zplane: int,
+    discard_sites,
     illum: bool = False,
     masks: bool = False,
     max_workers: int | None = None,
-    plates2process: list | None = None,
-    zplane: int = 2,) -> None: #TODO: 1 en JUMP-MoA, 2 en MAINCE
+    plates2process: list | None = None,) -> None: 
     """
         Run the full metadata extraction pipeline and save final CSV output.
 
@@ -280,7 +281,15 @@ def prepare_CSVs(
         compiled_regex=compiled_regex
     )
 
+
     df = df.filter(pl.col("Metadata_Plane") == zplane)
+
+    if discard_sites:
+        join_cols = ["Metadata_Plate", "Metadata_Well",	"Metadata_Field"]
+        df_discard = pl.read_parquet(discard_sites)
+        df = df.join(df_discard.select(join_cols),
+                    on=join_cols,
+                    how="anti")
 
     logger.info("Pivoting metadata table")
     df_wide = pivot_df(df, illum=illum, masks=masks)
@@ -301,8 +310,10 @@ if __name__ == "__main__":
     parser.add_argument("--masks", action="store_true", help="Include RNA mask metadata")
     parser.add_argument("--workers", type=int, default=None, help="Number of worker processes")
     parser.add_argument("--plates2process", nargs='*', help="List of plates to be processed")
+    parser.add_argument("--zplane", type=int, default=None, help="Z-Plane to analyze")
     parser.add_argument("--channel_dict", required=True, help='JSON Name→Number, e.g. {"Mito":"1",...}')
     parser.add_argument("--filename_regex", required=True, help="Regex with the following groups: Row/Column/Field/Plane/Channel")
+    parser.add_argument("--discard_sites", required=False, help="Path of the parquet with sites to be discarted due to QC problems")
 
     args = parser.parse_args()
 
@@ -319,6 +330,8 @@ if __name__ == "__main__":
         masks=args.masks,
         max_workers=args.workers,
         plates2process=args.plates2process,
+        zplane=args.zplane,
         channels=channels,
-        compiled_regex=compiled_regex
+        compiled_regex=compiled_regex,
+        discard_sites=args.discard_sites,
     )

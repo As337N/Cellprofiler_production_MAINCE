@@ -27,7 +27,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 # Page geometry (A4 landscape, inches).
 _PAGE_W, _PAGE_H = 11.69, 8.27
 _RED_KEYS = [("slope", "Slope"), ("medint", "MedInt"),
-             ("pctmax", "PctMax"), ("pctmin", "PctMin")]
+             ("debris", "Debris"), ("low_density", "LowDensity")]
 
 
 def summary_pdf(payload: dict, output_path: Path) -> None:

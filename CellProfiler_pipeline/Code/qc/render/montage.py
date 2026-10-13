@@ -65,7 +65,7 @@ def well_label(row: int, col: int) -> str:
     return f"{chr(ord('A') + row - 1)}{col:02d}"
 
 
-def load_and_downscale(path: Path, scale: float = 0.5) -> np.ndarray:
+def load_and_downscale(path: Path, scale: float = 0.4) -> np.ndarray:
     with tiff.TiffFile(path) as tf:
         img = tf.pages[0].asarray()
     if img.dtype != np.uint8:

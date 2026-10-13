@@ -31,10 +31,25 @@ from qc import profiles
 
 # Umbrales absolutos
 PCTMAX_FAIL = 1.0            # >  fail
-PERCENTILE10_FAIL = 0.015    # <  fail
+RATIO_P1090_FAIL = 0.5    # >  fail
 CELLS_NUCLEI_RATIO_FAIL = 0.95   # <  fail
 LOW_CELL_COUNT_FAIL = 70     # <  fail
-ZSCORE_FAIL = 3.0            # |z| > fail (robustas)
+
+# Corte de z robusto por métrica (|z_pl| > k O |z_co| > k = fail). MedianIntensity
+# usa 5 sigma (más tolerante a corrimientos de intensidad por la perturbación);
+# Slope usa 3 sigma.
+ZSCORE_FAIL = {"PowerLogLogSlope": 3.0, "MedianIntensity": 5.0}
+ZSCORE_FAIL_DEFAULT = 3.0
+
+# Robustez del MAD frente a dispersión casi nula. Un MAD diminuto convierte
+# variaciones triviales en z gigantes (falsos positivos). Se aplica un PISO:
+#   MAD_efectivo = max(MAD, MAD_FLOOR_FRAC*|mediana|, MAD_FLOOR_ABS)
+# El z por PLACA solo se calcula con la MAD real si la placa tiene > MIN_PLATE_SITES
+# sitios válidos; con <= ese número se usa el piso (opción 1) y se registra la
+# placa/columna para una nota en el reporte.
+MIN_PLATE_SITES = 15
+MAD_FLOOR_FRAC = 0.02        # 2% de |mediana|
+MAD_FLOOR_ABS = 1e-9         # mínimo absoluto para el caso mediana ~ 0
 
 ROBUST_METRICS = profiles.ROBUST_METRICS          # ("PowerLogLogSlope", "MedianIntensity")
 _CRIT_NAME = {"PowerLogLogSlope": "slope", "MedianIntensity": "medint"}
@@ -43,12 +58,12 @@ CELLS_COL = profiles.COUNT_COLS["Cells"]          # Count_Cells
 NUCLEI_COL = profiles.COUNT_COLS["Filtered"]      # Count_Nuclei
 
 
+def _zcut(metric: str) -> float:
+    return ZSCORE_FAIL.get(metric, ZSCORE_FAIL_DEFAULT)
+
+
 def _robust_col(metric: str, ch: str) -> str:
     return f"ImageQuality_{metric}_{ch}"
-
-
-def _percentile10_col(ch: str) -> str:
-    return f"Intensity_Percentile_10_{ch}"
 
 
 def _pctmax_col(ch: str) -> str:
@@ -59,56 +74,160 @@ def _valid(v) -> bool:
     return v is not None and not (isinstance(v, float) and v != v)
 
 
-def cohort_site_mad(site_qc: dict, col: str):
-    """(mediana, MAD) de una columna sobre TODOS los sitios de la cohorte.
+def _mad_floor(med: float) -> float:
+    return max(MAD_FLOOR_FRAC * abs(med), MAD_FLOOR_ABS)
 
-    MAD = mediana(|x - mediana|), con guardia MAD==0 -> 1.0 (igual que
-    scores.mad_scores). Devuelve (None, None) si <4 valores válidos.
+
+def _mad_ref(vals: list, apply_floor: bool = True):
+    """(mediana, MAD_efectivo, floored) de una lista.
+
+    MAD = mediana(|x-mediana|). Si apply_floor, MAD_efectivo = max(MAD, piso) y
+    floored indica si el piso llegó a dominar (MAD real < piso). None si <4 valores.
     """
     from statistics import median
-    vals = []
-    for wells in site_qc.values():
-        for fields in wells.values():
-            for sv in fields.values():
-                v = sv.get(col)
-                if _valid(v):
-                    vals.append(float(v))
     if len(vals) < 4:
-        return None, None
+        return None, None, False
     med = median(vals)
-    mad = median([abs(v - med) for v in vals]) or 1.0
-    return med, mad
+    mad_raw = median([abs(v - med) for v in vals])
+    if apply_floor:
+        floor = _mad_floor(med)
+        if mad_raw < floor:
+            return med, floor, True
+        return med, mad_raw or floor, False
+    return med, (mad_raw or 1.0), False
+
+
+def cohort_site_mad(site_qc: dict, col: str):
+    """(mediana, MAD_efectivo, floored) sobre TODOS los sitios de la cohorte."""
+    vals = [float(sv[col]) for wells in site_qc.values()
+            for fields in wells.values() for sv in fields.values()
+            if col in sv and _valid(sv[col])]
+    return _mad_ref(vals)
+
+
+def plate_site_mad(plate_fields: dict, col: str):
+    """(mediana, MAD_efectivo, floored) sobre los sitios de UNA placa.
+
+    Si la placa tiene <= MIN_PLATE_SITES sitios válidos, el MAD real es
+    inestable: se fuerza el piso (floored=True) para no inflar el z. Devuelve
+    (None, None, False) con <4 valores.
+    """
+    vals = [float(sv[col]) for fields in plate_fields.values()
+            for sv in fields.values()
+            if col in sv and _valid(sv[col])]
+    if len(vals) < 4:
+        return None, None, False
+    if len(vals) <= MIN_PLATE_SITES:
+        from statistics import median
+        med = median(vals)
+        return med, _mad_floor(med), True     # pocos sitios → piso
+    return _mad_ref(vals)
 
 
 def robust_site_refs(site_qc: dict, profile: profiles.DatasetProfile) -> dict:
-    """{col: (mediana, MAD)} de cohorte por sitio para cada métrica robusta×canal."""
-    refs = {}
-    for metric in ROBUST_METRICS:
-        for ch in profile.channels:
-            col = _robust_col(metric, ch)
-            med, mad = cohort_site_mad(site_qc, col)
+    """Referencias de z robusto por sitio, placa y cohorte.
+
+    Returns {
+      "cohort": {col: (med, mad, floored)},
+      "plate":  {plate: {col: (med, mad, floored)}},
+      "floored": [ (scope, plate_or_None, col), ... ]   # para la nota del reporte
+    }
+    """
+    cols = [_robust_col(m, ch) for m in ROBUST_METRICS for ch in profile.channels]
+    cohort, plate, floored = {}, {}, []
+    for col in cols:
+        med, mad, fl = cohort_site_mad(site_qc, col)
+        if med is not None:
+            cohort[col] = (med, mad, fl)
+            if fl:
+                floored.append(("cohort", None, col))
+    for pname, wells in site_qc.items():
+        plate[pname] = {}
+        for col in cols:
+            med, mad, fl = plate_site_mad(wells, col)
             if med is not None:
-                refs[col] = (med, mad)
-    return refs
+                plate[pname][col] = (med, mad, fl)
+                if fl:
+                    floored.append(("plate", pname, col))
+    return {"cohort": cohort, "plate": plate, "floored": floored}
+
+
+def robust_site_fail(metric: str, ch: str, value, plate: str,
+                     refs: dict) -> bool:
+    """True si el sitio falla la métrica robusta por z de PLACA o de COHORTE.
+
+    Doble guardia: |z_pl| > k O |z_co| > k, con k = _zcut(metric) (3 Slope, 5
+    MedInt). refs es la salida de robust_site_refs. Si falta una referencia, esa
+    mitad de la guardia simplemente no dispara (no rompe).
+    """
+    if not _valid(value):
+        return False
+    col = _robust_col(metric, ch)
+    k = _zcut(metric)
+    v = float(value)
+    # Cohorte
+    cref = refs.get("cohort", {}).get(col)
+    if cref is not None:
+        med, mad, _ = cref
+        if abs((v - med) / mad) > k:
+            return True
+    # Placa
+    pref = refs.get("plate", {}).get(plate, {}).get(col)
+    if pref is not None:
+        med, mad, _ = pref
+        if abs((v - med) / mad) > k:
+            return True
+    return False
+
+
+def well_robust_verdict(site_qc: dict, profile: profiles.DatasetProfile,
+                        robust_refs: dict | None = None) -> dict:
+    """Veredicto por-pozo del PEOR sitio para las métricas robustas.
+
+    Un pozo "falla" una métrica si CUALQUIER sitio suyo la falla (doble guardia
+    z placa/cohorte). Es la regla única que el collage y el overview usan para el
+    borde del tile (el tile refleja el peor sitio).
+
+    Returns {plate: {well: {metric: bool}}}. metric ∈ ROBUST_METRICS.
+    Los módulos de render consultan este dict precomputado — no recalculan z.
+    """
+    if robust_refs is None:
+        robust_refs = robust_site_refs(site_qc, profile)
+    out: dict = {}
+    for plate, wells in site_qc.items():
+        out[plate] = {}
+        for well, fields in wells.items():
+            wv = {}
+            for metric in ROBUST_METRICS:
+                failed = False
+                for ch in profile.channels:
+                    for sv in fields.values():
+                        if robust_site_fail(metric, ch, sv.get(_robust_col(metric, ch)),
+                                            plate, robust_refs):
+                            failed = True
+                            break
+                    if failed:
+                        break
+                wv[metric] = failed
+            out[plate][well] = wv
+    return out
 
 
 def site_failed_criteria(site_vals: dict, profile: profiles.DatasetProfile,
-                         robust_refs: dict) -> list[str]:
-    """Lista de criterios que este sitio rompe (vacía si pasa todo)."""
+                         robust_refs: dict, plate: str) -> list[str]:
+    """Lista de criterios que este sitio rompe (vacía si pasa todo).
+
+    robust_refs: salida de robust_site_refs (cohorte + placa).
+    plate: nombre de la placa del sitio (para el z por placa).
+    """
     failed = []
 
-    # Robustas por z de sitio
+    # Robustas: doble guardia z por placa O cohorte (3 sigma Slope, 5 MedInt).
     for metric in ROBUST_METRICS:
         crit = _CRIT_NAME.get(metric, metric.lower())
         for ch in profile.channels:
-            col = _robust_col(metric, ch)
-            ref = robust_refs.get(col)
-            v = site_vals.get(col)
-            if ref is None or not _valid(v):
-                continue
-            med, mad = ref
-            z = (float(v) - med) / mad
-            if abs(z) > ZSCORE_FAIL:
+            v = site_vals.get(_robust_col(metric, ch))
+            if robust_site_fail(metric, ch, v, plate, robust_refs):
                 failed.append(f"{crit}:{ch}")
 
     # PercentMaximal > 1.0
@@ -117,11 +236,10 @@ def site_failed_criteria(site_vals: dict, profile: profiles.DatasetProfile,
         if _valid(v) and float(v) > PCTMAX_FAIL:
             failed.append(f"pctmax:{ch}")
 
-    # Percentile10 < 0.015
-    for ch in profile.channels:
-        v = site_vals.get(_percentile10_col(ch))
-        if _valid(v) and float(v) < PERCENTILE10_FAIL:
-            failed.append(f"percentile10:{ch}")
+    # Ratio_P10/P90 > 0.5
+    v = site_vals.get("Ratio_P10/P90")
+    if _valid(v) and float(v) > RATIO_P1090_FAIL:
+        failed.append(f"Ratio_P10/P90")
 
     # Cells/Nuclei ratio < 0.95
     cells = site_vals.get(CELLS_COL)
@@ -137,6 +255,19 @@ def site_failed_criteria(site_vals: dict, profile: profiles.DatasetProfile,
     return failed
 
 
+def floored_note(robust_refs: dict) -> str | None:
+    """Nota para el reporte: qué placas usaron el piso de MAD por tener <=
+    MIN_PLATE_SITES sitios (z por placa menos fiable). None si ninguna.
+    """
+    floored = robust_refs.get("floored", [])
+    plates = sorted({p for scope, p, _ in floored if scope == "plate" and p})
+    if not plates:
+        return None
+    return (f"Per-plate robust z used a MAD floor for {len(plates)} plate(s) with "
+            f"≤{MIN_PLATE_SITES} sites ({', '.join(plates)}): site-level plate "
+            f"z-scores there are less sensitive. Cohort z is unaffected.")
+
+
 def flagged_sites_rows(site_qc: dict, profile: profiles.DatasetProfile) -> list[dict]:
     """Filas (dict) de SOLO los sitios fallidos: metadatos + todas las mediciones
     + fail + failed_criteria. El orden de columnas se resuelve al escribir.
@@ -146,7 +277,7 @@ def flagged_sites_rows(site_qc: dict, profile: profiles.DatasetProfile) -> list[
     for plate, wells in site_qc.items():
         for well, fields in wells.items():
             for field, sv in fields.items():
-                failed = site_failed_criteria(sv, profile, robust_refs)
+                failed = site_failed_criteria(sv, profile, robust_refs, plate)
                 if not failed:
                     continue
                 row = {"Metadata_Plate": plate, "Metadata_Well": well,

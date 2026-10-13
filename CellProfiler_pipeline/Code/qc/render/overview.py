@@ -14,13 +14,12 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from qc.render.montage import _font, well_label
-from qc.stats.expressions import passes_absolute_scalar as _passes_absolute
 
 BORDER_METRIC = "PowerLogLogSlope"
 
 
 def _collage_to_b64(collage_arr: np.ndarray, web_scale: float = 1.0,
-                    quality: int = 72) -> str:
+                    quality: int = 60) -> str:
     """Resize array and return as base64 JPEG string."""
     h, w = collage_arr.shape[:2]
     if web_scale != 1.0:
@@ -30,7 +29,7 @@ def _collage_to_b64(collage_arr: np.ndarray, web_scale: float = 1.0,
     else:
         pil = Image.fromarray(collage_arr)
     buf = io.BytesIO()
-    pil.save(buf, format="JPEG", quality=quality,
+    pil.save(buf, format="WEBP", quality=quality,
              optimize=True, progressive=True, subsampling=2)
     return base64.b64encode(buf.getvalue()).decode()
 
@@ -52,7 +51,10 @@ def _well_montage_b64(montages: dict, well_key: tuple,
 
 def _make_overview_grid(montages: dict, plate_qc: dict, plate_map: dict,
                         plate_rows: int = 8, plate_cols: int = 12,
-                        well_px: int = 90) -> tuple:
+                        well_px: int = 90, robust_verdict: dict | None = None) -> tuple:
+    # robust_verdict: {well: {metric: bool_fail}} del peor sitio; el borde del
+    # thumbnail refleja el veredicto de Slope (BORDER_METRIC). Sin él → neutro.
+    robust_verdict = robust_verdict or {}
     CW = CH = well_px
     W  = CW * plate_cols
     H  = CH * plate_rows
@@ -82,17 +84,13 @@ def _make_overview_grid(montages: dict, plate_qc: dict, plate_map: dict,
                 fdraw.rectangle([x0, y0, x0 + CW - 1, y0 + CH - 1],
                                 fill=(15, 18, 30))
 
-            results = [
-                p for col in slope_cols
-                if (v := metrics.get(col)) is not None
-                and not (isinstance(v, float) and np.isnan(v))
-                and (p := _passes_absolute(v, BORDER_METRIC)) is not None
-            ]
-            n_pass = sum(results) if results else -1
-            border = ((40, 45, 70)   if n_pass < 0 else
-                      (55, 200, 70)  if n_pass == len(results) else
-                      (210, 35, 35)  if n_pass == 0 else
-                      (220, 130, 0))
+            wv = robust_verdict.get(wl)
+            if not wv or BORDER_METRIC not in wv:
+                border = (40, 45, 70)          # sin veredicto → neutro
+            elif wv[BORDER_METRIC]:
+                border = (210, 35, 35)         # falla (peor sitio)
+            else:
+                border = (55, 200, 70)         # pasa
             fdraw.rectangle([x0, y0, x0 + CW - 1, y0 + CH - 1],
                             outline=border, width=2)
             fdraw.text((x0 + 2, y0 + 1), wl, fill=(220, 230, 255), font=flabel)

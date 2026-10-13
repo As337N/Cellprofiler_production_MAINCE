@@ -1,7 +1,8 @@
 FROM python:3.8-bullseye
 
-# Instalar dependencias del sistema
-RUN apt-get update && apt-get install -y \
+RUN sed -i 's|deb.debian.org|archive.debian.org|g; /bullseye-security/d' /etc/apt/sources.list
+
+RUN apt-get -o Acquire::Check-Valid-Until=false update && apt-get install -y \
     openjdk-11-jdk-headless \
     build-essential \
     libgtk-3-dev \

@@ -142,7 +142,7 @@ create_output_dirs() {
 #  Resource detection → prints MAX_JOBS to stdout
 # ============================================================
 calculate_max_jobs() {
-  local ram_per_batch="${CP_RAM_PER_BATCH:-8000}"   # MiB per worker
+  local ram_per_batch="${CP_RAM_PER_BATCH:-10000}"   # MiB per worker
 
   local nproc mem_free max_by_ram max_jobs
   nproc=$(nproc)
@@ -184,7 +184,7 @@ count_image_sets() {
 launch_batches() {
   local batch_data="$1" out_root="$2" total_sets="$3" batch_size="$4" max_jobs="$5"
   local start=1 end outdir tag rc=0
-  local -A PIDS
+  local -A PIDS=()
   local -a TAGS=()
 
   while [ "$start" -le "$total_sets" ]; do
@@ -192,6 +192,15 @@ launch_batches() {
     [ "$end" -gt "$total_sets" ] && end="$total_sets"
     tag="${start}_${end}"
     outdir="$out_root/batch_${tag}"
+    TAGS+=( "$tag" )
+    start=$(( end + 1 ))
+
+    # Skip batches that already finished successfully
+    if [ "$(cat "$outdir/rc" 2>/dev/null || true)" = "0" ]; then
+      echo "[INFO] Batch ${tag} already completed, skipping"
+      continue
+    fi
+
     mkdir -p "$outdir"
     rm -f "$outdir/rc"
 
@@ -203,21 +212,22 @@ launch_batches() {
     done
 
     (
-      cellprofiler -c -r -p "$batch_data" -f "$start" -l "$end" -o "$outdir" \
-        > "$outdir/cp.log" 2>&1
-      echo $? > "$outdir/rc"
+      batch_status=0
+      cellprofiler -c -r -p "$batch_data" -f "${tag%_*}" -l "${tag#*_}" -o "$outdir" \
+        > "$outdir/cp.log" 2>&1 || batch_status=$?
+      echo "$batch_status" > "$outdir/rc"
     ) &
     PIDS[$!]="$tag"
-    TAGS+=( "$tag" )
-    start=$(( end + 1 ))
   done
 
   wait
 
   for tag in "${TAGS[@]}"; do
     outdir="$out_root/batch_${tag}"
-    if [ "$(cat "$outdir/rc" 2>/dev/null)" != "0" ]; then
-      echo "[ERROR] Batch ${tag} falló (revisar ${outdir}/cp.log)" >&2
+    local batch_rc
+    batch_rc="$(cat "$outdir/rc" 2>/dev/null || echo "missing")"
+    if [ "$batch_rc" != "0" ]; then
+      echo "[ERROR] Batch ${tag} failed (rc=${batch_rc}, check ${outdir}/cp.log)" >&2
       rc=1
     fi
   done

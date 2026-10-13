@@ -38,7 +38,7 @@ def _fetch_plotly_js() -> str:
     except Exception as e:
         print(f"[warn] Could not fetch Plotly: {e}. HTML will use CDN fallback.")
         return ('/* CDN fallback */\n'
-                f'document.write(\'<script src="{_PLOTLY_URL}"></script>\');')
+                f'document.write(\'<script src="{_PLOTLY_URL}"><\\/script>\');')
 
 
 def _read_asset(name: str) -> str:
@@ -64,7 +64,10 @@ def render_report(cohort_name: str, plates_data: list[dict],
     qc_payload = payload if payload is not None else \
         build_payload(cohort_name, plates_data, profile)
 
-    payload_js = "window.__QC__ = " + json.dumps(qc_payload) + ";"
+    # "</" -> "<\/" so a "</script>" inside any string (compound name, path)
+    # can never terminate the inline <script> block early.
+    payload_js = ("window.__QC__ = "
+                  + json.dumps(qc_payload).replace("</", "<\\/") + ";")
     generated = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     html = _read_asset("report.html")
