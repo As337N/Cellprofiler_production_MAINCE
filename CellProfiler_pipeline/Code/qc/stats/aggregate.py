@@ -37,7 +37,7 @@ from qc import profiles
 # -1 -> peor es el mínimo.
 #   PercentMaximal: peor = máximo (más saturación).
 #   Ratio_P10/P90: peor = MÍNIMO (piso de intensidad más bajo = fondo
-#     negro predominante). Reemplaza a PercentMinimal.
+#     negro predominante). 
 PCT_WORST_DIRECTION = {
     "ImageQuality_PercentMaximal_": +1,
     "Ratio_P10/P90": +1,

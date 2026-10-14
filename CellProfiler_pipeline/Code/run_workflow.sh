@@ -13,7 +13,7 @@ run_section() { [[ " ${SECTIONS[*]} " == *" $1 "* ]]; }
 
 # ============================================================
 create_output_dirs $OUTPUT $IMAGES_WORKSPACE
-BATCH_SIZE=1000
+BATCH_SIZE=700
 
 if run_section 3; then
   echo "===***=== [3] Prepare QC ===***==="
@@ -49,9 +49,6 @@ if run_section 5; then
   NAME_MP="V_MP"
   #TODO: Falta integrar --discard_sites, para descartar sitios flageados
   python $SCRIPT_PY_CELLPROFILER -i $IMAGES_WORKSPACE -o $PATH_CSV --name_csv $NAME_MP --illum --channel_dict "$CHANNEL_DICT" --filename_regex "$FILENAME_REGEX" --zplane "$ZPLANE"
-
-  CSV_COUNT=$(find "$PATH_CPPIPE" -maxdepth 1 -name "*.csv" | wc -l)
-  echo "[INFO] Amount of CSV files to be processed: $CSV_COUNT in: $PATH_CPPIPE"
 
   generar_batchfiles "$PATH_CSV/$NAME_MP.csv" "$TEMPLATE_CPPIPE_PROFILING" "$PATH_CPPIPE" "$PATH_BATCH_PIPELINES" "$PATH_PROFILES" 1
   mv "$PATH_BATCH_PIPELINES/Batch_data.h5" \
