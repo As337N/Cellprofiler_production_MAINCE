@@ -7,6 +7,7 @@ from typing import Union, List, Dict, Iterable
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 import polars as pl
+import tifffile
 from tqdm import tqdm
 import os, json
 
@@ -39,13 +40,40 @@ def get_well(row: Union[str, int], col: Union[str, int]) -> str:
     return f"{row_corr}{int(col):02d}"
 
 
+def _is_readable_tiff(path: Path) -> tuple[bool, str]:
+    """
+        Check that a TIFF can be opened and its pixel data decoded.
+
+        Reading the pixels (not only the header) is what detects truncated
+        files, whose header is often intact.
+
+        Parameters
+        ----------
+        path : Path
+            Path to the TIFF file.
+
+        Returns
+        -------
+        tuple[bool, str]
+            (True, "") if readable, otherwise (False, error description).
+    """
+    try:
+        with tifffile.TiffFile(path) as tif:
+            tif.pages[0].asarray()
+        return True, ""
+    except Exception as e:
+        return False, repr(e)
+
+
 def _parse_single_file(
     path: Path,
     illum: bool,
     masks: bool,
     compiled_regex: re.Pattern,
     channels: Dict[int, str],
-    output: Path | None,) -> dict | None:
+    output: Path | None,
+    check_integrity: bool = False,
+    check_plane: int | None = None,) -> dict | None:
     """
         Parse metadata from a single image file.
 
@@ -59,11 +87,17 @@ def _parse_single_file(
             Whether to include RNA mask fields.
         output : Path | None
             Output directory used to build derived paths.
+        check_integrity : bool, default False
+            Whether to verify that the TIFF can be decoded.
+        check_plane : int | None, default None
+            If set, only files of this plane are verified (the rest are
+            discarded later, so checking them would be wasted work).
 
         Returns
         -------
         dict | None
-            Parsed metadata row, or None if the file does not match criteria.
+            Parsed metadata row, None if the file does not match criteria, or
+            {"_corrupt": path, "_error": msg} if the integrity check fails.
     """
     match = compiled_regex.match(path.name)
     if not match:
@@ -77,6 +111,11 @@ def _parse_single_file(
 
     plate_meta = plate_match.groupdict()
     ch_num = int(meta["Channel"])
+
+    if check_integrity and (check_plane is None or int(meta["Plane"]) == check_plane):
+        ok, err = _is_readable_tiff(path)
+        if not ok:
+            return {"_corrupt": str(path), "_error": err}
 
     row = {
         "Image_FileName": path.name,
@@ -93,13 +132,26 @@ def _parse_single_file(
         row["FileName_Illum"] = f"P{plate_meta['Plate']}_Illum_{channels.get(ch_num, ch_num)}.npy"
         row["PathName_Illum"] = str(output.parents[0] / "Illum_files")
 
-    if masks and output is not None:
+    if masks == 1 and output is not None:
         is_syto = channels.get(ch_num) == "Syto"
         is_z2 = int(meta["Plane"]) == 2
         row["Image_FileName_RNA_mask"] = (
             re.sub(r"\.tiff?$", ".png", path.name) if (is_syto and is_z2) else None
         )
         row["Image_PathName_RNA_mask"] = str(output.parents[0] / "Cellpose_seg" / f"P_{plate_meta['Plate']}")
+
+    if masks == 2 and output is not None:
+        is_syto = channels.get(ch_num) == "Syto"
+        is_hchs = channels.get(ch_num) == "Hoechst"
+        is_z2 = int(meta["Plane"]) == 2
+        row["Image_FileName_RNA_mask"] = (
+            (f"{path.stem}_cells_masks_P{plate_meta['Plate']}.tiff") if (is_syto and is_z2) else None
+        )
+        row["Image_FileName_DNA_mask"] = (
+            (f"{path.stem}_nuclei_masks_P{plate_meta['Plate']}.tiff") if (is_hchs and is_z2) else None
+        )
+        row["Image_PathName_RNA_mask"] = str(output.parents[0] / "Object_masks")
+        row["Image_PathName_DNA_mask"] = str(output.parents[0] / "Object_masks")
     return row
 
 
@@ -108,11 +160,13 @@ def parse_image_dataset(
     channels: dict,
     compiled_regex: re.Pattern,
     illum: bool = False,
-    masks: bool = False,
+    masks: int = 0,
     output: Union[str, Path, None] = None,
     max_workers: int | None = None,
     plates2process: list | None = None,
-    chunk_size: int = 2000,) -> pl.DataFrame:
+    chunk_size: int = 2000,
+    check_integrity: bool = False,
+    check_plane: int | None = None,) -> pl.DataFrame:
     """
         Parse a microscopy image dataset into a structured Polars DataFrame using
         multiprocessing and chunked execution for memory efficiency.
@@ -131,6 +185,11 @@ def parse_image_dataset(
             Number of worker processes.
         chunk_size : int, default 2000
             Number of files processed per batch to limit memory usage.
+        check_integrity : bool, default False
+            Whether to verify that each TIFF can be decoded. Corrupt files are
+            logged and excluded, as if they were missing.
+        check_plane : int | None, default None
+            Restrict the integrity check to this plane.
 
         Returns
         -------
@@ -151,14 +210,33 @@ def parse_image_dataset(
     logger.info(f"Found {len(files)} image files")
 
     rows: List[dict] = []
-    worker = partial(_parse_single_file, illum=illum, masks=masks, output=output, compiled_regex=compiled_regex, channels=channels)
+    corrupt: List[dict] = []
+    worker = partial(
+        _parse_single_file,
+        illum=illum,
+        masks=masks,
+        output=output,
+        compiled_regex=compiled_regex,
+        channels=channels,
+        check_integrity=check_integrity,
+        check_plane=check_plane,
+    )
 
     with ProcessPoolExecutor(max_workers=max_workers) as ex:
         for i in tqdm(range(0, len(files), chunk_size), desc="Parsing images"):
             batch = files[i:i + chunk_size]
             for result in ex.map(worker, batch, chunksize=64):
-                if result is not None:
+                if result is None:
+                    continue
+                if "_corrupt" in result:
+                    corrupt.append(result)
+                else:
                     rows.append(result)
+
+    if check_integrity:
+        for c in sorted(corrupt, key=lambda d: d["_corrupt"]):
+            logger.warning(f"Corrupt image excluded: {c['_corrupt']} | {c['_error']}")
+        logger.info(f"{len(corrupt)} corrupt images excluded")
 
     logger.info(f"Parsed {len(rows)} valid image records")
     return pl.DataFrame(rows, infer_schema_length=None)
@@ -193,7 +271,7 @@ def _aux_pivot(df: pl.DataFrame, values_col: str, idx: list[str], channel_names:
     rename_map = {ch: f"{values_col}_{ch}" for ch in channel_names}    
     return df_aux.rename(rename_map)
 
-def pivot_df(df: pl.DataFrame, illum: bool = False, masks: bool = False) -> pl.DataFrame:
+def pivot_df(df: pl.DataFrame, illum: bool = False, masks: int = 0) -> pl.DataFrame:
     idx = ["Metadata_Plate", "Metadata_Well", "Metadata_Field"]
     channel_names = df["Metadata_Channel_name"].unique().to_list()
 
@@ -212,7 +290,7 @@ def pivot_df(df: pl.DataFrame, illum: bool = False, masks: bool = False) -> pl.D
             .join(df_illum_path, on=idx, how="inner")
         )
 
-    if masks:
+    if masks == 1 or masks ==2:
         df_masks = (
             df
             .group_by(idx)
@@ -220,25 +298,64 @@ def pivot_df(df: pl.DataFrame, illum: bool = False, masks: bool = False) -> pl.D
                   pl.first("Image_PathName_RNA_mask").alias("Image_PathName_RNA_mask")]))
 
         df_final = df_final.join(df_masks, on=idx, how="left")
-        df_final = df_final.with_columns([
-            pl.when(pl.col("Image_FileName_RNA_mask").is_null())
-            .then(
-                pl.col(f"Image_FileName_Syto")
-                .str.replace(r"\.tiff?$", ".png")
-            )
-            .otherwise(pl.col("Image_FileName_RNA_mask"))
-            .alias("Image_FileName_RNA_mask")])
+
+        if masks == 2:
+            df_masks = (
+                df
+                .group_by(idx)
+                .agg([pl.col("Image_FileName_DNA_mask").drop_nulls().first().alias("Image_FileName_DNA_mask"),
+                    pl.first("Image_PathName_DNA_mask").alias("Image_PathName_DNA_mask")]))
+
+            df_final = df_final.join(df_masks, on=idx, how="left")
 
     ordered_cols = (
         [f"Image_FileName_{ch}" for ch in channel_names]
         + [f"Image_PathName_{ch}" for ch in channel_names]
         + ([f"FileName_Illum_{ch}" for ch in channel_names]
            + [f"PathName_Illum_{ch}" for ch in channel_names] if illum else [])
-        + (["Image_FileName_RNA_mask", "Image_PathName_RNA_mask"] if masks else [])
+        + (["Image_FileName_RNA_mask", "Image_PathName_RNA_mask"] if masks==1 else [])
+        + (["Image_FileName_RNA_mask", "Image_PathName_RNA_mask", "Image_FileName_DNA_mask", "Image_PathName_DNA_mask"] if masks==2 else [])
         + idx
     )
 
     return df_final.select(ordered_cols)
+
+def drop_incomplete_rows(df_wide: pl.DataFrame, idx: list[str]) -> pl.DataFrame:
+    """
+        Remove rows with missing values (null or empty string) in any
+        non-metadata column, and log the metadata of each removed row.
+
+        Parameters
+        ----------
+        df_wide : pl.DataFrame
+            Wide-format table produced by pivot_df.
+        idx : list[str]
+            Metadata columns that identify a row (Plate, Well, Field).
+
+        Returns
+        -------
+        pl.DataFrame
+            Table containing only complete rows.
+    """
+    data_cols = [c for c in df_wide.columns if c not in idx]
+
+    is_incomplete = pl.any_horizontal(
+        [pl.col(c).is_null() | (pl.col(c) == "") for c in data_cols]
+    )
+
+    df_bad = df_wide.filter(is_incomplete).select(idx).sort(idx)
+
+    for r in df_bad.iter_rows(named=True):
+        logger.warning(
+            f"Row removed (missing data): "
+            f"Plate={r['Metadata_Plate']}, Well={r['Metadata_Well']}, Field={r['Metadata_Field']}"
+        )
+
+    logger.info(
+        f"{df_bad.height} incomplete rows removed, "
+        f"{df_wide.height - df_bad.height} rows kept"
+    )
+    return df_wide.filter(~is_incomplete)
 
 def prepare_CSVs(
     path: Union[str, Path],
@@ -249,9 +366,10 @@ def prepare_CSVs(
     zplane: int,
     discard_sites,
     illum: bool = False,
-    masks: bool = False,
+    masks: int = 0,
     max_workers: int | None = None,
-    plates2process: list | None = None,) -> None: 
+    plates2process: list | None = None,
+    check_integrity: bool = False,) -> None: 
     """
         Run the full metadata extraction pipeline and save final CSV output.
 
@@ -267,6 +385,8 @@ def prepare_CSVs(
             Whether to include RNA mask metadata.
         max_workers : int | None, default None
             Number of worker processes.
+        check_integrity : bool, default False
+            Whether to verify that TIFFs of the selected z-plane can be decoded.
     """
     #print(f"[DEBUG masks] masks: {masks}")
     logger.info("Starting metadata parsing")
@@ -278,7 +398,9 @@ def prepare_CSVs(
         max_workers=max_workers,
         plates2process=plates2process,
         channels=channels,
-        compiled_regex=compiled_regex
+        compiled_regex=compiled_regex,
+        check_integrity=check_integrity,
+        check_plane=zplane,
     )
 
 
@@ -294,6 +416,9 @@ def prepare_CSVs(
     logger.info("Pivoting metadata table")
     df_wide = pivot_df(df, illum=illum, masks=masks)
 
+    idx = ["Metadata_Plate", "Metadata_Well", "Metadata_Field"]
+    df_wide = drop_incomplete_rows(df_wide, idx)
+
     filepath = Path(output) / f"{name_csv}.csv"
     df_wide.write_csv(filepath)
     logger.info(f"Final metadata CSV written to: {filepath}")
@@ -307,17 +432,16 @@ if __name__ == "__main__":
     parser.add_argument("-o", "--output", required=True, help="Output directory")
     parser.add_argument("--name_csv", required=True, help="Name of the CSV file to generate")
     parser.add_argument("--illum", action="store_true", help="Include illumination metadata")
-    parser.add_argument("--masks", action="store_true", help="Include RNA mask metadata")
+    parser.add_argument("--masks", type=int, help="0 - without masks, 1 - only RNA, 2 - RNA (cells) and DNA (nuclei) masks")
     parser.add_argument("--workers", type=int, default=None, help="Number of worker processes")
     parser.add_argument("--plates2process", nargs='*', help="List of plates to be processed")
     parser.add_argument("--zplane", type=int, default=None, help="Z-Plane to analyze")
     parser.add_argument("--channel_dict", required=True, help='JSON Name→Number, e.g. {"Mito":"1",...}')
     parser.add_argument("--filename_regex", required=True, help="Regex with the following groups: Row/Column/Field/Plane/Channel")
     parser.add_argument("--discard_sites", required=False, help="Path of the parquet with sites to be discarted due to QC problems")
+    parser.add_argument("--check_integrity", action="store_true", help="Verify that TIFFs of the selected z-plane can be decoded; corrupt files are excluded and logged")
 
     args = parser.parse_args()
-
-    print(f"[DEBUG] channel_dict repr: {repr(args.channel_dict)}")
 
     channels = {int(v): k for k, v in json.loads(args.channel_dict).items()}
     compiled_regex = re.compile(args.filename_regex)
@@ -334,4 +458,5 @@ if __name__ == "__main__":
         channels=channels,
         compiled_regex=compiled_regex,
         discard_sites=args.discard_sites,
+        check_integrity=args.check_integrity,
     )

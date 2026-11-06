@@ -29,7 +29,7 @@ from qc.profiles import DatasetProfile, profile_from_env
 from qc.io.platemap import load_platemap
 from qc.io.readers import TableStore
 from qc.render.collage import (
-    _aggregate_mfi_per_well, _aggregate_mfi_sites,
+    _aggregate_mfi_per_well, 
     _well_passes_all, _well_passes_group, _metric_well_fail,
     render_plate_collage,
 )
@@ -86,7 +86,7 @@ class QCPipeline:
         self._mfi_sources: dict = {}
         self._channel_map: dict = {}
         self._mfi_img: dict = {}
-        self._mfi_img_sites: dict = {}
+        self._mfi_site_table: dict = {}
         self._radius_all: dict = {}
         self._plates_data: list[dict] = []
 
@@ -126,7 +126,7 @@ class QCPipeline:
         # MFI (single read of Cells/Nuclei), image-level MFI, radius (all plates).
         self._mfi_sources, self._channel_map = self.store.mfi_sources()
         self._mfi_img = self.store.mfi_img()
-        self._mfi_img_sites = self.store.mfi_img_sites()
+        self._mfi_site_table = self.store.mfi_site_table()
         self._radius_all = self.store.radius_all_plates()
 
         # Platemap: explicit path, else first platemap_*.csv in input dir.
@@ -251,6 +251,16 @@ class QCPipeline:
         print(f"  [warn] {label}: no key matched '{plate_name}'. Keys: {list(mapping)[:10]}")
         return {}
 
+    def _site_rows_for_plate(self, plate_name: str) -> list:
+        """Rows of the per-site MFI table belonging to one plate (JSON-ready)."""
+        from qc import schema
+        df = self._mfi_site_table.get("df")
+        if df is None or df.is_empty():
+            return []
+        target = schema.normalize_plate(plate_name)
+        sub = df.filter(schema.normalize_plate_expr("Metadata_Plate") == target)
+        return sub.rows()
+
     def _render_plate(self, plate_name: str, montages: dict) -> dict | None:
         if not montages:
             print(f"  No images for {plate_name}, skipping.")
@@ -322,12 +332,8 @@ class QCPipeline:
             "mfi_data": (_aggregate_mfi_per_well(self._mfi_sources, self._channel_map,
                                                  plate_name) if self._channel_map else {}),
             "mfi_img": self._mfi_img,
-            # Per-site MFI (object + image), keyed by real ImageNumber, for the
-            # cohort CSV export. Kept separate from mfi_data/mfi_img above, which
-            # the boxplots and SNR/Δ views consume unchanged.
-            "mfi_sites": (_aggregate_mfi_sites(self._mfi_sources, self._channel_map,
-                                               plate_name) if self._channel_map else {}),
-            "mfi_img_sites": self._mfi_img_sites,
+            "mfi_site_columns": self._mfi_site_table.get("columns", []),
+            "mfi_site_rows": self._site_rows_for_plate(plate_name),
             "radius_data": radius_data,
             "pass_rate": 100 * n_pass / n_wells if n_wells else 0,
             "n_wells": n_wells,

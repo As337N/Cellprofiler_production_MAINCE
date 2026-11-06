@@ -26,9 +26,9 @@ if run_section 1; then
    echo "PATH_CSV=$PATH_CSV"
    echo "NAME_ILLUM=$NAME_ILLUM"
 
-   python $SCRIPT_PY_CELLPROFILER -i $IMAGES_WORKSPACE -o $PATH_CSV --name_csv $NAME_ILLUM --channel_dict $CHANNEL_DICT --filename_regex $FILENAME_REGEX --zplane "$ZPLANE"
+   python $SCRIPT_PY_CELLPROFILER -i $IMAGES_WORKSPACE -o $PATH_CSV --name_csv $NAME_ILLUM --channel_dict $CHANNEL_DICT --filename_regex $FILENAME_REGEX --zplane "$ZPLANE" --check_integrity
 
-   generar_batchfiles "$PATH_CSV/$NAME_ILLUM.csv" "$TEMPLATE_CPPIPE_ILLUM" "$PATH_CPPIPE" "$PATH_BATCH_PIPELINES" "$PATH_ILLUM_FILES" 0
+   generar_batchfiles --metadata "$PATH_CSV/$NAME_ILLUM.csv" --template "$TEMPLATE_CPPIPE_ILLUM" --cppipe "$PATH_CPPIPE" --batch "$PATH_BATCH_PIPELINES" --output "$PATH_ILLUM_FILES" --profiles 0
    mv $PATH_BATCH_PIPELINES/Batch_data.h5 \
       $PATH_BATCH_PIPELINES/Batch_data_Illum.h5
    echo "Batch files generated"

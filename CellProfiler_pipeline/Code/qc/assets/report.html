@@ -19,7 +19,7 @@
   <table class="summary-table">
     <thead>
       <tr><th>Plate</th><th>Wells</th>
-          <th>Blur</th><th>Debris</th><th>Low Cell Density</th><th>MedianIntensity</th><th>Signal / Noise (SNR in MFI)</th><th>Positional Effects (ANOVA in MFI)</th></tr>
+          <th>Blur</th><th>Debris</th><th>Low Cell Density</th><th>MedianIntensity</th><th>Object to background contrast (O2B in MFI)</th><th>Positional Effects (ANOVA in MFI)</th></tr>
     </thead>
     <tbody id="summary-tbody"></tbody>
   </table>
@@ -246,8 +246,8 @@
       background pixels.
     </div>
     <div class="audit-row" style="margin-top:4px;">
-      <b style="color:#a8c8f0;">SNR proxy = Δ / MFI<sub>img</sub></b>:
-      signal-to-noise ratio (SNR), the fold-change of object intensity over background —
+      <b style="color:#a8c8f0;">O2B = Δ / MFI<sub>img</sub></b>:
+      object to background contrast (O2B), the fold-change of object intensity over background —
       how much brighter the segmented objects are relative to the image background.
       <span style="color:#4bd760;">■ ≥ 0.5×</span> acceptable &nbsp;·&nbsp;
       <span style="color:#ffbe00;">■ 0.2–0.5×</span> weak signal, check segmentation &nbsp;·&nbsp;

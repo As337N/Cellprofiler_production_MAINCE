@@ -2,7 +2,7 @@ CellProfiler Pipeline: http://www.cellprofiler.org
 Version:5
 DateRevision:428
 GitHash:
-ModuleCount:25
+ModuleCount:29
 HasImagePlaneDetails:False
 
 LoadData:[module_num:1|svn_version:'Unknown'|variable_revision_number:6|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
@@ -11,7 +11,7 @@ LoadData:[module_num:1|svn_version:'Unknown'|variable_revision_number:6|show_win
     Load images based on this data?:Yes
     Base image location:Default Input Folder|
     Process just a range of rows?:No
-    Rows to process:1,100000
+    Rows to process:1,1000
     Group images by metadata?:No
     Select metadata tags for grouping:
     Rescale intensities?:Yes
@@ -174,7 +174,7 @@ FilterObjects:[module_num:8|svn_version:'Unknown'|variable_revision_number:10|sh
     Allow fuzzy feature matching?:No
 
 IdentifySecondaryObjects:[module_num:9|svn_version:'Unknown'|variable_revision_number:10|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
-    Select the input objects:Raw_nuclei
+    Select the input objects:Filtered_nuclei
     Name the objects to be identified:Complete_cells
     Select the method to identify the secondary objects:Propagation
     Select the input image:Syto
@@ -240,7 +240,7 @@ MaskObjects:[module_num:12|svn_version:'Unknown'|variable_revision_number:3|show
     Numbering of resulting objects:Renumber
     Invert the mask?:No
 
-RelateObjects:[module_num:13|svn_version:'Unknown'|variable_revision_number:5|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:True]
+RelateObjects:[module_num:13|svn_version:'Unknown'|variable_revision_number:5|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Parent objects:Filtered_cells
     Child objects:masked_nuclei
     Calculate child-parent distances?:None
@@ -320,10 +320,8 @@ OverlayOutlines:[module_num:19|svn_version:'Unknown'|variable_revision_number:4|
     How to outline:Thick
     Select outline color:green
     Select objects to display:Nuclei
-    Select outline color:cyan
-    Select objects to display:Cells
     Select outline color:red
-    Select objects to display:Illum_artifacts
+    Select objects to display:Cells
 
 MeasureImageIntensity:[module_num:20|svn_version:'Unknown'|variable_revision_number:4|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select images to measure:Hoechst, Syto
@@ -361,7 +359,59 @@ MeasureObjectSizeShape:[module_num:23|svn_version:'Unknown'|variable_revision_nu
     Calculate the Zernike features?:No
     Calculate the advanced features?:No
 
-ExportToSpreadsheet:[module_num:24|svn_version:'Unknown'|variable_revision_number:13|show_window:False|notes:['We explicitly set which measurement types to export so that we do NOT export measurements of the objects touching the well edges as we ONLY want them for masking and not to use for measurements.', '', 'We have turned off the exporting of measurements starting with the word Location for Cells and Cytoplasm and the duplicate Number_Object_Number from Cells, because a) those measurements are not useful on their own (only relative to one another, which is not an analysis we currently ever perform) and b) we were previously exporting >2000 measurements for those compartments, which would complicate using SQLite if not manually compiled to allow >2000 columns.']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+ConvertObjectsToImage:[module_num:24|svn_version:'Unknown'|variable_revision_number:1|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+    Select the input objects:Cells
+    Name the output image:cells_final_masks
+    Select the color format:uint16
+    Select the colormap:Default
+
+ConvertObjectsToImage:[module_num:25|svn_version:'Unknown'|variable_revision_number:1|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+    Select the input objects:Nuclei
+    Name the output image:nuclei_final_masks
+    Select the color format:uint16
+    Select the colormap:Default
+
+SaveImages:[module_num:26|svn_version:'Unknown'|variable_revision_number:16|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+    Select the type of image to save:Image
+    Select the image to save:cells_final_masks
+    Select method for constructing file names:From image filename
+    Select image name for file prefix:Syto
+    Enter single file name:OrigBlue
+    Number of digits:4
+    Append a suffix to the image file name?:Yes
+    Text to append to the image name:_cells_masks_P\g<Plate>
+    Saved file format:tiff
+    Output file location:Elsewhere...|MASKS_PATH/
+    Image bit depth:8-bit integer
+    Overwrite existing files without warning?:Yes
+    When to save:Every cycle
+    Record the file and path information to the saved image?:No
+    Create subfolders in the output folder?:No
+    Base image folder:Elsewhere...|
+    How to save the series:T (Time)
+    Save with lossless compression?:Yes
+
+SaveImages:[module_num:27|svn_version:'Unknown'|variable_revision_number:16|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+    Select the type of image to save:Image
+    Select the image to save:nuclei_final_masks
+    Select method for constructing file names:From image filename
+    Select image name for file prefix:Hoechst
+    Enter single file name:OrigBlue
+    Number of digits:4
+    Append a suffix to the image file name?:Yes
+    Text to append to the image name:_nuclei_masks_P\g<Plate>
+    Saved file format:tiff
+    Output file location:Elsewhere...|MASKS_PATH/
+    Image bit depth:8-bit integer
+    Overwrite existing files without warning?:Yes
+    When to save:Every cycle
+    Record the file and path information to the saved image?:No
+    Create subfolders in the output folder?:No
+    Base image folder:Elsewhere...|
+    How to save the series:T (Time)
+    Save with lossless compression?:Yes
+
+ExportToSpreadsheet:[module_num:28|svn_version:'Unknown'|variable_revision_number:13|show_window:False|notes:['We explicitly set which measurement types to export so that we do NOT export measurements of the objects touching the well edges as we ONLY want them for masking and not to use for measurements.', '', 'We have turned off the exporting of measurements starting with the word Location for Cells and Cytoplasm and the duplicate Number_Object_Number from Cells, because a) those measurements are not useful on their own (only relative to one another, which is not an analysis we currently ever perform) and b) we were previously exporting >2000 measurements for those compartments, which would complicate using SQLite if not manually compiled to allow >2000 columns.']|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Select the column delimiter:Tab
     Add image metadata columns to your object data file?:Yes
     Add image file and folder names to your object data file?:No
@@ -374,17 +424,13 @@ ExportToSpreadsheet:[module_num:24|svn_version:'Unknown'|variable_revision_numbe
     Select source of sample row name:Metadata
     Select the image to use as the identifier:None
     Select the metadata to use as the identifier:None
-    Export all measurement types?:No
-    Press button to select measurements:Image|ImageQuality_PowerLogLogSlope_Mito,Image|ImageQuality_PowerLogLogSlope_ER,Image|ImageQuality_PowerLogLogSlope_Syto,Image|ImageQuality_PowerLogLogSlope_Golgi,Image|ImageQuality_PowerLogLogSlope_Brightfield,Image|ImageQuality_PowerLogLogSlope_Hoechst,Image|ImageQuality_TotalIntensity_Golgi,Image|ImageQuality_TotalIntensity_ER,Image|ImageQuality_TotalIntensity_Mito,Image|ImageQuality_TotalIntensity_Syto,Image|ImageQuality_TotalIntensity_Hoechst,Image|ImageQuality_TotalIntensity_Brightfield,Image|ImageQuality_PercentMinimal_Brightfield,Image|ImageQuality_PercentMinimal_Hoechst,Image|ImageQuality_PercentMinimal_ER,Image|ImageQuality_PercentMinimal_Mito,Image|ImageQuality_PercentMinimal_Golgi,Image|ImageQuality_PercentMinimal_Syto,Image|ImageQuality_TotalArea_ER,Image|ImageQuality_TotalArea_Golgi,Image|ImageQuality_TotalArea_Hoechst,Image|ImageQuality_TotalArea_Brightfield,Image|ImageQuality_TotalArea_Mito,Image|ImageQuality_TotalArea_Syto,Image|ImageQuality_FocusScore_Syto,Image|ImageQuality_FocusScore_Mito,Image|ImageQuality_FocusScore_Golgi,Image|ImageQuality_FocusScore_ER,Image|ImageQuality_FocusScore_Brightfield,Image|ImageQuality_FocusScore_Hoechst,Image|ImageQuality_PercentMaximal_Syto,Image|ImageQuality_PercentMaximal_ER,Image|ImageQuality_PercentMaximal_Mito,Image|ImageQuality_PercentMaximal_Hoechst,Image|ImageQuality_PercentMaximal_Golgi,Image|ImageQuality_PercentMaximal_Brightfield,Image|ImageQuality_MaxIntensity_Syto,Image|ImageQuality_MaxIntensity_Golgi,Image|ImageQuality_MaxIntensity_Hoechst,Image|ImageQuality_MaxIntensity_Brightfield,Image|ImageQuality_MaxIntensity_Mito,Image|ImageQuality_MaxIntensity_ER,Image|ImageQuality_MedianIntensity_ER,Image|ImageQuality_MedianIntensity_Syto,Image|ImageQuality_MedianIntensity_Golgi,Image|ImageQuality_MedianIntensity_Brightfield,Image|ImageQuality_MedianIntensity_Mito,Image|ImageQuality_MedianIntensity_Hoechst,Image|Intensity_StdIntensity_Hoechst,Image|Intensity_StdIntensity_Syto,Image|Intensity_MADIntensity_Hoechst,Image|Intensity_MADIntensity_Syto,Image|Intensity_UpperQuartileIntensity_Syto,Image|Intensity_UpperQuartileIntensity_Hoechst,Image|Intensity_TotalIntensity_Hoechst,Image|Intensity_TotalIntensity_Syto,Image|Intensity_TotalArea_Hoechst,Image|Intensity_TotalArea_Syto,Image|Intensity_PercentMaximal_Syto,Image|Intensity_PercentMaximal_Hoechst,Image|Intensity_MinIntensity_Hoechst,Image|Intensity_MinIntensity_Syto,Image|Intensity_LowerQuartileIntensity_Hoechst,Image|Intensity_LowerQuartileIntensity_Syto,Image|Intensity_Percentile_90_Syto,Image|Intensity_Percentile_90_Hoechst,Image|Intensity_Percentile_10_Hoechst,Image|Intensity_Percentile_10_Syto,Image|Intensity_MedianIntensity_Hoechst,Image|Intensity_MedianIntensity_Syto,Image|Intensity_MaxIntensity_Syto,Image|Intensity_MaxIntensity_Hoechst,Image|Intensity_MeanIntensity_Syto,Image|Intensity_MeanIntensity_Hoechst,Image|Count_Raw_nuclei,Image|Count_Cells,Image|Count_Nuclei,Image|Count_Illum_artifacts,Image|Count_Illum_artifacts_filtered,Image|Metadata_Field,Image|Metadata_Plate,Image|Metadata_Well,Cells|Intensity_StdIntensity_Syto,Cells|Intensity_StdIntensity_Golgi,Cells|Intensity_StdIntensity_Mito,Cells|Intensity_StdIntensity_ER,Cells|Intensity_MedianIntensity_Syto,Cells|Intensity_MedianIntensity_Golgi,Cells|Intensity_MedianIntensity_Mito,Cells|Intensity_MedianIntensity_ER,Cells|Intensity_MADIntensity_ER,Cells|Intensity_MADIntensity_Syto,Cells|Intensity_MADIntensity_Mito,Cells|Intensity_MADIntensity_Golgi,Cells|Intensity_MeanIntensity_Mito,Cells|Intensity_MeanIntensity_Golgi,Cells|Intensity_MeanIntensity_Syto,Cells|Intensity_MeanIntensity_ER,Cells|Intensity_IntegratedIntensity_Golgi,Cells|Intensity_IntegratedIntensity_Syto,Cells|Intensity_IntegratedIntensity_Mito,Cells|Intensity_IntegratedIntensity_ER,Cells|Intensity_MassDisplacement_Golgi,Cells|Intensity_MassDisplacement_Mito,Cells|Intensity_MassDisplacement_Syto,Cells|Intensity_MassDisplacement_ER,Cells|AreaShape_MedianRadius,Nuclei|Intensity_MedianIntensity_Hoechst,Nuclei|Intensity_MeanIntensity_Hoechst,Nuclei|Intensity_StdIntensity_Hoechst,Nuclei|Intensity_MADIntensity_Hoechst,Nuclei|Intensity_MassDisplacement_Hoechst,Nuclei|Intensity_IntegratedIntensity_Hoechst,Nuclei|AreaShape_MedianRadius
+    Export all measurement types?:Yes
+    Press button to select measurements:Nuclei|Intensity_IntegratedIntensity_Hoechst,Nuclei|Intensity_MADIntensity_Hoechst,Nuclei|Intensity_StdIntensity_Hoechst,Nuclei|Intensity_MedianIntensity_Hoechst,Nuclei|Intensity_MassDisplacement_Hoechst,Nuclei|Intensity_MeanIntensity_Hoechst,Nuclei|AreaShape_MedianRadius,Image|ImageQuality_TotalArea_Syto,Image|ImageQuality_TotalArea_Mito,Image|ImageQuality_TotalArea_Golgi,Image|ImageQuality_TotalArea_Brightfield,Image|ImageQuality_TotalArea_Hoechst,Image|ImageQuality_TotalArea_ER,Image|ImageQuality_FocusScore_ER,Image|ImageQuality_FocusScore_Golgi,Image|ImageQuality_FocusScore_Syto,Image|ImageQuality_FocusScore_Hoechst,Image|ImageQuality_FocusScore_Mito,Image|ImageQuality_FocusScore_Brightfield,Image|ImageQuality_TotalIntensity_Brightfield,Image|ImageQuality_TotalIntensity_ER,Image|ImageQuality_TotalIntensity_Golgi,Image|ImageQuality_TotalIntensity_Syto,Image|ImageQuality_TotalIntensity_Mito,Image|ImageQuality_TotalIntensity_Hoechst,Image|ImageQuality_PercentMinimal_Syto,Image|ImageQuality_PercentMinimal_Mito,Image|ImageQuality_PercentMinimal_ER,Image|ImageQuality_PercentMinimal_Hoechst,Image|ImageQuality_PercentMinimal_Golgi,Image|ImageQuality_PercentMinimal_Brightfield,Image|ImageQuality_MaxIntensity_Mito,Image|ImageQuality_MaxIntensity_Brightfield,Image|ImageQuality_MaxIntensity_ER,Image|ImageQuality_MaxIntensity_Golgi,Image|ImageQuality_MaxIntensity_Syto,Image|ImageQuality_MaxIntensity_Hoechst,Image|ImageQuality_PercentMaximal_ER,Image|ImageQuality_PercentMaximal_Mito,Image|ImageQuality_PercentMaximal_Syto,Image|ImageQuality_PercentMaximal_Golgi,Image|ImageQuality_PercentMaximal_Brightfield,Image|ImageQuality_PercentMaximal_Hoechst,Image|ImageQuality_PowerLogLogSlope_Brightfield,Image|ImageQuality_PowerLogLogSlope_Mito,Image|ImageQuality_PowerLogLogSlope_Syto,Image|ImageQuality_PowerLogLogSlope_Hoechst,Image|ImageQuality_PowerLogLogSlope_Golgi,Image|ImageQuality_PowerLogLogSlope_ER,Image|ImageQuality_MedianIntensity_Syto,Image|ImageQuality_MedianIntensity_ER,Image|ImageQuality_MedianIntensity_Hoechst,Image|ImageQuality_MedianIntensity_Mito,Image|ImageQuality_MedianIntensity_Brightfield,Image|ImageQuality_MedianIntensity_Golgi,Image|Intensity_MinIntensity_Hoechst,Image|Intensity_MinIntensity_Syto,Image|Intensity_TotalArea_Hoechst,Image|Intensity_TotalArea_Syto,Image|Intensity_MADIntensity_Syto,Image|Intensity_MADIntensity_Hoechst,Image|Intensity_StdIntensity_Syto,Image|Intensity_StdIntensity_Hoechst,Image|Intensity_Percentile_90_Hoechst,Image|Intensity_Percentile_90_Syto,Image|Intensity_Percentile_10_Hoechst,Image|Intensity_Percentile_10_Syto,Image|Intensity_TotalIntensity_Hoechst,Image|Intensity_TotalIntensity_Syto,Image|Intensity_MaxIntensity_Syto,Image|Intensity_MaxIntensity_Hoechst,Image|Intensity_PercentMaximal_Hoechst,Image|Intensity_PercentMaximal_Syto,Image|Intensity_MedianIntensity_Syto,Image|Intensity_MedianIntensity_Hoechst,Image|Intensity_LowerQuartileIntensity_Syto,Image|Intensity_LowerQuartileIntensity_Hoechst,Image|Intensity_UpperQuartileIntensity_Hoechst,Image|Intensity_UpperQuartileIntensity_Syto,Image|Intensity_MeanIntensity_Syto,Image|Intensity_MeanIntensity_Hoechst,Image|Count_Nuclei,Image|Count_Cells,Image|Count_Illum_artifacts,Image|Count_Illum_artifacts_filtered,Image|Count_Raw_nuclei,Image|Metadata_Plate,Image|Metadata_Well,Image|Metadata_Site,Cells|AreaShape_MedianRadius,Cells|Intensity_MeanIntensity_ER,Cells|Intensity_MeanIntensity_Syto,Cells|Intensity_MeanIntensity_Mito,Cells|Intensity_MeanIntensity_Golgi,Cells|Intensity_MassDisplacement_Syto,Cells|Intensity_MassDisplacement_Golgi,Cells|Intensity_MassDisplacement_Mito,Cells|Intensity_MassDisplacement_ER,Cells|Intensity_MADIntensity_Golgi,Cells|Intensity_MADIntensity_Mito,Cells|Intensity_MADIntensity_ER,Cells|Intensity_MADIntensity_Syto,Cells|Intensity_StdIntensity_Golgi,Cells|Intensity_StdIntensity_Mito,Cells|Intensity_StdIntensity_ER,Cells|Intensity_StdIntensity_Syto,Cells|Intensity_MedianIntensity_Syto,Cells|Intensity_MedianIntensity_ER,Cells|Intensity_MedianIntensity_Mito,Cells|Intensity_MedianIntensity_Golgi,Cells|Intensity_IntegratedIntensity_Syto,Cells|Intensity_IntegratedIntensity_Golgi,Cells|Intensity_IntegratedIntensity_ER,Cells|Intensity_IntegratedIntensity_Mito
     Representation of Nan/Inf:NaN
     Add a prefix to file names?:No
     Filename prefix:MyExpt_
     Overwrite existing files without warning?:Yes
     Data to export:Image
-    Combine these object measurements with those of the previous object?:No
-    File name:DATA.csv
-    Use the object name for the file name?:Yes
-    Data to export:Experiment
     Combine these object measurements with those of the previous object?:No
     File name:DATA.csv
     Use the object name for the file name?:Yes
@@ -397,7 +443,7 @@ ExportToSpreadsheet:[module_num:24|svn_version:'Unknown'|variable_revision_numbe
     File name:DATA.csv
     Use the object name for the file name?:Yes
 
-CreateBatchFiles:[module_num:25|svn_version:'Unknown'|variable_revision_number:8|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
+CreateBatchFiles:[module_num:29|svn_version:'Unknown'|variable_revision_number:8|show_window:False|notes:[]|batch_state:array([], dtype=uint8)|enabled:True|wants_pause:False]
     Store batch files in default output folder?:Yes
     Output folder path:Elsewhere...|SAVING_BATCH_PATH/
     Are the cluster computers running Windows?:No

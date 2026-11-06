@@ -26,42 +26,68 @@ if not MODEL_PATH.exists():
 # Dataset custom: ..._002004.tif  ->  r"00200(?P<Channel>\d)\.tiff?$"
 #DEFAULT_CHANNEL_REGEX = r"00200(?P<Channel>\d)\.tiff?$"
 
+class CorruptImageError(Exception):
+    pass
+
+
+def read_tiff_safe(path: Path, expected_shape: tuple) -> np.ndarray:
+    # Un TIFF truncado puede lanzar TiffFileError, ValueError, OSError o struct.error,
+    # por eso se captura Exception de forma amplia y se re-lanza como error propio.
+    try:
+        img = tiff.imread(path)
+    except Exception as e:
+        raise CorruptImageError(f"{type(e).__name__}: {e}") from e
+    if img.shape != expected_shape:
+        raise CorruptImageError(f"shape {img.shape} != {expected_shape}")
+    return img
 
 class PreparePlate():
-    def __init__(self, image_paths, illumination_npy, batch_size: int = 32):
+    def __init__(self, image_paths, illumination_npy, batch_size: int = 32,
+                 max_corrupt_fraction: float = 0.01):
         self.image_paths = image_paths
         self.illumination_npy = illumination_npy
         self.batch_size = batch_size
+        self.max_corrupt_fraction = max_corrupt_fraction
+        self.corrupt: list[tuple[Path, str]] = []
 
-    def illum_correction(self) -> list[np.ndarray]:
+    def illum_correction(self) -> tuple[list[Path], list[np.ndarray]]:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         illum = np.load(self.illumination_npy)
         illum /= illum.mean()
         illum_t = torch.from_numpy(illum).float().to(device)
 
-        corrected_images = []
+        valid_paths, corrected_images = [], []
 
         for i in tqdm(range(0, len(self.image_paths), self.batch_size), desc="Illumination correction"):
             batch_paths = self.image_paths[i:i + self.batch_size]
 
-            imgs = [tiff.imread(p) for p in batch_paths]
-            imgs_np = np.stack(imgs, axis=0)
+            imgs, ok_paths = [], []
+            for p in batch_paths:
+                try:
+                    imgs.append(read_tiff_safe(p, illum.shape))
+                    ok_paths.append(p)
+                except CorruptImageError as e:
+                    self.corrupt.append((p, str(e)))
+                    tqdm.write(f"[WARN] Corrupt image skipped: {p.name} ({e})")
 
-            if imgs_np.shape[1:] != illum.shape:
-                raise ValueError(
-                    f"Shape mismatch: images {imgs_np.shape[1:]} vs illumination {illum.shape}"
-                )
+            if not imgs:
+                continue
 
-            imgs_t = torch.from_numpy(imgs_np).float().to(device)
+            imgs_t = torch.from_numpy(np.stack(imgs, axis=0)).float().to(device)
+            corrected = torch.clamp(imgs_t / (illum_t + 1e-6), min=0.0)
 
-            eps = 1e-6
-            corrected = imgs_t / (illum_t + eps)
-            corrected = torch.clamp(corrected, min=0.0) 
-
+            valid_paths.extend(ok_paths)
             corrected_images.extend(corrected.cpu().numpy())
 
-        return corrected_images
+        frac = len(self.corrupt) / max(len(self.image_paths), 1)
+        if frac > self.max_corrupt_fraction:
+            raise RuntimeError(
+                f"{len(self.corrupt)}/{len(self.image_paths)} images corrupt ({frac:.1%}), "
+                f"above threshold {self.max_corrupt_fraction:.1%}. Aborting: likely a bad transfer."
+            )
+
+        return valid_paths, corrected_images
 
 
 class CellPose():
@@ -131,6 +157,18 @@ class CellSegmentation():
         path_masks.mkdir(parents=True, exist_ok=True)
         return plate, path_masks
 
+    def _report_corrupt(self, plate: str, corrupt: list):
+        if not corrupt:
+            return
+        log_dir = self.output_path / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        report = log_dir / f"corrupt_files_P{plate}.tsv"
+        with open(report, "w") as f:
+            f.write("path\treason\n")
+            for p, reason in corrupt:
+                f.write(f"{p}\t{reason}\n")
+        print(f"[WARN] Plate {plate}: {len(corrupt)} corrupt images, listed in {report}")
+
     def run(self):
         cellpose_seg = CellPose(
             path_model=MODEL_PATH,
@@ -165,21 +203,21 @@ class CellSegmentation():
                 illumination_npy=illumination_npy,
                 batch_size=self.batch_size,
             )
-            corrected_images = prep.illum_correction()
+            valid_paths, corrected_images = prep.illum_correction()
+            self._report_corrupt(plate, prep.corrupt)
 
             cellpose_seg.process_plate(
-                img_paths=img_paths,
+                img_paths=valid_paths,
                 corrected_images=corrected_images,
                 path_masks=path_masks,
             )
-
 
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Cellpose segmentation of RNA channel per plate."
     )
-    parser.add_argument("input_path", type=Path)
-    parser.add_argument("output_path", type=Path)
+    parser.add_argument("--input", type=Path)
+    parser.add_argument("--output", type=Path)
     parser.add_argument("--channel_dict", required=True, help='JSON Name→Number, e.g. {"Mito":"1",...}')
     parser.add_argument("--rna_channel", type=int, default=4)
     parser.add_argument("--batch-size", type=int, default=12)
@@ -199,8 +237,8 @@ if __name__ == "__main__":
 
     args = parse_args()
     segmentation = CellSegmentation(
-        input_path=args.input_path,
-        output_path=args.output_path,
+        input_path=args.input,
+        output_path=args.output,
         channel_dict=args.channel_dict,
         regex=args.regex,
         channel_regex=args.channel_regex,

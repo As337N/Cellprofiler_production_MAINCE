@@ -16,3 +16,4 @@ copairs
 igraph
 leidenalg
 opencv-python
+harmonypy

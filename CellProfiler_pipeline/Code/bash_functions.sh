@@ -27,12 +27,40 @@ detectar_max_jobs() {
 }
 
 generar_batchfiles() {
-  local metadata_csv_path="$1"
-  local TEMPLATE_CPPIPE="$2"
-  local PATH_CPPIPE="$3"
-  local PATH_BATCH_FILE="$4"
-  local PATH_OUTPUT="$5"
-  local PROFILES="${6:-}"
+  local metadata_csv_path=""
+  local TEMPLATE_CPPIPE=""
+  local PATH_CPPIPE=""
+  local PATH_BATCH_FILE=""
+  local PATH_OUTPUT=""
+  local PROFILES=""
+  local PATH_MASKS=""
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -m|--metadata) metadata_csv_path="$2"; shift 2 ;;
+      -t|--template) TEMPLATE_CPPIPE="$2";   shift 2 ;;
+      -c|--cppipe)   PATH_CPPIPE="$2";        shift 2 ;;
+      -b|--batch)    PATH_BATCH_FILE="$2";   shift 2 ;;
+      -o|--output)   PATH_OUTPUT="$2";       shift 2 ;;
+      -p|--profiles) PROFILES="$2";          shift 2 ;;
+      -k|--masks_path)    PATH_MASKS="$2";        shift 2 ;;
+      -h|--help)
+        echo "Usage: generar_batchfiles -m <metadata.csv> -t <template.cppipe> -c <cppipe_dir> -b <batchfile_dir> -o <outdir> [-p <profiles>]"
+        return 0 ;;
+      *)
+        echo "[ERROR] Unknown flag: $1" >&2
+        return 1 ;;
+    esac
+  done
+
+  local missing=0
+  for var in metadata_csv_path TEMPLATE_CPPIPE PATH_CPPIPE PATH_BATCH_FILE PATH_OUTPUT; do
+    if [ -z "${!var}" ]; then
+      echo "[ERROR] Missing required flag for: $var" >&2
+      missing=1
+    fi
+  done
+  [ "$missing" -eq 1 ] && return 1
 
   if [ -z "$metadata_csv_path" ] || [ -z "$TEMPLATE_CPPIPE" ] || [ -z "$PATH_CPPIPE" ]; then
     echo "[ERROR] A parameter is missing, path csv: $metadata_csv_path, template cppipe: $TEMPLATE_CPPIPE, path cppipe: $PATH_CPPIPE"
@@ -52,6 +80,7 @@ generar_batchfiles() {
 
   sed -e "s|INPUT_PATH_CSV|$parent_dir_csv|g" \
       -e "s|SAVING_OUTPUT_PATH|$PATH_OUTPUT|g" \
+      -e "s|MASKS_PATH|$PATH_MASKS|g" \
       -e "s|SAVING_MEASUREMENTS_OUTPUT_PATH|$PATH_OUTPUT/Measurements|g" \
       -e "s|SAVING_BATCH_PATH|$PATH_BATCH_FILE|g" \
       -e "s|FILE_CSV|$file_name_csv|g" \
@@ -95,13 +124,14 @@ create_output_dirs() {
         PATH_CPPIPE="$OUTPUT/CellProfiler_files/Pipelines"
         PATH_BATCH_PIPELINES="$OUTPUT/CellProfiler_files/Batch_files"
         PATH_PROFILES="$OUTPUT/CellProfiler_files/MP"
+        PATH_MASKS="$OUTPUT/CellProfiler_files/Object_masks"
 
         PATH_QC_IMAGES="$OUTPUT/QC/Images"
         PATH_QC_COLLAGES="$OUTPUT/QC/Collages"
         PATH_QC_MEASUREMENTS="$OUTPUT/QC/Measurements"
         PATH_QC_REPORTS="$OUTPUT/QC/Reports"
 
-        PATH_FINAL_PROFILES="$OUTPUT/Profiles/Treated_profiles"
+        PATH_FINAL_PROFILES="$OUTPUT/Profiles"
         PATH_CLUSTERS="$OUTPUT/Clustering"
 
         PATH_REPRODUCIBILITY="$OUTPUT/Reproducibility"
@@ -120,6 +150,7 @@ create_output_dirs() {
             "$PATH_CPPIPE" \
             "$PATH_BATCH_PIPELINES" \
             "$PATH_PROFILES" \
+            "$PATH_MASKS" \
             "$PATH_QC_IMAGES" \
             "$PATH_QC_COLLAGES" \
             "$PATH_QC_MEASUREMENTS" \

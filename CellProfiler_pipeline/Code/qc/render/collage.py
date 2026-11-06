@@ -563,52 +563,6 @@ def _aggregate_mfi_per_well(source_dfs: dict,
 
     return {well: dict(ch_vals) for well, ch_vals in result.items()}
 
-
-def _aggregate_mfi_sites(source_dfs: dict, channel_map: dict,
-                         plate_name: str) -> "dict":
-    """Per-object MFI keyed by real ImageNumber, for the CSV export.
-
-    Returns { well: { channel: { ImageNumber: median } } }. Same per-image median
-    as _aggregate_mfi_per_well, but retains the ImageNumber instead of appending
-    into an order-dependent list — so the CSV's site_index is the real site and
-    object vs image values align per site. Does not replace
-    _aggregate_mfi_per_well (the boxplots keep consuming its plain value lists).
-    """
-    def _norm_plate(s: str) -> str:
-        return str(s).strip().lstrip("P").lstrip("0") or "0"
-
-    target = _norm_plate(plate_name)
-    result: dict = {}
-
-    for ch, (col, _) in channel_map.items():
-        df = source_dfs.get(ch)
-        if df is None:
-            continue
-        norm_expr = (
-            pl.col("Metadata_Plate").cast(pl.Utf8).str.strip_chars()
-              .str.strip_chars_start("P").str.strip_chars_start("0")
-              .replace("", "0")
-        )
-        plate_df = df.filter(norm_expr == target)
-        if plate_df.is_empty():
-            if df["Metadata_Plate"].n_unique() == 1:
-                plate_df = df
-            else:
-                continue
-        if "ImageNumber" not in plate_df.columns:
-            continue
-        per_image = plate_df.group_by(
-            ["Metadata_Well", "ImageNumber"]
-        ).agg(pl.col(col).median())
-        for row in per_image.iter_rows(named=True):
-            well = str(row["Metadata_Well"]).strip().upper()
-            img = int(row["ImageNumber"])
-            v = row[col]
-            if v is not None and not (isinstance(v, float) and np.isnan(v)):
-                result.setdefault(well, {}).setdefault(ch, {})[img] = float(v)
-    return result
-
-
 def render_plate_collage(plate_name: str, montages: dict, plate_qc: dict,
                          plate_map: dict, engine: ThresholdEngine,
                          *, plate_rows: int, plate_cols: int,

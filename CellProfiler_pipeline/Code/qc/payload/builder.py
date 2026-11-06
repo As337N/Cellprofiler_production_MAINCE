@@ -59,7 +59,7 @@ def build_payload(cohort_name: str, plates_data: list[dict],
         One entry per plate, carrying the rendered arrays and per-well QC. Each
         entry provides: name, plate_qc, plate_map, engine_adaptive, collage_arr,
         overview_arr/cw/ch, flagged_b64, pass_rate, n_wells, n_pass,
-        n_illum_pass, plate_qc_sites, mfi_data, mfi_img, radius_data, plate_rows,
+        n_illum_pass, plate_qc_sites, mfi_data, mfi_img, mfi_site_columns, mfi_site_rows, radius_data, plate_rows,
         plate_cols.
     profile : DatasetProfile
         Active dataset profile (channels, column templates, labels).
@@ -207,14 +207,16 @@ def build_payload(cohort_name: str, plates_data: list[dict],
         if vals:
             mfi_cohort_median[ch] = round(float(np.median(vals)), 6)
     mfi_img_payload = {pd_["name"]: pd_.get("mfi_img", {}) for pd_ in plates_data}
-    # Per-site MFI for the CSV export (object + image), keyed by real ImageNumber.
-    mfi_sites_payload = {pd_["name"]: pd_.get("mfi_sites", {}) for pd_ in plates_data}
-    mfi_img_sites_payload = {pd_["name"]: pd_.get("mfi_img_sites", {})
-                             for pd_ in plates_data}
+    # Per-site MFI table for the CSV export: columns once, rows concatenated
+    # across plates (each row already carries its Metadata_Plate).
+    site_columns = next((pd_["mfi_site_columns"] for pd_ in plates_data
+                         if pd_.get("mfi_site_columns")), [])
+    site_rows = [row for pd_ in plates_data for row in pd_.get("mfi_site_rows", [])]
     radius_payload = {pd_["name"]: pd_.get("radius_data", {}) for pd_ in plates_data}
-
+ 
     n_rows = plates_data[0].get("plate_rows", profile.plate_rows)
     n_cols = plates_data[0].get("plate_cols", profile.plate_cols)
+
 
     # PCA over well features to flag deviant plates (empty when not enough data).
     from qc.stats.pca import compute_pca
@@ -230,8 +232,7 @@ def build_payload(cohort_name: str, plates_data: list[dict],
             "channels": all_mfi_channels,
             "colors": mfi_colors,
             "img": mfi_img_payload,
-            "sites": mfi_sites_payload,
-            "imgSites": mfi_img_sites_payload,
+            "siteTable": {"columns": site_columns, "rows": site_rows},
             "cohortMedian": mfi_cohort_median,
         },
         "radius": radius_payload,

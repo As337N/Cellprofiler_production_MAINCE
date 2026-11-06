@@ -149,35 +149,74 @@ class TableStore:
                                          if row[ch] is not None}
         return out
 
-    def mfi_img_sites(self) -> dict:
-        """Per-site image MFI: {well: {ImageNumber: {channel: median}}}.
-
-        Like mfi_img but grouped by [Well, ImageNumber] so each site keeps its own
-        whole-image median, keyed by the real ImageNumber. Used to align
-        object-vs-image MFI per site in the CSV export. Does not replace mfi_img,
-        which stays a single per-well median for the SNR/Δ views.
+    def mfi_site_table(self) -> dict:
+        """Per-site MFI table for the cohort CSV export.
+ 
+        Anchored on the Image table: one row per ImageNumber, carrying EVERY
+        original Metadata_* column (Plate, Well, Site/Field, ...), then the
+        object-level MFI (<ch>_obj, median over the site's objects from
+        Cells/Nuclei, joined by ImageNumber) and the whole-image MFI (<ch>_img).
+        Anchoring on Image means a site is never dropped or mislabeled because
+        the object tables lack Metadata_* columns; a site with no objects keeps
+        its row with empty *_obj values.
+ 
+        Returns {"columns": [...], "df": pl.DataFrame} or {} if unavailable.
         """
         lf = self.scan("Image")
         if lf is None:
             return {}
         cols = lf.collect_schema().names()
-        if "Metadata_Well" not in cols or "ImageNumber" not in cols:
+        if "ImageNumber" not in cols:
+            print("[mfi-csv] ImageNumber not found in Image table — CSV export disabled.")
             return {}
-        img_cols = {ch: self.profile.image_intensity_col(ch)
-                    for ch in self.profile.channels
+ 
+        channels = list(self.profile.channels)
+        meta = [c for c in cols if c.startswith("Metadata_")]
+        # Plate and Well first, the rest in original table order.
+        front = [c for c in ("Metadata_Plate", "Metadata_Well") if c in meta]
+        meta = front + [c for c in meta if c not in front]
+ 
+        img_cols = {ch: self.profile.image_intensity_col(ch) for ch in channels
                     if self.profile.image_intensity_col(ch) in cols}
-        if not img_cols:
-            return {}
-        agg = (lf.group_by(["Metadata_Well", "ImageNumber"])
-                 .agg([pl.col(col).median().alias(ch) for ch, col in img_cols.items()])
-                 .collect())
-        out: dict = {}
-        for row in agg.iter_rows(named=True):
-            well = str(row["Metadata_Well"]).strip().upper()
-            img = int(row["ImageNumber"])
-            out.setdefault(well, {})[img] = {
-                ch: float(row[ch]) for ch in img_cols if row[ch] is not None}
-        return out
+        base = (lf.select([pl.col("ImageNumber").cast(pl.Int64)] +
+                          [pl.col(c) for c in meta] +
+                          [pl.col(col).alias(f"{ch}_img") for ch, col in img_cols.items()])
+                  .collect())
+ 
+        obj_names: list = []
+        for table, source in (("Cells", "cells"), ("Nuclei", "nuclei")):
+            tlf = self.scan(table)
+            if tlf is None:
+                continue
+            tcols = tlf.collect_schema().names()
+            wanted = [ch for ch in channels if self.profile.mfi_source(ch) == source
+                      and self.profile.object_col(ch) in tcols]
+            if not wanted:
+                continue
+            if "ImageNumber" not in tcols:
+                print(f"[mfi-csv] {table} has no ImageNumber — its *_obj columns "
+                      f"cannot be joined to sites.")
+                continue
+            agg = (tlf.group_by(pl.col("ImageNumber").cast(pl.Int64))
+                      .agg([pl.col(self.profile.object_col(ch)).median().alias(f"{ch}_obj")
+                            for ch in wanted])
+                      .collect())
+            base = base.join(agg, on="ImageNumber", how="left")
+            obj_names += [f"{ch}_obj" for ch in wanted]
+ 
+        obj_ordered = [f"{ch}_obj" for ch in channels if f"{ch}_obj" in obj_names]
+        img_ordered = [f"{ch}_img" for ch in channels if f"{ch}_img" in base.columns]
+        out_cols = meta + ["ImageNumber"] + obj_ordered + img_ordered
+        df = base.select(out_cols)
+        # NaN is not valid JSON; make it a null (empty CSV cell).
+        float_cols = [c for c in obj_ordered + img_ordered
+                      if df.schema[c] in (pl.Float32, pl.Float64)]
+        if float_cols:
+            df = df.with_columns([pl.col(c).fill_nan(None) for c in float_cols])
+        n_missing = sum(df[c].null_count() for c in obj_ordered)
+        print(f"[mfi-csv] {df.height} sites; {n_missing} empty object-MFI cells.")
+        return {"columns": out_cols, "df": df}
+
 
     # ── Radius para TODAS las placas de una vez (ex-load_radius_data ×N) ──────
     def radius_all_plates(self) -> dict:
@@ -225,6 +264,13 @@ class TableStore:
         if "Metadata_Well" not in cols or "Metadata_Field" not in cols:
             print("[warn] Metadata_Well/Field not found — site-level QC disabled.")
             return {}
+
+        n_total = lf.select(pl.len()).collect().item()
+        lf = lf.filter(pl.col("Metadata_Field").is_not_null())
+        n_dropped = n_total - lf.select(pl.len()).collect().item()
+        if n_dropped:
+            print(f"[warn] {n_dropped} imagen(es) sin Metadata_Field excluidas "
+                  f"del QC por sitio.")
 
         metric_cols = list(dict.fromkeys(
             c for cs in self.profile.metric_cols().values() for c in cs if c in cols))

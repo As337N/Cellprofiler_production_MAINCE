@@ -156,9 +156,9 @@ function arrMedian(arr) {
                           .map(w => w[ch]).filter(v => v != null);
         const imgMed  = imgVals.length ? arrMedian(imgVals) : null;
         if (objMed == null || imgMed == null || imgMed === 0) return;
-        const snr = (objMed - imgMed) / imgMed;
-        if      (snr < 0.2) badCh.push(ch);
-        else if (snr < 0.5) warnCh.push(ch);
+        const o2b = (objMed - imgMed) / imgMed;
+        if      (o2b < 0.2) badCh.push(ch);
+        else if (o2b < 0.5) warnCh.push(ch);
       });
 
       if (!badCh.length && !warnCh.length) {
@@ -1633,16 +1633,16 @@ function renderMFI() {
             .map(([w,chs]) => chs[ch]).filter(v=>v!=null);
           const imgMed = imgVals.length ? mfiQuantile([...imgVals].sort((a,b)=>a-b), 0.5) : null;
           const delta  = (plateMed!=null && imgMed!=null) ? plateMed - imgMed : null;
-          const snr    = (delta!=null && imgMed>0) ? delta / imgMed : null;
+          const o2b    = (delta!=null && imgMed>0) ? delta / imgMed : null;
           if (imgMed==null) return '';
           let snrColor, snrLabel;
-          if      (snr==null)  { snrColor='var(--muted)'; snrLabel='N/A'; }
-          else if (snr >= 0.5) { snrColor='#4bd760';      snrLabel=`${snr.toFixed(2)}×`; }
-          else if (snr >= 0.2) { snrColor='#ffbe00';      snrLabel=`${snr.toFixed(2)}×`; }
-          else                 { snrColor='#ff4444';      snrLabel=`${snr.toFixed(2)}×`; }
+          if      (o2b==null)  { snrColor='var(--muted)'; snrLabel='N/A'; }
+          else if (o2b >= 0.5) { snrColor='#4bd760';      snrLabel=`${o2b.toFixed(2)}×`; }
+          else if (o2b >= 0.2) { snrColor='#ffbe00';      snrLabel=`${o2b.toFixed(2)}×`; }
+          else                 { snrColor='#ff4444';      snrLabel=`${o2b}×`; }
           return `· img: ${imgMed.toFixed(5)} · <b>Δ: ${delta>=0?'+':''}${delta.toFixed(5)}</b>`
-            + ` · <span title="SNR proxy = Δ / MFI_img — fold-change of objects over background"
-                style="color:${snrColor};cursor:help;">SNR: ${snrLabel}</span>`;
+            + ` · <span title="O2B = Δ / MFI_img — fold-change of objects over background"
+                style="color:${snrColor};cursor:help;">O2B: ${snrLabel}</span>`;
         })()}
         </span></h3>
         ${badgeRow}${badgeCol}
@@ -2418,61 +2418,22 @@ renderPlate(0);
 })();
 
 // ─── MFI CSV export (whole cohort, per site) ─────────────────────────────────
-// One row per (plate, well, ImageNumber), with <channel>_obj and <channel>_img
-// columns aligned by real ImageNumber. Sources: Q.mfi.sites (object MFI) and
-// Q.mfi.imgSites (whole-image MFI), both keyed by ImageNumber in Python.
-function buildMfiCsv() {
-  const sites    = (Q.mfi && Q.mfi.sites)    || {};
-  const imgSites = (Q.mfi && Q.mfi.imgSites) || {};
-  const channels = MFI_CHANNELS.slice();
-
-  const header = ['plate', 'well', 'site_index']
-    .concat(channels.map(c => `${c}_obj`))
-    .concat(channels.map(c => `${c}_img`));
-
-  const rows = [header];
-
-  Object.keys(sites).sort().forEach(plate => {
-    const plateObj = sites[plate] || {};
-    const plateImg = imgSites[plate] || {};
-
-    // Collect the full set of (well, ImageNumber) pairs seen in either source.
-    const wells = new Set(Object.keys(plateObj));
-    Object.keys(plateImg).forEach(w => wells.add(w));
-
-    Array.from(wells).sort().forEach(well => {
-      const objByCh = plateObj[well] || {};        // { channel: { img: val } }
-      const imgByImg = plateImg[well] || {};        // { img: { channel: val } }
-
-      // Union of ImageNumbers across channels (object side) and the image side.
-      const imgSet = new Set();
-      channels.forEach(ch => {
-        Object.keys(objByCh[ch] || {}).forEach(n => imgSet.add(n));
-      });
-      Object.keys(imgByImg).forEach(n => imgSet.add(n));
-
-      Array.from(imgSet)
-        .sort((a, b) => Number(a) - Number(b))
-        .forEach(img => {
-          const row = [plate, well, img];
-          // object MFI per channel
-          channels.forEach(ch => {
-            const v = (objByCh[ch] || {})[img];
-            row.push(v == null ? '' : v);
-          });
-          // image MFI per channel
-          channels.forEach(ch => {
-            const v = (imgByImg[img] || {})[ch];
-            row.push(v == null ? '' : v);
-          });
-          rows.push(row);
-        });
-    });
-  });
-
-  return rows.map(r => r.join(',')).join('\n');
+// Serializes Q.mfi.siteTable, built in Python from the Image table: one row per
+// ImageNumber with all original Metadata_* columns plus <channel>_obj and
+// <channel>_img MFI. Nothing is recomputed or re-keyed here.
+function csvCell(v) {
+  if (v == null) return '';
+  const s = String(v);
+  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
-
+ 
+function buildMfiCsv() {
+  const t = (Q.mfi && Q.mfi.siteTable) || { columns: [], rows: [] };
+  const lines = [t.columns.map(csvCell).join(',')];
+  t.rows.forEach(r => lines.push(r.map(csvCell).join(',')));
+  return lines.join('\n');
+}
+ 
 function downloadMfiCsv() {
   const csv  = buildMfiCsv();
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -2486,7 +2447,7 @@ function downloadMfiCsv() {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
-
+ 
 (function wireMfiCsvButton() {
   const btn = document.getElementById('mfi-csv-btn');
   if (btn) btn.onclick = downloadMfiCsv;

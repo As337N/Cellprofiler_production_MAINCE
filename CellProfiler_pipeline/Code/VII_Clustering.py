@@ -1,403 +1,471 @@
-import os
-os.environ["NUMBA_CACHE_DIR"] = "/tmp/numba_cache"
-
+from __future__ import annotations
 from pathlib import Path
-from typing import Callable, List, Optional
-
-import numpy as np
-import matplotlib.pyplot as plt
+import re
+import random
+import logging
+from typing import Union, List, Dict, Iterable
+from concurrent.futures import ProcessPoolExecutor
+from functools import partial
 import polars as pl
-import argparse
+import tifffile
+from tqdm import tqdm
+import os, json
 
-from scipy.stats import spearmanr
-from sklearn.metrics.pairwise import cosine_similarity
-from sklearn.preprocessing import StandardScaler
-from sklearn.manifold import TSNE
-from sklearn.decomposition import PCA
-from sklearn.metrics import silhouette_score
-import umap
-import plotly.graph_objects as go
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+)
+logger = logging.getLogger(__name__)
 
-DEFAULT_LABEL_COL    = "Metadata_Perturbation"
-DEFAULT_RANDOM_STATE = 42
+PLATE_REGEX = re.compile(r"_P(?P<Plate>\d{2})_")
 
 
-# ── Metric functions ────────────────────────────────────────────────────────
-# Each metric function has the signature:
-#   fn(X_scaled, labels, label_names) -> pl.DataFrame
-# and must return a DataFrame with at least a "Metadata_Compound" column.
-# A global summary scalar can optionally be printed inside the function.
-
-def metric_cosine_similarity(
-    X_scaled: np.ndarray,
-    labels: np.ndarray,
-    label_names: np.ndarray,
-) -> pl.DataFrame:
-    """Mean / std cosine similarity between replicas per compound."""
-    cos_sim = cosine_similarity(X_scaled)
-
-    same_label  = labels[:, None] == labels[None, :]
-    off_diag    = ~np.eye(len(labels), dtype=bool)
-    mean_global = cos_sim[same_label & off_diag].mean()
-    print(f"  [cosine]   mean (all replicas): {mean_global:.4f}")
-
-    results = []
-    for compound in label_names:
-        idx = np.where(labels == compound)[0]
-        if len(idx) < 2:
-            continue
-        sub      = cos_sim[np.ix_(idx, idx)]
-        sim_vals = sub[~np.eye(len(idx), dtype=bool)]
-        results.append({
-            "Metadata_Compound": compound,
-            "mean_cosine":       float(sim_vals.mean()),
-            "std_cosine":        float(sim_vals.std()),
-        })
-
-    return pl.DataFrame(results)
-
-
-def metric_spearman_correlation(
-    X_scaled: np.ndarray,
-    labels: np.ndarray,
-    label_names: np.ndarray,
-) -> pl.DataFrame:
-    """Mean Spearman correlation between replicas per compound."""
-    results = []
-    all_corrs = []
-
-    for compound in label_names:
-        idx = np.where(labels == compound)[0]
-        if len(idx) < 2:
-            continue
-
-        corrs = []
-        for i in range(len(idx)):
-            for j in range(i + 1, len(idx)):
-                r, _ = spearmanr(X_scaled[idx[i]], X_scaled[idx[j]])
-                corrs.append(r)
-
-        all_corrs.extend(corrs)
-        results.append({
-            "Metadata_Compound":  compound,
-            "mean_spearman":      float(np.mean(corrs)),
-            "std_spearman":       float(np.std(corrs)),
-        })
-
-    if all_corrs:
-        print(f"  [spearman] mean (all replicas): {np.mean(all_corrs):.4f}")
-
-    return pl.DataFrame(results)
-
-
-# ── Main class ───────────────────────────────────────────────────────────────
-
-class Clustering:
+def get_well(row: Union[str, int], col: Union[str, int]) -> str:
     """
-    Loads morphological profiles, runs PCA / UMAP / t-SNE embeddings,
-    saves figures, computes silhouette scores, and a configurable set
-    of replica similarity metrics.
+        Convert numeric row and column indices into well notation.
 
-    Parameters
-    ----------
-    metric_fns : List of callables, optional
-        Functions with signature (X_scaled, labels, label_names) -> pl.DataFrame.
-        Each must return a DataFrame with a "Metadata_Compound" column.
-        Defaults to [metric_cosine_similarity, metric_spearman_correlation].
+        Parameters
+        ----------
+        row : str | int
+            Row index (1-based).
+        col : str | int
+            Column index.
+
+        Returns
+        -------
+        str
+            Well identifier (e.g. 'A01').
     """
+    row_corr = chr(64 + int(row))
+    return f"{row_corr}{int(col):02d}"
 
-    DEFAULT_METRICS: List[Callable] = [
-        metric_cosine_similarity,
-        metric_spearman_correlation,
+
+def _is_readable_tiff(path: Path, full_decode: bool = False) -> tuple[bool, str]:
+    """
+        Check that a TIFF is complete (and optionally decodable).
+
+        Fast mode (default): read only the header and verify that the file is
+        large enough to contain all the pixel data it declares. This detects
+        truncated files (interrupted copies or writes) without decoding pixels.
+
+        Parameters
+        ----------
+        path : Path
+            Path to the TIFF file.
+        full_decode : bool, default False
+            Also decode the pixel data of the first page. Much slower, but
+            additionally detects corruption inside the pixel stream.
+
+        Returns
+        -------
+        tuple[bool, str]
+            (True, "") if the file passes, otherwise (False, error description).
+    """
+    try:
+        size = path.stat().st_size
+        with tifffile.TiffFile(path) as tif:
+            page = tif.pages[0]
+            expected_end = max(o + b for o, b in zip(page.dataoffsets, page.databytecounts))
+            if expected_end > size:
+                return False, f"truncated: expects at least {expected_end} bytes, file has {size}"
+            if full_decode:
+                page.asarray()
+        return True, ""
+    except Exception as e:
+        return False, repr(e)
+
+
+def _parse_single_file(
+    path: Path,
+    illum: bool,
+    masks: bool,
+    compiled_regex: re.Pattern,
+    channels: Dict[int, str],
+    output: Path | None,
+    check_integrity: bool = False,
+    check_plane: int | None = None,
+    full_decode: bool = False,) -> dict | None:
+    """
+        Parse metadata from a single image file.
+
+        Parameters
+        ----------
+        path : Path
+            Path to the image file.
+        illum : bool
+            Whether to include illumination correction fields.
+        masks : bool
+            Whether to include RNA mask fields.
+        output : Path | None
+            Output directory used to build derived paths.
+        check_integrity : bool, default False
+            Whether to verify that the TIFF can be decoded.
+        check_plane : int | None, default None
+            If set, only files of this plane are verified (the rest are
+            discarded later, so checking them would be wasted work).
+        full_decode : bool, default False
+            Decode pixel data in the integrity check (slow).
+
+        Returns
+        -------
+        dict | None
+            Parsed metadata row, None if the file does not match criteria, or
+            {"_corrupt": path, "_error": msg} if the integrity check fails.
+    """
+    match = compiled_regex.match(path.name)
+    if not match:
+        return None
+
+    meta = match.groupdict()
+
+    plate_match = PLATE_REGEX.search(str(path))
+    if not plate_match:
+        return None
+
+    plate_meta = plate_match.groupdict()
+    ch_num = int(meta["Channel"])
+
+    if check_integrity and (check_plane is None or int(meta["Plane"]) == check_plane):
+        ok, err = _is_readable_tiff(path, full_decode)
+        if not ok:
+            return {"_corrupt": str(path), "_error": err}
+
+    row = {
+        "Image_FileName": path.name,
+        "Image_PathName": str(path.parent),
+        "Metadata_Plate": plate_meta["Plate"],
+        "Metadata_Well": get_well(meta["Row"], meta["Column"]),
+        "Metadata_Field": int(meta["Field"]),
+        "Metadata_Channel": ch_num,
+        "Metadata_Channel_name": channels.get(ch_num, str(ch_num)),
+        "Metadata_Plane": int(meta["Plane"]),
+    }
+
+    if illum and output is not None:
+        row["FileName_Illum"] = f"P{plate_meta['Plate']}_Illum_{channels.get(ch_num, ch_num)}.npy"
+        row["PathName_Illum"] = str(output.parents[0] / "Illum_files")
+
+    if masks and output is not None:
+        is_syto = channels.get(ch_num) == "Syto"
+        is_z2 = int(meta["Plane"]) == 2
+        row["Image_FileName_RNA_mask"] = (
+            re.sub(r"\.tiff?$", ".png", path.name) if (is_syto and is_z2) else None
+        )
+        row["Image_PathName_RNA_mask"] = str(output.parents[0] / "Cellpose_seg" / f"P_{plate_meta['Plate']}")
+    return row
+
+
+def parse_image_dataset(
+    root: Union[str, Path],
+    channels: dict,
+    compiled_regex: re.Pattern,
+    illum: bool = False,
+    masks: bool = False,
+    output: Union[str, Path, None] = None,
+    max_workers: int | None = None,
+    plates2process: list | None = None,
+    chunk_size: int = 2000,
+    check_integrity: bool = False,
+    check_plane: int | None = None,
+    full_decode: bool = False,) -> pl.DataFrame:
+    """
+        Parse a microscopy image dataset into a structured Polars DataFrame using
+        multiprocessing and chunked execution for memory efficiency.
+
+        Parameters
+        ----------
+        root : str | Path
+            Root directory containing plate subfolders.
+        illum : bool, default False
+            Whether to include illumination correction metadata.
+        masks : bool, default False
+            Whether to include RNA mask metadata.
+        output : str | Path | None, default None
+            Output directory used to build derived paths.
+        max_workers : int | None, default None
+            Number of worker processes.
+        chunk_size : int, default 2000
+            Number of files processed per batch to limit memory usage.
+        check_integrity : bool, default False
+            Whether to verify that each TIFF can be decoded. Corrupt files are
+            logged and excluded, as if they were missing.
+        check_plane : int | None, default None
+            Restrict the integrity check to this plane.
+        full_decode : bool, default False
+            Decode pixel data in the integrity check (slow).
+
+        Returns
+        -------
+        pl.DataFrame
+            Long-format metadata table.
+    """
+    root = Path(root)
+    output = Path(output) if output is not None else None
+    files = [
+        path
+        for plate in root.iterdir()
+        if plate.is_dir()
+        and plate.name != "Output"
+        and (plates2process is None or any(f"_P{p}_" in plate.name for p in plates2process))
+        for path in plate.rglob("*.tif*")
     ]
 
-    def __init__(
-        self,
-        path_profiles: Path,
-        saving_path: Path,
-        cohort: str,
-        label_col: str        = DEFAULT_LABEL_COL,
-        drop_cols: tuple      = (DEFAULT_LABEL_COL,),
-        random_state: int     = DEFAULT_RANDOM_STATE,
-        metric_fns: Optional[Callable] = None,
-        ctrl_label: str       = "DMSO",
-    ):
-        self.saving_path  = saving_path
-        self.cohort = cohort
-        self.label_col    = label_col
-        self.drop_cols    = drop_cols
-        self.random_state = random_state
-        self.metric_fns   = metric_fns if metric_fns is not None else self.DEFAULT_METRICS
-        self.ctrl_label   = ctrl_label
+    logger.info(f"Found {len(files)} image files")
 
-        self.saving_path.mkdir(parents=True, exist_ok=True)
+    rows: List[dict] = []
+    corrupt: List[dict] = []
+    worker = partial(
+        _parse_single_file,
+        illum=illum,
+        masks=masks,
+        output=output,
+        compiled_regex=compiled_regex,
+        channels=channels,
+        check_integrity=check_integrity,
+        check_plane=check_plane,
+        full_decode=full_decode,
+    )
 
-        self.X_scaled, self.labels = self._load_and_prepare(path_profiles)
-        self.label_codes, self.label_names, self.cmap = self._encode_labels()
+    with ProcessPoolExecutor(max_workers=max_workers) as ex:
+        for i in tqdm(range(0, len(files), chunk_size), desc="Parsing images"):
+            batch = files[i:i + chunk_size]
+            for result in ex.map(worker, batch, chunksize=64):
+                if result is None:
+                    continue
+                if "_corrupt" in result:
+                    corrupt.append(result)
+                else:
+                    rows.append(result)
 
-        self.X_pca, self.X_umap, self.X_tsne = self._run_embeddings()
-        self._save_figures()
-        self._save_figures_3d()
+    if check_integrity:
+        for c in sorted(corrupt, key=lambda d: d["_corrupt"]):
+            logger.warning(f"Corrupt image excluded: {c['_corrupt']} | {c['_error']}")
+        logger.info(f"{len(corrupt)} corrupt images excluded")
 
-        self.df_report = self._build_report()
+    logger.info(f"Parsed {len(rows)} valid image records")
+    return pl.DataFrame(rows, infer_schema_length=None)
 
-    # ── Data loading ─────────────────────────────────────────────────────
 
-    def _load_and_prepare(self, path_profiles: Path):
-        df     = pl.read_csv(path_profiles)
-        labels = df[self.label_col].to_numpy()
-        X      = (df
-                .drop(list(self.drop_cols))
-                .select(pl.col(pl.Float64, pl.Float32, pl.Int64, pl.Int32))
-                .to_numpy()
-                .astype(float))
+def _aux_pivot(df: pl.DataFrame, values_col: str, idx: list[str], channel_names: list[str]) -> pl.DataFrame:
+    """
+        Pivot helper to reshape long to wide format.
 
-        # ── Robust z-score referenciado a DMSO (Harmony convention) ──────────
-        # Identificar filas de control (prefijo, cubre DMSO_1, DMSO_2, etc.)
-        ctrl_mask = np.array([
-            str(lbl).startswith(self.ctrl_label) for lbl in labels
-        ])
+        Parameters
+        ----------
+        df : pl.DataFrame
+            Input long-format DataFrame.
+        values_col : str
+            Column to pivot.
+        idx : list[str]
+            Index columns.
+        channel_names : list[str]
+            Channel identifiers.
 
-        if ctrl_mask.sum() >= 2:
-            ctrl_X = X[ctrl_mask]
-            A      = ctrl_X.mean(axis=0)                        # media por feature
-            B      = np.median(np.abs(ctrl_X - A), axis=0)     # MAD por feature
-            denom  = np.where(B > 1e-8, B, np.exp(-B))         # fallback igual que Harmony
-            X_scaled = 0.6745 * (X - A) / denom
-            print(f"  [robust zscore] Control rows used: {ctrl_mask.sum()} "
-                f"(prefix='{self.ctrl_label}')")
-            print(f"  [robust zscore] Features with B≈0 (fallback): {(B <= 1e-8).sum()}")
-        else:
-            # Sin suficientes controles: caer en StandardScaler con aviso
-            print(f"  [WARNING] No DMSO rows found with prefix '{self.ctrl_label}' "
-                f"({ctrl_mask.sum()} found). Falling back to StandardScaler.")
-            from sklearn.preprocessing import StandardScaler
-            X_scaled = StandardScaler().fit_transform(X)
+        Returns
+        -------
+        pl.DataFrame
+            Pivoted DataFrame.
+    """
+    df_aux = df.pivot(
+        index=idx,
+        on="Metadata_Channel_name",
+        values=values_col,
+        aggregate_function="first",
+    )
+    rename_map = {ch: f"{values_col}_{ch}" for ch in channel_names}    
+    return df_aux.rename(rename_map)
 
-        return X_scaled, labels
+def pivot_df(df: pl.DataFrame, illum: bool = False, masks: bool = False) -> pl.DataFrame:
+    idx = ["Metadata_Plate", "Metadata_Well", "Metadata_Field"]
+    channel_names = df["Metadata_Channel_name"].unique().to_list()
 
-    def _encode_labels(self):
-        label_names, label_codes = np.unique(self.labels, return_inverse=True)
-        cmap = plt.get_cmap("tab20", len(label_names))
-        return label_codes, label_names, cmap
+    df_file = _aux_pivot(df, "Image_FileName", idx, channel_names)
+    df_path = _aux_pivot(df, "Image_PathName", idx, channel_names)
 
-    # ── Embeddings ───────────────────────────────────────────────────────
+    df_final = df_file.join(df_path, on=idx, how="inner")
 
-    def _run_embeddings(self):
-        MIN_SAMPLES = 10
-        n = self.X_scaled.shape[0]
-        X_pca  = self._run_pca()
-        X_umap = self._run_umap() if n >= MIN_SAMPLES else None
-        X_tsne = self._run_tsne() if n >= MIN_SAMPLES else None
+    if illum:
+        df_illum_file = _aux_pivot(df, "FileName_Illum", idx, channel_names)
+        df_illum_path = _aux_pivot(df, "PathName_Illum", idx, channel_names)
 
-        if X_umap is None: print(f"[WARNING] UMAP omitido: solo {n} muestras")
-        if X_tsne is None: print(f"[WARNING] t-SNE omitido: solo {n} muestras")
-
-        return X_pca, X_umap, X_tsne
-
-    def _run_pca(self):
-        return PCA(n_components=3, random_state=self.random_state).fit_transform(self.X_scaled)
-
-    def _run_umap(self):
-        return umap.UMAP(
-            n_neighbors=20, min_dist=0.5, n_components=3,
-            random_state=self.random_state,
-        ).fit_transform(self.X_scaled)
-
-    def _run_tsne(self):
-        n = self.X_scaled.shape[0]
-        pca_init = PCA(n_components=3, random_state=self.random_state).fit_transform(self.X_scaled)
-        pca_init = (pca_init / (pca_init.std(axis=0) * 10000)).astype(np.float32)
-
-        return TSNE(
-            n_components=3,
-            perplexity=min(30, n - 1),
-            learning_rate=200.0,   # "auto" not supported in sklearn < 1.2 — use explicit float
-            init=pca_init,
-            random_state=self.random_state,
-        ).fit_transform(self.X_scaled).astype(np.float64)
-
-    # ── Figures ──────────────────────────────────────────────────────────
-
-    def _plot_embedding(self, X: np.ndarray, title: str, filename: Path):
-        fig, ax = plt.subplots(figsize=(9, 7), dpi=300)
-        for i, label in enumerate(self.label_names):
-            mask = self.label_codes == i
-            ax.scatter(X[mask, 0], X[mask, 1], color=self.cmap(i),
-                       s=40, alpha=0.9, label=label)
-
-        ax.legend(title="Perturbation", bbox_to_anchor=(1.01, 1), loc="upper left",
-                  fontsize=7, title_fontsize=8, framealpha=0.7)
-        ax.set_title(title, fontsize=12)
-        ax.set_xlabel("Component 1")
-        ax.set_ylabel("Component 2")
-        fig.tight_layout()
-        fig.savefig(filename, transparent=True, bbox_inches="tight")
-        plt.close(fig)
-
-    def _save_figures(self):
-        embeddings = {
-            "PCA":   (self.X_pca,  "pca_embedding.png"),
-            "UMAP":  (self.X_umap, "umap_embedding.png"),
-            "t-SNE": (self.X_tsne, "tsne_embedding.png"),
-        }
-        n_labels  = len(np.unique(self.label_codes))
-        for title, (X, fname) in embeddings.items():
-            if X is None:
-                continue
-            self._plot_embedding(X, title, self.saving_path / fname)
-            n_samples = X.shape[0]
-            if 2 <= n_labels <= n_samples - 1:
-                score = silhouette_score(X, self.label_codes)
-                print(f"  Silhouette {title:<6}: {score:.3f}")
-            else:
-                print(f"  Silhouette {title:<6}: omitido (n_labels={n_labels}, n_samples={n_samples})")
-
-    # ── 3D Interactive Figures ────────────────────────────────────────────
-
-    def _plot_embedding_3d_interactive(self, emb: np.ndarray, title: str, fname: Path):
-        """Genera figura 3D interactiva con Plotly y la guarda como HTML autocontenido."""
-        fig = go.Figure()
-
-        for i, name in enumerate(self.label_names):
-            mask  = self.label_codes == i
-            color = (
-                f"rgb({int(self.cmap(i)[0]*255)},"
-                f"{int(self.cmap(i)[1]*255)},"
-                f"{int(self.cmap(i)[2]*255)})"
-            )
-            fig.add_trace(go.Scatter3d(
-                x=emb[mask, 0],
-                y=emb[mask, 1],
-                z=emb[mask, 2],
-                mode="markers",
-                name=name,
-                marker=dict(size=4, color=color, opacity=0.85),
-                hovertemplate=(
-                    f"<b>{name}</b><br>"
-                    "x: %{x:.3f}<br>y: %{y:.3f}<br>z: %{z:.3f}"
-                    "<extra></extra>"
-                ),
-            ))
-
-        fig.update_layout(
-            title=dict(text=title, font=dict(size=16)),
-            scene=dict(
-                xaxis_title="Dim 1",
-                yaxis_title="Dim 2",
-                zaxis_title="Dim 3",
-                bgcolor="rgba(245,245,245,0.8)",
-            ),
-            legend=dict(title="Perturbation", itemsizing="constant", font=dict(size=10)),
-            margin=dict(l=0, r=0, t=40, b=0),
-            width=900, height=700,
+        df_final = (
+            df_final
+            .join(df_illum_file, on=idx, how="inner")
+            .join(df_illum_path, on=idx, how="inner")
         )
 
-        html_str = fig.to_html(full_html=True, include_plotlyjs="cdn")
-        with open(fname, "w") as f:
-            f.write(html_str)
-        print(f"  3D interactive saved → {fname}")
+    if masks:
+        df_masks = (
+            df
+            .group_by(idx)
+            .agg([pl.col("Image_FileName_RNA_mask").drop_nulls().first().alias("Image_FileName_RNA_mask"),
+                  pl.first("Image_PathName_RNA_mask").alias("Image_PathName_RNA_mask")]))
 
-    def _save_figures_3d(self):
-        embeddings_3d = {
-            "PCA 3D":   (self.X_pca,  "pca_3d.html"),
-            "UMAP 3D":  (self.X_umap, "umap_3d.html"),
-            "t-SNE 3D": (self.X_tsne, "tsne_3d.html"),
-        }
-        n_labels = len(np.unique(self.label_codes))
-        for title, (X, fname) in embeddings_3d.items():
-            if X is None:
-                continue
-            self._plot_embedding_3d_interactive(X, title, self.saving_path / f"{self.cohort}_{fname}")
-            n_samples = X.shape[0]
-            if 2 <= n_labels <= n_samples - 1:
-                score = silhouette_score(X, self.label_codes)
-                print(f"  Silhouette {title:<6}: {score:.3f}")
+        df_final = df_final.join(df_masks, on=idx, how="left")
+        df_final = df_final.with_columns([
+            pl.when(pl.col("Image_FileName_RNA_mask").is_null())
+            .then(
+                pl.col(f"Image_FileName_Syto")
+                .str.replace(r"\.tiff?$", ".png")
+            )
+            .otherwise(pl.col("Image_FileName_RNA_mask"))
+            .alias("Image_FileName_RNA_mask")])
 
-    # ── Metrics report ───────────────────────────────────────────────────
-
-    def _build_report(self) -> pl.DataFrame:
-        """
-        Runs all metric_fns and joins their results into a single DataFrame
-        keyed on Metadata_Compound, sorted by mean_cosine if present.
-        """
-        base = pl.DataFrame({"Metadata_Compound": list(self.label_names)})
-
-        for fn in self.metric_fns:
-            print(f"\nRunning metric: {fn.__name__}")
-            result = fn(self.X_scaled, self.labels, self.label_names)
-            if "Metadata_Compound" not in result.columns:
-                raise ValueError(
-                    f"Metric '{fn.__name__}' must return a DataFrame with 'Metadata_Compound' column."
-                )
-            base = base.join(result, on="Metadata_Compound", how="left")
-
-        sort_col = "mean_cosine" if "mean_cosine" in base.columns else base.columns[1]
-        return base.sort(sort_col)
-
-
-# ── CLI ──────────────────────────────────────────────────────────────────────
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Clustering and embedding of morphological profiles."
+    ordered_cols = (
+        [f"Image_FileName_{ch}" for ch in channel_names]
+        + [f"Image_PathName_{ch}" for ch in channel_names]
+        + ([f"FileName_Illum_{ch}" for ch in channel_names]
+           + [f"PathName_Illum_{ch}" for ch in channel_names] if illum else [])
+        + (["Image_FileName_RNA_mask", "Image_PathName_RNA_mask"] if masks else [])
+        + idx
     )
-    parser.add_argument("-i", "--input",  required=True, type=Path,
-                        dest="input_dir",   help="Directory containing input CSV profiles.")
-    parser.add_argument("-o", "--output", required=True, type=Path,
-                        dest="saving_path", help="Directory for output figures and reports.")
-    parser.add_argument("-c", "--cohort", required=True, type=str,
-                        help="Name of the analyzed cohort.")
-    parser.add_argument("--ctrl-label", type=str, default="DMSO",
-                    dest="ctrl_label",
-                    help="Prefix of control wells for robust z-score (default: DMSO).")
-    return parser.parse_args()
+
+    return df_final.select(ordered_cols)
+
+def drop_incomplete_rows(df_wide: pl.DataFrame, idx: list[str]) -> pl.DataFrame:
+    """
+        Remove rows with missing values (null or empty string) in any
+        non-metadata column, and log the metadata of each removed row.
+
+        Parameters
+        ----------
+        df_wide : pl.DataFrame
+            Wide-format table produced by pivot_df.
+        idx : list[str]
+            Metadata columns that identify a row (Plate, Well, Field).
+
+        Returns
+        -------
+        pl.DataFrame
+            Table containing only complete rows.
+    """
+    data_cols = [c for c in df_wide.columns if c not in idx]
+
+    is_incomplete = pl.any_horizontal(
+        [pl.col(c).is_null() | (pl.col(c) == "") for c in data_cols]
+    )
+
+    df_bad = df_wide.filter(is_incomplete).select(idx).sort(idx)
+
+    for r in df_bad.iter_rows(named=True):
+        logger.warning(
+            f"Row removed (missing data): "
+            f"Plate={r['Metadata_Plate']}, Well={r['Metadata_Well']}, Field={r['Metadata_Field']}"
+        )
+
+    logger.info(
+        f"{df_bad.height} incomplete rows removed, "
+        f"{df_wide.height - df_bad.height} rows kept"
+    )
+    return df_wide.filter(~is_incomplete)
+
+def prepare_CSVs(
+    path: Union[str, Path],
+    output: Union[str, Path],
+    name_csv: str,
+    channels: dict,
+    compiled_regex: re.Pattern,
+    zplane: int,
+    discard_sites,
+    illum: bool = False,
+    masks: bool = False,
+    max_workers: int | None = None,
+    plates2process: list | None = None,
+    check_integrity: bool = False,
+    full_decode: bool = False,) -> None: 
+    """
+        Run the full metadata extraction pipeline and save final CSV output.
+
+        Parameters
+        ----------
+        path : str | Path
+            Input dataset root directory.
+        output : str | Path
+            Output directory.
+        illum : bool, default False
+            Whether to include illumination metadata.
+        masks : bool, default False
+            Whether to include RNA mask metadata.
+        max_workers : int | None, default None
+            Number of worker processes.
+        check_integrity : bool, default False
+            Whether to verify that TIFFs of the selected z-plane can be decoded.
+    """
+    #print(f"[DEBUG masks] masks: {masks}")
+    logger.info("Starting metadata parsing")
+    df = parse_image_dataset(
+        path,
+        illum=illum,
+        masks=masks,
+        output=output,
+        max_workers=max_workers,
+        plates2process=plates2process,
+        channels=channels,
+        compiled_regex=compiled_regex,
+        check_integrity=check_integrity,
+        check_plane=zplane,
+        full_decode=full_decode,
+    )
 
 
-def _process_dataset(tmp_csv: Path, saving_path: Path, tag: str, cohort: str, ctrl_label="DMSO"):
-    print(f"\n{'─'*50}\nProcessing: {tag}\n{'─'*50}")
-    cl = Clustering(tmp_csv, saving_path, cohort, ctrl_label=ctrl_label)
-    out = saving_path / "similarity_report.csv"
-    cl.df_report.write_csv(out)
-    print(f"Report saved → {out}")
+    df = df.filter(pl.col("Metadata_Plane") == zplane)
 
+    if discard_sites:
+        join_cols = ["Metadata_Plate", "Metadata_Well",	"Metadata_Field"]
+        df_discard = pl.read_parquet(discard_sites)
+        df = df.join(df_discard.select(join_cols),
+                    on=join_cols,
+                    how="anti")
 
-def main():
-    args = parse_args()
-    args.saving_path.mkdir(parents=True, exist_ok=True)
+    logger.info("Pivoting metadata table")
+    df_wide = pivot_df(df, illum=illum, masks=masks)
 
-    # ── 1. Reduced profiles (*_red*.csv) ─────────────────────────────────
-    red_files = sorted(args.input_dir.glob("**/*_reduced.csv"))
-    if red_files:
-        print(f"\nFound {len(red_files)} reduced profile file(s):")
-        dfs = []
-        for p in red_files:
-            print(f"  Loading: {p.name}")
-            dfs.append(pl.read_csv(p))
-        combined = pl.concat(dfs, how="diagonal")
-        print(f"Combined reduced shape: {combined.shape}")
-        tmp = args.saving_path / "combined_red.csv"
-        combined.write_csv(tmp)
-        _process_dataset(tmp, args.saving_path / "combined_red", "combined reduced profiles", args.cohort)
-    else:
-        print(f"[WARNING] No reduced files ('_red') found in {args.input_dir}")
+    idx = ["Metadata_Plate", "Metadata_Well", "Metadata_Field"]
+    df_wide = drop_incomplete_rows(df_wide, idx)
 
-    # ── 2. Normalized profiles (*_normalized*.csv) ───────────────────────
-    norm_files = sorted(args.input_dir.glob("**/*_normalized*.csv"))
-    if norm_files:
-        print(f"\nFound {len(norm_files)} normalized profile file(s):")
-        dfs = []
-        for p in norm_files:
-            print(f"  Loading: {p.name}")
-            dfs.append(pl.read_csv(p))
-        combined = pl.concat(dfs, how="diagonal")
-        print(f"Combined norm shape: {combined.shape}")
-        tmp = args.saving_path / "combined_norm.csv"
-        combined.write_csv(tmp)
-        _process_dataset(tmp, args.saving_path / "combined_norm", "combined normalized profiles", args.cohort)
-    else:
-        print(f"[WARNING] No normalized files ('_normalized') found in {args.input_dir}")
+    filepath = Path(output) / f"{name_csv}.csv"
+    df_wide.write_csv(filepath)
+    logger.info(f"Final metadata CSV written to: {filepath}")
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="High-performance metadata extraction pipeline")
+    parser.add_argument("-i", "--input", required=True, help="Input dataset root")
+    parser.add_argument("-o", "--output", required=True, help="Output directory")
+    parser.add_argument("--name_csv", required=True, help="Name of the CSV file to generate")
+    parser.add_argument("--illum", action="store_true", help="Include illumination metadata")
+    parser.add_argument("--masks", action="store_true", help="Include RNA mask metadata")
+    parser.add_argument("--workers", type=int, default=None, help="Number of worker processes")
+    parser.add_argument("--plates2process", nargs='*', help="List of plates to be processed")
+    parser.add_argument("--zplane", type=int, default=None, help="Z-Plane to analyze")
+    parser.add_argument("--channel_dict", required=True, help='JSON Name→Number, e.g. {"Mito":"1",...}')
+    parser.add_argument("--filename_regex", required=True, help="Regex with the following groups: Row/Column/Field/Plane/Channel")
+    parser.add_argument("--discard_sites", required=False, help="Path of the parquet with sites to be discarted due to QC problems")
+    parser.add_argument("--check_integrity", action="store_true", help="Verify that TIFFs of the selected z-plane can be decoded; corrupt files are excluded and logged")
+
+    parser.add_argument("--full_decode", action="store_true", help="With --check_integrity, also decode pixel data (slow)")
+
+    args = parser.parse_args()
+
+    print(f"[DEBUG] channel_dict repr: {repr(args.channel_dict)}")
+
+    channels = {int(v): k for k, v in json.loads(args.channel_dict).items()}
+    compiled_regex = re.compile(args.filename_regex)
+
+    prepare_CSVs(
+        path=args.input,
+        output=args.output,
+        name_csv=args.name_csv,
+        illum=args.illum,
+        masks=args.masks,
+        max_workers=args.workers,
+        plates2process=args.plates2process,
+        zplane=args.zplane,
+        channels=channels,
+        compiled_regex=compiled_regex,
+        discard_sites=args.discard_sites,
+        check_integrity=args.check_integrity,
+        full_decode=args.full_decode,
+    )
